@@ -1,0 +1,57 @@
+# CME site configuration -- template with example values.
+#
+# Copy to config.yaml and edit for this machine. config.yaml is gitignored,
+# because every value here describes one machine and none of them is portable.
+#
+#   cp config.example.yaml config.yaml
+#
+# The values below are examples, not defaults. When config.yaml is absent the
+# build falls back to empty for every key, which disables what it cannot reach
+# rather than pointing at some other machine's device. A -D on the cmake
+# command line still overrides anything here, because these become cache
+# entries.
+#
+# Format: flat `key: value` only. No nesting, no lists, no `;` in a value.
+# CMake reads this file through cmake/SiteConfig.cmake and the sweep scripts
+# read it with grep, so staying flat is what lets both do so without a parser.
+
+# ── Build: consumed by CMakeLists.txt and tests/CMakeLists.txt ──────────
+
+# devdax char device backing the *_dax ctest variants. Leave empty to skip
+# them; the shm suite still runs in full. Find yours with `daxctl list`.
+dax_device: /dev/dax0.0
+
+# Bytes reserved at the END of dax_device for test slots, at 2 MiB per slot.
+# Slots sit at the far end because a filesystem sharing the device starts at
+# offset 0 and grows up. 1 GiB = 512 slots.
+dax_slot_reserve: 1073741824
+
+# Byte offset of dax slot 0. Empty derives it from the device size reported by
+# /sys/bus/dax/devices/<name>/size. Set it explicitly when that node is absent,
+# and pick an offset clear of any filesystem living on the device.
+dax_slot_base:
+
+# Mount directory for the file-backend tests, on a filesystem whose mappings
+# are uncacheable (UC). Leave empty to skip those tests.
+file_backend_dir: /mnt/uc
+
+# Build with -march=native. This is not tuning: with SSE2 a 64B slot moves as
+# 16B x4 and can tear. Turn it OFF only for a portable release build, and
+# re-check slot atomicity on the target ISA when you do.
+native_arch: ON
+
+# ── Harness: read by the sweep scripts, not by the build ────────────────
+# rdma_lock.sh reads these through tests/harness/site_config.sh.
+
+# RoCE HCA name for tests/baseline/rdma_lock.cpp and rdma_lock.sh. Empty picks whatever
+# card this host has; `ibv_devinfo` lists them.
+roce_hca:
+# RoCEv2 IPv4 GID index, same on both hosts.
+roce_gid_index: 3
+# RoCE address of the far node, and the ssh target used to drive it.
+roce_peer_ip: 10.0.0.2
+sweep_peer_host: user@192.168.0.2
+# Directory on the far node holding the built binaries, relative to its $HOME.
+sweep_peer_dir: rdma_lock_bench
+# Python used to render the sweep figures.
+sweep_python: python3

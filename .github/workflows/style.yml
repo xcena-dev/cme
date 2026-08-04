@@ -1,0 +1,81 @@
+# Style gates for a pull request: clang-format over the tree, clang-tidy over the diff.
+#
+# The two run at different scopes on purpose. Formatting is already clean everywhere, so the
+# whole tree is checkable and drift anywhere fails. clang-tidy is not: the tree carries known
+# findings the policy has not been applied to yet, so checking all of it would fail every PR
+# regardless of what the PR changed. Holding only the changed lines to the policy is what
+# lets the gate exist before the backlog is gone.
+#
+# Neither job rewrites the branch. A gate that pushes commits the author did not write races
+# with their next push and needs write access on forks, which is a bigger cost than running
+# one command locally.
+
+name: style
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version is pinned because clang-format's output changes between major releases.
+      # 18 and 21 agree on this tree today -- ColumnLimit: 0 means it never reflows, which is
+      # where most of the inter-version difference lives -- but that is a fact about the
+      # current config, not a guarantee.
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          mapfile -t files < <(find src tests tools examples -name '*.cpp' -o -name '*.hpp')
+          echo "checking ${#files[@]} files"
+          if ! clang-format-18 --dry-run -Werror "${files[@]}"; then
+            echo
+            echo "Run this, then commit the result:"
+            echo "  find src tests tools examples -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 -i"
+            exit 1
+          fi
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      # clang-tidy-diff needs the base commit to diff against, so the shallow default clone
+      # is not enough.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy-18 cmake ninja-build
+
+      # Configure only. clang-tidy needs compile_commands.json, not object files, and this
+      # tree generates no headers, so nothing has to be built first. A missing config.yaml is
+      # not an error: cme_site_config_load returns early and every consumer falls back to a
+      # value that disables the feature.
+      - name: Generate the compile database
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Check the diff
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "no base commit to diff against; nothing to check"
+            exit 0
+          fi
+          git diff -U0 "$base"...HEAD -- 'src/*' 'tests/*' 'tools/*' 'examples/*' \
+            | python3 /usr/lib/llvm-18/share/clang/clang-tidy-diff.py \
+                -p1 -path build -clang-tidy-binary clang-tidy-18 -use-color \
+            | tee tidy.log
+          if grep -q 'warning:' tidy.log; then
+            echo
+            echo "The lines this PR touches must satisfy /.clang-tidy."
+            exit 1
+          fi

@@ -1,0 +1,24 @@
+# Build
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+
+# Logs
+*.log
+
+# Per-site facts: device paths, mounts, sweep hosts. The template is tracked as
+# config.example.yaml; the filled-in copy describes one machine only.
+config.yaml
+
+# Personal, per-clone ignores (untracked; wired via core.excludesFile)
+.gitignore.local

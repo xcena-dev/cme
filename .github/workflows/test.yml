@@ -1,0 +1,47 @@
+# The third of the suite a hosted runner can prove.
+#
+# GitHub Actions has no devdax node and no uncacheable mount, so the dax and uc registrations
+# would report skipped here and prove nothing. This runs the shm label, which is 61 of the
+# 234 ctest entries and covers every case that does not need the hardware. tests/local_ci.sh
+# runs the whole of it on a machine that has the media, and treats a missing medium as a
+# failure rather than a skip.
+#
+# tests/baseline is not here either: it needs a second host over RoCE.
+
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shm-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
+
+      # No config.yaml: it is per-machine and gitignored, and a missing one is not an error.
+      # cme_site_config_load returns early, so the dax device and the uncacheable mount both
+      # read as absent -- which on this runner is the truth.
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      # Serial. A gate that flakes is not a gate, and these cases contend on purpose: several
+      # of them assert a fairness bound or a bounded wait that a loaded box can miss.
+      - name: Run the shm suite
+        run: ctest --test-dir build -L shm --output-on-failure
+
+      - name: Report what ran
+        if: always()
+        run: ctest --test-dir build -N -L shm | tail -1

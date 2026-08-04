@@ -1,0 +1,8 @@
+# TLC output
+states/
+*.toolbox/
+*.out
+*.old
+
+# Model checker, fetched from upstream releases rather than vendored
+tla2tools.jar
