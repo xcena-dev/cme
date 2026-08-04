@@ -10,6 +10,8 @@
 //   --once             one render then exit (scripting-friendly)
 //   --interval=MS      refresh period in milliseconds (default 500)
 //   --no-clear         do not ANSI-clear between frames (append mode)
+//
+// CI probe: this branch exercises the pull-request workflows and is not meant to merge.
 
 #include <unistd.h>
 
