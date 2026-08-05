@@ -9,9 +9,11 @@
 
 #pragma once
 
+#include <cerrno>
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <system_error>
 
 namespace cme
 {
@@ -19,6 +21,13 @@ namespace cme
 // PMD size. dax and marufs-backed file mappings must be a multiple of it; POSIX shm is not
 // constrained this way, so ShmMemory does not use it.
 inline constexpr std::uint64_t PmdAlign = 2ULL * 1024 * 1024;
+
+// What the failing call left in errno, as the code a BackendError carries. Call it before anything
+// else runs: a string concatenation between the failing call and here may overwrite errno.
+[[nodiscard]] inline std::error_code lastSystemError() noexcept
+{
+    return std::error_code{errno, std::generic_category()};
+}
 
 class Memory
 {

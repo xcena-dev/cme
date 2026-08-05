@@ -36,6 +36,8 @@
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -48,13 +50,13 @@ constexpr std::uint32_t FineStepMs = 1;  // fast poll: catch the stake inside th
 template <typename T>
 bool holdsFor(T pred, std::uint32_t windowMs)
 {
-    for (std::uint32_t waited = 0; waited < windowMs; waited += PollStepMs)
+    for (std::uint32_t waited = 0; waited < windowMs; waited += harness::PollStepMs)
     {
         if (!pred())
         {
             return false;
         }
-        sleepMs(PollStepMs);
+        harness::sleepMs(harness::PollStepMs);
     }
     return pred();
 }
@@ -88,7 +90,7 @@ void worker(PeerSlot_t* slot)
         slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
         if (slot->freezeReq.load(std::memory_order_acquire))
         {
-            sleepMs(2);  // short: a thaw takes effect within ~2 ms (< settle window)
+            harness::sleepMs(2);  // short: a thaw takes effect within ~2 ms (< settle window)
             continue;
         }
         try
@@ -156,12 +158,12 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
     constexpr cme::PeerId Ghost = 4;    // never-admitted slot hosting DeadRa's ghost claim word
 
     std::optional<cme::Geometry> region{ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts)};
-    seedDataDomains(*region, NumDomains, coherency);
+    harness::seedDataDomains(*region, NumDomains, coherency);
     std::printf("zombie/dead-RA hook: %u peers (%s)\n", MaxPeers, stratSuffix.c_str());
 
     std::array<PeerSlot_t, 5> peers{};
     spawnPeers(peers, Workers, *region, coherency, NumDomains);
-    sleepMs(1000);  // memberships go Active; ownership spreads
+    harness::sleepMs(1000);  // memberships go Active; ownership spreads
 
     auto raStatusIs = [&](Status status)
     {
@@ -178,7 +180,7 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
     // Crash DeadRa, then stamp a ghost claim it "authored" on the spare slot Ghost -- the
     // residue of an RA that staked a claim while recovering some other peer, then died.
     peers[DeadRa].freezeReq.store(true);
-    sleepMs(150);
+    harness::sleepMs(150);
     cme::coherency::rmwIfTrue(ghostSlot, coherency,
                               [](auto* claim)
                               {
@@ -193,11 +195,11 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
 
     // retractClaimsBy sweeps every DeadRa-authored word BEFORE its slot commits to None,
     // so reaching None implies the ghost word is already retracted.
-    const bool raRecovered = waitUntil([&]
-                                       {
-                                           return raStatusIs(Status::None);
-                                       },
-                                       RecoveryDeadlineMs);
+    const bool raRecovered = harness::waitUntil([&]
+                                                {
+                                                    return raStatusIs(Status::None);
+                                                },
+                                                RecoveryDeadlineMs);
     ctx.check(raRecovered, "dead RA driven to None by a survivor");
     ctx.check(ghostRa() == cme::NoPeer, "ghost claim authored by recovered peer retracted at FINISH");
 
@@ -217,7 +219,9 @@ void runBody(harness::TestContext& ctx)
     runDeadRaHook(ctx, ctx.uri(), ctx.coherency(), fmtOpts, stratSuffix);
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

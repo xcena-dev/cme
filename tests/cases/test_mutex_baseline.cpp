@@ -50,6 +50,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -243,7 +245,7 @@ void runPeer(const Opts_t& opt, Region_t& region, std::uint32_t peerIndex)
 
     for (std::uint32_t sweep = 0; sweep < opt.warmup; ++sweep)
     {
-        shuffleVisitOrder(visitOrder, rng);
+        harness::shuffleVisitOrder(visitOrder, rng);
         for (const std::uint32_t domainIndex : visitOrder)
         {
             lockOrDie(region.mutexAt(domainIndex), peerIndex);
@@ -258,7 +260,7 @@ void runPeer(const Opts_t& opt, Region_t& region, std::uint32_t peerIndex)
     const std::size_t sampleBase = static_cast<std::size_t>(peerIndex) * opt.iters * opt.domains;
     for (std::uint32_t sweep = 0; sweep < opt.iters; ++sweep)
     {
-        shuffleVisitOrder(visitOrder, rng);
+        harness::shuffleVisitOrder(visitOrder, rng);
         for (const std::uint32_t domainIndex : visitOrder)
         {
             const auto acquireStart = std::chrono::steady_clock::now();
@@ -359,9 +361,9 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
     }
     const double meanNs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
     const double meanUs = meanNs / 1000.0;
-    const double p50 = percentile(samples, 0.50) / 1000.0;
-    const double p90 = percentile(samples, 0.90) / 1000.0;
-    const double p99 = percentile(samples, 0.99) / 1000.0;
+    const double p50 = harness::percentile(samples, 0.50) / 1000.0;
+    const double p90 = harness::percentile(samples, 0.90) / 1000.0;
+    const double p99 = harness::percentile(samples, 0.99) / 1000.0;
     const double tput = wallSec > 0 ? static_cast<double>(samples.size()) / wallSec : 0.0;
 
     std::printf("\n=== mutex baseline (process-shared pthread_mutex, shm) ===\n");
@@ -442,7 +444,9 @@ void runBody(harness::TestContext& ctx)
     ctx.check(exitCode == 0, opt.verify ? "verify run" : "latency sweep");
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

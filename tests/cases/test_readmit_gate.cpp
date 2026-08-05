@@ -33,6 +33,8 @@
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -65,7 +67,7 @@ void runBody(harness::TestContext& ctx)
     {
         peers[i] = std::make_unique<cme::Peer>(*region, i, ctx.coherency());
     }
-    sleepMs(500);  // memberships go Active; poll threads running
+    harness::sleepMs(500);  // memberships go Active; poll threads running
 
     constexpr cme::PeerId Dead = MaxPeers - 1;
     auto deadStatusIs = [&](Status status)
@@ -95,11 +97,11 @@ void runBody(harness::TestContext& ctx)
 
     // ── Phase 2: recovery flips the dead slot to None; only then is it re-claimable,
     // and the reused slot must be exactly the dead one. ──
-    const bool becameNone = waitUntil([&]
-                                      {
-                                          return deadStatusIs(Status::None);
-                                      },
-                                      RecoveryDeadlineMs);
+    const bool becameNone = harness::waitUntil([&]
+                                               {
+                                                   return deadStatusIs(Status::None);
+                                               },
+                                               RecoveryDeadlineMs);
     ctx.check(becameNone, "recovery marked the dead slot None");
 
     cme::PeerId reclaimed = cme::NoPeer;
@@ -126,7 +128,9 @@ void runBody(harness::TestContext& ctx)
     region.reset();
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

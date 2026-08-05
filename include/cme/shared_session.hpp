@@ -46,17 +46,20 @@ public:
     {
     public:
         // ── ctor / dtor ────────────────────────────────────────────
-        Guard() noexcept = default;
+        // No default constructor, unlike cme::Guard: move-assign is deleted below, so an empty
+        // Guard could never become a held one. lock() is the only way to get one.
         Guard(const Guard&) = delete;
         Guard(Guard&& other) noexcept;
-        // Move-assign is deleted, not defaulted: it would drop the mutex without running the
-        // cohort release, leaving the domain pinned and unforwardable forever.
         ~Guard() noexcept;
 
         // ── operator= ──────────────────────────────────────────────
         Guard& operator=(const Guard&) = delete;
+        // Deleted, not defaulted: it would drop the mutex without running the cohort release,
+        // leaving the domain pinned and unforwardable forever.
         Guard& operator=(Guard&&) = delete;
 
+        // Whether this Guard holds the domain. False after it has been moved from: a move leaves
+        // the source holding nothing.
         explicit operator bool() const noexcept
         {
             return impl_ != nullptr;

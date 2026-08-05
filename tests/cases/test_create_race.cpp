@@ -22,6 +22,8 @@
 #include "cme/shared.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -121,7 +123,9 @@ void runBody(harness::TestContext& ctx)
     ctx.check(allNamesFound, "each creator's name resolved to a live domain");
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

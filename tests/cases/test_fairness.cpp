@@ -46,8 +46,11 @@
 #include "helper.hpp"
 #include "observe/latency.hpp"
 #include "test_context.hpp"
+#include "test_options.hpp"
 #include "util/time.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -356,7 +359,7 @@ void sweepDomains(const WorkerContext_t& shared, std::vector<cme::DomainId>& vis
 {
     if (shared.opt.shuffle)
     {
-        shuffleVisitOrder(visit, rng);
+        harness::shuffleVisitOrder(visit, rng);
     }
     for (const cme::DomainId domainId : visit)
     {
@@ -665,7 +668,7 @@ void runBody(harness::TestContext& ctx)
 
     // Slot 0 is control; create the rest so workers find every slot Active. Control doubles
     // as a contended domain here, since no create/delete runs during the measured section.
-    seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
+    harness::seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
 
     std::vector<PeerResult_t> results(opt.numPeers);
     runPeers(opt, region, results, ctx.coherency());
@@ -697,7 +700,9 @@ void runBody(harness::TestContext& ctx)
     ctx.check(spread.deadlineHits == 0, "no acquire hit its deadline");
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

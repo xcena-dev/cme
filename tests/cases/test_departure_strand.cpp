@@ -31,6 +31,8 @@
 #include "util/coherency.hpp"
 #include "util/time.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -131,7 +133,9 @@ void runBody(harness::TestContext& ctx)
     keeper.reset();  // membership leaves before the mapping it was made against goes
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

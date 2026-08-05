@@ -7,11 +7,10 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "cme/errors.hpp"
 #include "memory/memory.hpp"
@@ -30,22 +29,23 @@ namespace
     // names the offset rather than surfacing as a bare EINVAL.
     if (offset % PmdAlign != 0)
     {
-        throw FormatError{std::string{"cme::DaxMemory("} + pathString +
-                          "): offset must be a multiple of 2 MiB"};
+        throw InvalidArgumentError{std::string{"cme::DaxMemory("} + pathString +
+                                   "): offset must be a multiple of 2 MiB"};
     }
     const int file = ::open(pathString.c_str(), O_RDWR);
     if (file < 0)
     {
-        throw FormatError{std::string{"cme::DaxMemory open("} + pathString + "): " +
-                          std::strerror(errno)};
+        const auto failure = lastSystemError();
+        throw BackendError{std::string{"cme::DaxMemory open("} + pathString + ")", failure};
     }
     void* mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file,
                           static_cast<::off_t>(offset));
+    // Before the close, which is allowed to leave its own value in errno.
+    const auto failure = (mapped == MAP_FAILED) ? lastSystemError() : std::error_code{};
     ::close(file);
     if (mapped == MAP_FAILED)
     {
-        throw FormatError{std::string{"cme::DaxMemory mmap("} + pathString + "): " +
-                          std::strerror(errno)};
+        throw BackendError{std::string{"cme::DaxMemory mmap("} + pathString + ")", failure};
     }
     return mapped;
 }

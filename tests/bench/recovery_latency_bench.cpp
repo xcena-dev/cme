@@ -187,7 +187,7 @@ struct Phases_t
     std::optional<cme::Geometry> region;
     region.emplace(cme::Geometry::create(uri, domains + 1, peers,
                                          cme::Geometry::FormatOpts_t{strategy}));
-    seedDataDomains(*region, domains, coherency);  // create data domains 1..n
+    harness::seedDataDomains(*region, domains, coherency);  // create data domains 1..n
 
     std::vector<std::unique_ptr<PeerSlot_t>> slots;
     for (PeerId peerId = 0; peerId < peers; ++peerId)

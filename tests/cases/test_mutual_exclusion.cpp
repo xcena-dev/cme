@@ -27,6 +27,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -49,7 +51,7 @@ void runBody(harness::TestContext& ctx)
     const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     std::optional<cme::Geometry> region;
     region.emplace(ctx.memory().createRegion(DomainCeiling, NumPeers, fmtOpts));
-    seedDataDomains(*region, 1, ctx.coherency());  // creates data domain id 1
+    harness::seedDataDomains(*region, 1, ctx.coherency());  // creates data domain id 1
 
     std::vector<std::uint32_t> done(NumPeers, 0);
     std::vector<std::thread> threads;
@@ -102,7 +104,9 @@ void runBody(harness::TestContext& ctx)
     ctx.check(allDone, "bounded-wait: every peer completed all M acquires (no starvation)");
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

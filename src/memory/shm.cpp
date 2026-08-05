@@ -9,9 +9,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <cerrno>
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -31,7 +30,7 @@ inline constexpr std::size_t MaxShmNameLen = 255;
 {
     if (name.empty())
     {
-        throw FormatError{"cme::ShmMemory: empty shm name"};
+        throw InvalidArgumentError{"cme::ShmMemory: empty shm name"};
     }
     std::string normalised;
     if (name.front() == '/')
@@ -46,7 +45,7 @@ inline constexpr std::size_t MaxShmNameLen = 255;
     }
     if (normalised.size() > MaxShmNameLen)
     {
-        throw FormatError{"cme::ShmMemory: shm name too long"};
+        throw InvalidArgumentError{"cme::ShmMemory: shm name too long"};
     }
     return normalised;
 }
@@ -62,20 +61,22 @@ struct MappedRegion_t
     const int file = ::shm_open(normalised.c_str(), O_CREAT | O_RDWR, 0600);
     if (file < 0)
     {
-        throw FormatError{std::string{"cme::ShmMemory shm_open: "} + std::strerror(errno)};
+        const auto failure = lastSystemError();
+        throw BackendError{"cme::ShmMemory shm_open", failure};
     }
     void* mapped = MAP_FAILED;
     try
     {
         if (::ftruncate(file, static_cast<off_t>(areaSize)) < 0)
         {
-            throw FormatError{std::string{"cme::ShmMemory ftruncate: "} +
-                              std::strerror(errno)};
+            const auto failure = lastSystemError();
+            throw BackendError{"cme::ShmMemory ftruncate", failure};
         }
         mapped = ::mmap(nullptr, areaSize, PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
         if (mapped == MAP_FAILED)
         {
-            throw FormatError{std::string{"cme::ShmMemory mmap: "} + std::strerror(errno)};
+            const auto failure = lastSystemError();
+            throw BackendError{"cme::ShmMemory mmap", failure};
         }
     }
     catch (...)
@@ -97,8 +98,8 @@ struct MappedRegion_t
     const int file = ::shm_open(normalised.c_str(), O_RDWR, 0);
     if (file < 0)
     {
-        throw FormatError{std::string{"cme::ShmMemory shm_open(attach): "} +
-                          std::strerror(errno)};
+        const auto failure = lastSystemError();
+        throw BackendError{"cme::ShmMemory shm_open(attach)", failure};
     }
     void* mapped = MAP_FAILED;
     std::uint64_t mapSize = 0;
@@ -107,18 +108,21 @@ struct MappedRegion_t
         struct stat fileStat;
         if (::fstat(file, &fileStat) < 0)
         {
-            throw FormatError{std::string{"cme::ShmMemory fstat: "} + std::strerror(errno)};
+            const auto failure = lastSystemError();
+            throw BackendError{"cme::ShmMemory fstat", failure};
         }
+        // No failing syscall behind this one, so it carries no code: the name exists and the
+        // creator has not sized it yet.
         if (fileStat.st_size <= 0)
         {
-            throw FormatError{"cme::ShmMemory: shm size invalid"};
+            throw BackendError{"cme::ShmMemory: shm size invalid"};
         }
         mapSize = static_cast<std::uint64_t>(fileStat.st_size);
         mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
         if (mapped == MAP_FAILED)
         {
-            throw FormatError{std::string{"cme::ShmMemory mmap(attach): "} +
-                              std::strerror(errno)};
+            const auto failure = lastSystemError();
+            throw BackendError{"cme::ShmMemory mmap(attach)", failure};
         }
     }
     catch (...)
@@ -145,7 +149,7 @@ ShmMemory::ShmMemory(std::string_view name, std::uint64_t areaSize)
 {
     if (areaSize == 0)
     {
-        throw FormatError{"cme::ShmMemory: creator areaSize must be > 0"};
+        throw InvalidArgumentError{"cme::ShmMemory: creator areaSize must be > 0"};
     }
     const auto mapping = openCreator(normaliseShmName(name), areaSize);
     base_ = mapping.base;

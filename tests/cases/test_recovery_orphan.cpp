@@ -34,6 +34,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -45,7 +47,7 @@ constexpr std::uint32_t RecoveryDeadlineMs = 20000;
 
 void runBody(harness::TestContext& ctx)
 {
-    startLogClock();
+    harness::startLogClock();
 
     const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
@@ -59,31 +61,31 @@ void runBody(harness::TestContext& ctx)
     const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
 
-    log("starting %u peers (%s, ceiling=%u, max_peers=%u, backend=%s)", ActivePeers,
-        stratSuffix, DomainCeiling, MaxPeers, ctx.backendName());
+    harness::log("starting %u peers (%s, ceiling=%u, max_peers=%u, backend=%s)", ActivePeers,
+                 stratSuffix, DomainCeiling, MaxPeers, ctx.backendName());
 
     std::array<std::unique_ptr<cme::Peer>, MaxPeers> peers{};
     for (cme::PeerId i = 0; i < ActivePeers; ++i)
     {
         peers[i] = std::make_unique<cme::Peer>(*region, i, ctx.coherency());
     }
-    sleepMs(500);  // memberships go Active; poll threads running
+    harness::sleepMs(500);  // memberships go Active; poll threads running
 
     // ── Scenario A: orphan-free ────────────────────────────────────────
     constexpr cme::PeerId SoloOwner = 3;  // sole participant + genesis holder
-    log("A: peer %u creates 'solo' (sole participant + genesis holder)", SoloOwner);
+    harness::log("A: peer %u creates 'solo' (sole participant + genesis holder)", SoloOwner);
     const auto soloId = peers[SoloOwner]->createDomain("solo");
-    sleepMs(200);
+    harness::sleepMs(200);
     ctx.checkf(peers[0]->resolveDomainName("solo") != cme::NoDomain,
                "'solo' (id=%u) visible to survivor before crash", soloId);
 
-    log("A: freeze peer %u (its sole participant crashes)", SoloOwner);
+    harness::log("A: freeze peer %u (its sole participant crashes)", SoloOwner);
     peers[SoloOwner]->setFreeze(true);
 
     // RA takes over -> orphan (Active, holder=RA, 0 participants) -> poll-loop
     // sweep frees the slot.  Poll until the name disappears (resolve scans only
     // Active records, so NoDomain == the slot is Free again).
-    const bool freed = waitUntil(
+    const bool freed = harness::waitUntil(
         [&]
         {
             return peers[0]->resolveDomainName("solo") == cme::NoDomain;
@@ -98,10 +100,10 @@ void runBody(harness::TestContext& ctx)
     // ── Scenario B: participation scrub unblocks delete ────────────────
     constexpr cme::PeerId SharedHolder = 0;  // genesis holder + participant
     constexpr cme::PeerId SharedJoiner = 1;  // second participant (non-holder)
-    log("B: peer %u creates 'shared'; peer %u also joins", SharedHolder, SharedJoiner);
+    harness::log("B: peer %u creates 'shared'; peer %u also joins", SharedHolder, SharedJoiner);
     const auto sharedId = peers[SharedHolder]->createDomain("shared");
     peers[SharedJoiner]->joinDomain(sharedId);
-    sleepMs(200);
+    harness::sleepMs(200);
     ctx.checkf(peers[SharedHolder]->resolveDomainName("shared") != cme::NoDomain,
                "'shared' (id=%u) visible", sharedId);
 
@@ -117,17 +119,17 @@ void runBody(harness::TestContext& ctx)
     }
     catch (const std::exception& e)
     {
-        log("B: pre-scrub delete threw unexpected: %s", e.what());
+        harness::log("B: pre-scrub delete threw unexpected: %s", e.what());
     }
     ctx.checkf(refused, "deleteDomain refused while peer %u still participates", SharedJoiner);
 
-    log("B: freeze peer %u (non-holder participant crashes)", SharedJoiner);
+    harness::log("B: freeze peer %u (non-holder participant crashes)", SharedJoiner);
     peers[SharedJoiner]->setFreeze(true);
 
     // Retry delete until the scrub lands or the deadline elapses. Any exception means "not
     // yet": NotParticipatingError while the scrub is pending, or under ORDER a transient
     // lock failure while the token sits on the dead peer.
-    const bool deleted = waitUntil(
+    const bool deleted = harness::waitUntil(
         [&]
         {
             try
@@ -146,7 +148,7 @@ void runBody(harness::TestContext& ctx)
                "'shared' gone after delete");
 
     // ── teardown ───────────────────────────────────────────────────────
-    log("shutdown");
+    harness::log("shutdown");
     for (cme::PeerId i = 0; i < ActivePeers; ++i)
     {
         peers[i].reset();  // dtor stops poll thread + leaves membership
@@ -154,7 +156,9 @@ void runBody(harness::TestContext& ctx)
     region.reset();
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

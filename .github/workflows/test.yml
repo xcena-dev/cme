@@ -1,10 +1,11 @@
 # The third of the suite a hosted runner can prove.
 #
 # GitHub Actions has no devdax node and no uncacheable mount, so the dax and uc registrations
-# would report skipped here and prove nothing. This runs the shm label, which is 61 of the
-# 234 ctest entries and covers every case that does not need the hardware. tests/local_ci.sh
-# runs the whole of it on a machine that has the media, and treats a missing medium as a
-# failure rather than a skip.
+# would report skipped here and prove nothing. This runs the shm label, which covers every case
+# that does not need the hardware. How many that is belongs to the run rather than to this
+# comment: the Report what ran step below prints it, and a count written here goes stale the
+# next time a case is added. tests/local_ci.sh runs the whole of it on a machine that has the
+# media, and treats a missing medium as a failure rather than a skip.
 #
 # tests/baseline is not here either: it needs a second host over RoCE.
 

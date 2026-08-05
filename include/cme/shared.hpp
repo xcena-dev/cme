@@ -67,7 +67,10 @@ class [[nodiscard]] Guard
 {
 public:
     // ── ctor / dtor ────────────────────────────────────────────────
-    Guard() noexcept = default;
+    // An empty Guard, for a caller that locks conditionally and moves the result in later.
+    // Declared here and defined in shared.cpp: `= default` in the header is generated in the
+    // caller's translation unit, where Impl is incomplete, so it would not compile there.
+    Guard() noexcept;
     Guard(const Guard&) = delete;
     Guard(Guard&& other) noexcept;
     ~Guard() noexcept;
@@ -80,6 +83,8 @@ public:
     // Explicit early release. Idempotent.
     void unlock() noexcept;
 
+    // Whether this Guard holds a domain. False for an empty one, and false after it has been
+    // moved from: a move leaves the source holding nothing.
     explicit operator bool() const noexcept
     {
         return impl_ != nullptr;
@@ -149,10 +154,10 @@ public:
 
     // Scoped lambda helper. fn receives a reference to the Guard.
     template <typename T>
-    void withLock(std::string_view name, T&& fn)
+    void withLock(std::string_view name, T&& body)
     {
         auto guard = lock(name);
-        std::forward<T>(fn)(guard);
+        std::forward<T>(body)(guard);
     }
 
     // ── participation (opt-in) ─────────────────────────────────────

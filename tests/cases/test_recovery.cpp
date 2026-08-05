@@ -40,6 +40,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -83,7 +85,7 @@ void worker(PeerSlot_t* slot)
         }
         catch (const std::exception& e)
         {
-            log("peer %u: ctor exception: %s", slot->peerId, e.what());
+            harness::log("peer %u: ctor exception: %s", slot->peerId, e.what());
             slot->rc.store(1);
             return false;
         }
@@ -106,7 +108,7 @@ void worker(PeerSlot_t* slot)
         slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
         if (status == PState::Paused || slot->freezeReq.load(std::memory_order_acquire))
         {
-            sleepMs(50);
+            harness::sleepMs(50);
             continue;
         }
         try
@@ -116,7 +118,7 @@ void worker(PeerSlot_t* slot)
         }
         catch (const cme::LockTimeoutError&)
         {
-            log("peer %u: lock(d=%u) timed out (takeover path)", slot->peerId, domainId);
+            harness::log("peer %u: lock(d=%u) timed out (takeover path)", slot->peerId, domainId);
         }
         domainId = (domainId % slot->numDomains) + 1;
     }
@@ -225,9 +227,9 @@ void runChurn(std::vector<PeerSlot_t>& peers, cme::PeerId count, std::vector<boo
         {
             freezePeer(peers[target]);
             frozen[target] = true;
-            log("churn: freeze peer %u", target);
+            harness::log("churn: freeze peer %u", target);
         }
-        sleepMs(800);
+        harness::sleepMs(800);
     }
 }
 
@@ -253,7 +255,7 @@ void shutdownPeers(std::vector<PeerSlot_t>& peers, cme::PeerId count)
 
 void runBody(harness::TestContext& ctx)
 {
-    startLogClock();
+    harness::startLogClock();
 
     const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
@@ -272,20 +274,20 @@ void runBody(harness::TestContext& ctx)
     region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
 
     // Create the NumDomains data domains (slots 1..NumDomains) before peers start.
-    seedDataDomains(*region, NumDomains, ctx.coherency());
+    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
     std::vector<PeerSlot_t> peers(MaxPeers + 1);
-    log("starting %u peers (%s, domains=%u, max_peers=%u, backend=%s)", InitialPeers,
-        stratSuffix, NumDomains, MaxPeers, ctx.backendName());
+    harness::log("starting %u peers (%s, domains=%u, max_peers=%u, backend=%s)", InitialPeers,
+                 stratSuffix, NumDomains, MaxPeers, ctx.backendName());
     for (cme::PeerId i = 0; i < InitialPeers; ++i)
     {
         spawnPeer(peers[i], i, &*region, NumDomains, ctx.coherency());
     }
 
     // ── Phase A: steady-state ──────────────────────────────────────
-    sleepMs(1000);
+    harness::sleepMs(1000);
     const auto acqSnapshot = snapshotAcq(peers, InitialPeers);
-    log("steady-state acq snapshot");
+    harness::log("steady-state acq snapshot");
     for (cme::PeerId i = 0; i < InitialPeers; ++i)
     {
         ctx.checkf(acqSnapshot[i] > 0, "peer %u acquired at least once (%" PRIu64 ")", i, acqSnapshot[i]);
@@ -294,41 +296,41 @@ void runBody(harness::TestContext& ctx)
     // ── Phase B: freeze peer ───────────────────────────────────────
     // FreezeTarget stays frozen for good (permanent-crash model); the survivor-progress
     // check is what confirms recovery reclaimed its domains.
-    log("freezing peer %u (simulated crash)", FreezeTarget);
+    harness::log("freezing peer %u (simulated crash)", FreezeTarget);
     const auto bFreeze = peers[FreezeTarget].acqCount.load();
     freezePeer(peers[FreezeTarget]);
 
-    sleepMs(7500);  // > AcquireTimeout (config.hpp) so survivors take over
+    harness::sleepMs(7500);  // > AcquireTimeout (config.hpp) so survivors take over
     expectFlat(ctx, peers[FreezeTarget], bFreeze, FreezeTarget);
     expectSurvivorsAdvanced(
         ctx, {peers, acqSnapshot, skipSet(InitialPeers, {FreezeTarget}), InitialPeers}, "freeze");
 
     // ── Phase D: graceful leave ────────────────────────────────────
-    log("graceful leave: peer %u stop + destroy", LeaveTarget);
+    harness::log("graceful leave: peer %u stop + destroy", LeaveTarget);
     const auto dPre = snapshotAcq(peers, InitialPeers);
     peers[LeaveTarget].state.store(PState::Stop);
     peers[LeaveTarget].tid.join();
     ctx.checkf(peers[LeaveTarget].state.load() == PState::Dead,
                "peer %u joined out as Dead", LeaveTarget);
 
-    sleepMs(1500);
+    harness::sleepMs(1500);
     expectSurvivorsAdvanced(
         ctx, {peers, dPre, skipSet(InitialPeers, {LeaveTarget, FreezeTarget}), InitialPeers},
         "leave");
 
     // ── Phase E: rejoin same slot ──────────────────────────────────
-    log("rejoin slot %u", LeaveTarget);
+    harness::log("rejoin slot %u", LeaveTarget);
     spawnPeer(peers[LeaveTarget], LeaveTarget, &*region, NumDomains, ctx.coherency());
-    sleepMs(2000);
+    harness::sleepMs(2000);
     ctx.checkf(peers[LeaveTarget].acqCount.load() > 0, "rejoined peer %u acquired",
                LeaveTarget);
 
     // ── Phase F: concurrent multi-freeze ───────────────────────────
-    log("concurrent freeze: peers %u and %u", MultiA, MultiB);
+    harness::log("concurrent freeze: peers %u and %u", MultiA, MultiB);
     const auto fPre = snapshotAcq(peers, InitialPeers);
     freezePeer(peers[MultiA]);
     freezePeer(peers[MultiB]);
-    sleepMs(7500);
+    harness::sleepMs(7500);
     expectFlat(ctx, peers[MultiA], fPre[MultiA], MultiA);
     expectFlat(ctx, peers[MultiB], fPre[MultiB], MultiB);
     expectSurvivorsAdvanced(
@@ -337,25 +339,27 @@ void runBody(harness::TestContext& ctx)
 
     // ── Phase G: random churn for 10 s ─────────────────────────────
     // Seed frozen[] with the peers already frozen in B/F so the survivor cap counts them.
-    log("random churn for 10 s (events every 800 ms)");
+    harness::log("random churn for 10 s (events every 800 ms)");
     auto frozen = skipSet(InitialPeers, {FreezeTarget, MultiA, MultiB});
     const auto gPre = snapshotAcq(peers, InitialPeers);
     runChurn(peers, InitialPeers, frozen, std::chrono::seconds{10});
-    sleepMs(4000);
+    harness::sleepMs(4000);
     expectSurvivorsAdvanced(ctx, {peers, gPre, frozen, InitialPeers}, "churn");
 
     // ── Phase H: shutdown ──────────────────────────────────────────
-    log("clean shutdown");
+    harness::log("clean shutdown");
     shutdownPeers(peers, InitialPeers);
 
-    log("final acq counts:");
+    harness::log("final acq counts:");
     for (cme::PeerId i = 0; i < InitialPeers; ++i)
     {
-        log("  peer %u : %" PRIu64 "  rc=%d", i, peers[i].acqCount.load(), peers[i].rc.load());
+        harness::log("  peer %u : %" PRIu64 "  rc=%d", i, peers[i].acqCount.load(), peers[i].rc.load());
     }
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

@@ -58,6 +58,9 @@ Guard::Guard(std::unique_ptr<Impl> impl) noexcept
 {
 }
 
+// Out of line, all four: Impl is complete only here, and a header-side `= default` would be
+// generated in the caller's translation unit where it is not.
+Guard::Guard() noexcept = default;
 Guard::Guard(Guard&&) noexcept = default;
 Guard& Guard::operator=(Guard&&) noexcept = default;
 Guard::~Guard() noexcept = default;

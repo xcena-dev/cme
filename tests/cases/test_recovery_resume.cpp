@@ -33,6 +33,8 @@
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -70,7 +72,7 @@ void worker(PeerSlot_t* slot)
         slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
         if (slot->freezeReq.load(std::memory_order_acquire))
         {
-            sleepMs(20);
+            harness::sleepMs(20);
             continue;
         }
         try
@@ -109,7 +111,7 @@ void runBody(harness::TestContext& ctx)
     std::optional<cme::Geometry> region;
     const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
-    seedDataDomains(*region, NumDomains, ctx.coherency());
+    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
     std::printf("recovery resume: %u peers (%s, backend=%s)\n", MaxPeers, stratSuffix,
                 ctx.backendName());
@@ -123,7 +125,7 @@ void runBody(harness::TestContext& ctx)
         peers[i].coherency = ctx.coherency();
         peers[i].tid = std::thread{worker, &peers[i]};
     }
-    sleepMs(1000);  // memberships go Active; ownership spreads
+    harness::sleepMs(1000);  // memberships go Active; ownership spreads
 
     auto deadStatusIs = [&](Status status)
     {
@@ -135,7 +137,7 @@ void runBody(harness::TestContext& ctx)
     // of an RA that died before committing None. Inside the grace window, so no survivor
     // has entered the normal path yet.
     peers[Dead].freezeReq.store(true);
-    sleepMs(150);  // worker applies setFreeze; poll thread stops stamping
+    harness::sleepMs(150);  // worker applies setFreeze; poll thread stops stamping
     cme::coherency::rmwIfTrue(region->getMemberSlot(Dead), ctx.coherency(),
                               [](auto* member)
                               {
@@ -150,11 +152,11 @@ void runBody(harness::TestContext& ctx)
 
     // A surviving RA must detect the strand and drive the slot to None. Pre-fix, the ring
     // walk never re-selects a Recovering peer, so this never happens and the wait times out.
-    const bool becameNone = waitUntil([&]
-                                      {
-                                          return deadStatusIs(Status::None);
-                                      },
-                                      RecoveryDeadlineMs);
+    const bool becameNone = harness::waitUntil([&]
+                                               {
+                                                   return deadStatusIs(Status::None);
+                                               },
+                                               RecoveryDeadlineMs);
     ctx.check(becameNone, "surviving RA resumed recovery -> stranded slot reached None");
 
     // Survivors kept making progress across the resume (domains stayed usable).
@@ -163,7 +165,7 @@ void runBody(harness::TestContext& ctx)
     {
         pre[i] = peers[i].acqCount.load();
     }
-    sleepMs(500);
+    harness::sleepMs(500);
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
         if (i == Dead)
@@ -190,7 +192,9 @@ void runBody(harness::TestContext& ctx)
     region.reset();
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

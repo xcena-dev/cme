@@ -33,6 +33,8 @@
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -44,13 +46,13 @@ constexpr std::uint32_t RecoveryDeadlineMs = 15000;
 template <typename T>
 bool holdsFor(T pred, std::uint32_t windowMs)
 {
-    for (std::uint32_t waited = 0; waited < windowMs; waited += PollStepMs)
+    for (std::uint32_t waited = 0; waited < windowMs; waited += harness::PollStepMs)
     {
         if (!pred())
         {
             return false;
         }
-        sleepMs(PollStepMs);
+        harness::sleepMs(harness::PollStepMs);
     }
     return pred();
 }
@@ -84,7 +86,7 @@ void worker(PeerSlot_t* slot)
         slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
         if (slot->freezeReq.load(std::memory_order_acquire))
         {
-            sleepMs(20);
+            harness::sleepMs(20);
             continue;
         }
         try
@@ -124,7 +126,7 @@ void runBody(harness::TestContext& ctx)
     std::optional<cme::Geometry> region;
     const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
-    seedDataDomains(*region, NumDomains, ctx.coherency());
+    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
     std::printf("recovery stake-gate: %u peers (%s, backend=%s)\n", MaxPeers, stratSuffix,
                 ctx.backendName());
@@ -138,7 +140,7 @@ void runBody(harness::TestContext& ctx)
         peers[i].coherency = ctx.coherency();
         peers[i].tid = std::thread{worker, &peers[i]};
     }
-    sleepMs(1000);  // memberships go Active; ownership spreads
+    harness::sleepMs(1000);  // memberships go Active; ownership spreads
 
     auto deadStatusIs = [&](Status status)
     {
@@ -156,7 +158,7 @@ void runBody(harness::TestContext& ctx)
     // heartbeat stalled) and stamp its claim word with a LIVE RA (LiveRA). Seeded inside
     // the liveness grace window, before hasFailed(Dead) trips and peer 0 reaches claim().
     peers[Dead].freezeReq.store(true);
-    sleepMs(150);
+    harness::sleepMs(150);
     cme::coherency::rmwIfTrue(claimSlot, ctx.coherency(),
                               [](auto* claim)
                               {
@@ -183,11 +185,11 @@ void runBody(harness::TestContext& ctx)
     // Phase B: kill the recorded RA. Its word now names a dead peer -> a surviving RA
     // stakes over it (branch (b)) and drives the stranded slot to None.
     peers[LiveRA].freezeReq.store(true);
-    const bool becameNone = waitUntil([&]
-                                      {
-                                          return deadStatusIs(Status::None);
-                                      },
-                                      RecoveryDeadlineMs);
+    const bool becameNone = harness::waitUntil([&]
+                                               {
+                                                   return deadStatusIs(Status::None);
+                                               },
+                                               RecoveryDeadlineMs);
     ctx.check(becameNone, "dead-RA claim stolen -> stranded slot reached None");
 
     // Survivors (not the two frozen peers) kept making progress.
@@ -196,7 +198,7 @@ void runBody(harness::TestContext& ctx)
     {
         pre[i] = peers[i].acqCount.load();
     }
-    sleepMs(500);
+    harness::sleepMs(500);
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
         if (i == Dead || i == LiveRA)
@@ -224,7 +226,9 @@ void runBody(harness::TestContext& ctx)
     region.reset();
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

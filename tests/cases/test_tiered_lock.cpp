@@ -32,6 +32,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -140,7 +142,7 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
     {
         if (cfg.shuffle)
         {
-            shuffleVisitOrder(visit, rng);
+            harness::shuffleVisitOrder(visit, rng);
         }
         for (const std::uint32_t domainId : visit)
         {
@@ -226,8 +228,8 @@ void reportLatency(const Config_t& cfg, std::vector<std::uint32_t>& acqLatNs)
     }
     const double meanNs = acqLatNs.empty() ? 0.0 : sum / static_cast<double>(acqLatNs.size());
     std::printf("acquire latency : n=%zu mean=%.0f p50=%.0f p90=%.0f p99=%.0f max=%.0f (ns)\n",
-                acqLatNs.size(), meanNs, percentile(acqLatNs, 0.50), percentile(acqLatNs, 0.90),
-                percentile(acqLatNs, 0.99), percentile(acqLatNs, 1.0));
+                acqLatNs.size(), meanNs, harness::percentile(acqLatNs, 0.50), harness::percentile(acqLatNs, 0.90),
+                harness::percentile(acqLatNs, 0.99), harness::percentile(acqLatNs, 1.0));
 
     // --csv <path>: append one sweep row (us). Columns: peers,threads,domains + latency.
     const std::string csv = harness::argStr("--csv", std::string{});
@@ -238,8 +240,8 @@ void reportLatency(const Config_t& cfg, std::vector<std::uint32_t>& acqLatNs)
     if (std::FILE* out = std::fopen(csv.c_str(), "a"))
     {
         std::fprintf(out, "%u,%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", cfg.numPeers, cfg.threadsPerPeer,
-                     cfg.numDomains, meanNs / 1000.0, percentile(acqLatNs, 0.50) / 1000.0,
-                     percentile(acqLatNs, 0.90) / 1000.0, percentile(acqLatNs, 0.99) / 1000.0,
+                     cfg.numDomains, meanNs / 1000.0, harness::percentile(acqLatNs, 0.50) / 1000.0,
+                     harness::percentile(acqLatNs, 0.90) / 1000.0, harness::percentile(acqLatNs, 0.99) / 1000.0,
                      acqLatNs.size());
         std::fclose(out);
     }
@@ -294,7 +296,9 @@ void runBody(harness::TestContext& ctx)
     teardown(tiers);
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

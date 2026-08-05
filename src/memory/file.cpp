@@ -28,9 +28,9 @@
 
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "cme/errors.hpp"
 #include "memory/memory.hpp"
@@ -55,7 +55,8 @@ struct Mapping_t
     const int file = ::open(path.c_str(), flags, 0644);
     if (file < 0)
     {
-        throw FormatError{"cme::FileMemory open(" + path + "): " + std::strerror(errno)};
+        const auto failure = lastSystemError();
+        throw BackendError{"cme::FileMemory open(" + path + ")", failure};
     }
     return file;
 }
@@ -85,19 +86,21 @@ void grantDefaultPerms(int file, const std::string& path)
     {
         return;
     }
-    const int err = errno;
+    const auto failure = lastSystemError();
     ::close(file);
-    throw FormatError{"cme::FileMemory perm_set_default(" + path + "): " + std::strerror(err)};
+    throw BackendError{"cme::FileMemory perm_set_default(" + path + ")", failure};
 }
 
 // Consumes @file either way.
 [[nodiscard]] void* mapFd(int file, const std::string& path, std::uint64_t mapSize)
 {
     void* mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
+    // Before the close, which is allowed to leave its own value in errno.
+    const auto failure = (mapped == MAP_FAILED) ? lastSystemError() : std::error_code{};
     ::close(file);
     if (mapped == MAP_FAILED)
     {
-        throw FormatError{"cme::FileMemory mmap(" + path + "): " + std::strerror(errno)};
+        throw BackendError{"cme::FileMemory mmap(" + path + ")", failure};
     }
     return mapped;
 }
@@ -114,8 +117,9 @@ void grantDefaultPerms(int file, const std::string& path)
         ::fstat(file, &info) != 0 || static_cast<std::uint64_t>(info.st_size) < mapSize;
     if (needGrow && ::ftruncate(file, static_cast<off_t>(mapSize)) != 0)
     {
+        const auto failure = lastSystemError();
         ::close(file);
-        throw FormatError{"cme::FileMemory ftruncate(" + path + "): " + std::strerror(errno)};
+        throw BackendError{"cme::FileMemory ftruncate(" + path + ")", failure};
     }
     grantDefaultPerms(file, path);
     return {mapFd(file, path, mapSize), mapSize};
@@ -130,8 +134,17 @@ void grantDefaultPerms(int file, const std::string& path)
     struct stat info = {};
     if (::fstat(file, &info) != 0)
     {
+        const auto failure = lastSystemError();
         ::close(file);
-        throw FormatError{"cme::FileMemory fstat(" + path + "): " + std::strerror(errno)};
+        throw BackendError{"cme::FileMemory fstat(" + path + ")", failure};
+    }
+    // roundUp turns a zero size into a whole PMD, so mmap would succeed over a file holding no
+    // bytes and the first read would SIGBUS. ShmMemory's joiner refuses the same case, and as
+    // there no syscall failed, so this carries no code.
+    if (info.st_size <= 0)
+    {
+        ::close(file);
+        throw BackendError{"cme::FileMemory: file size invalid (" + path + ")"};
     }
     const std::uint64_t mapSize = roundUp(static_cast<std::uint64_t>(info.st_size), PmdAlign);
     return {mapFd(file, path, mapSize), mapSize};

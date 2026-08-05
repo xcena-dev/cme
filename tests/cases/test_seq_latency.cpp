@@ -46,8 +46,11 @@
 #include "helper.hpp"
 #include "observe/latency.hpp"  // trace::writeJsonl (no-op unless CME_LATENCY)
 #include "test_context.hpp"
+#include "test_options.hpp"
 #include "util/time.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -248,12 +251,12 @@ struct DriveState_t
 // lets the acquire thread see a stale "done" from the previous turn.
 void oneAcquire(const Opts_t& opt, Baton_t& baton, DriveState_t& state, std::uint64_t& rng, bool record)
 {
-    auto pick = static_cast<cme::PeerId>(nextRandom(rng) % opt.numPeers);
+    auto pick = static_cast<cme::PeerId>(harness::nextRandom(rng) % opt.numPeers);
     if (opt.forceMigrate && opt.numPeers > 1 && state.holder >= 0)
     {
         while (static_cast<std::int64_t>(pick) == state.holder)
         {
-            pick = static_cast<cme::PeerId>(nextRandom(rng) % opt.numPeers);
+            pick = static_cast<cme::PeerId>(harness::nextRandom(rng) % opt.numPeers);
         }
     }
     const bool migrate = state.holder >= 0 && static_cast<std::int64_t>(pick) != state.holder;
@@ -321,8 +324,8 @@ void report(const char* tag, std::vector<std::uint32_t>& samples)
     }
     const double mean = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
     std::printf("  %-9s n=%-7zu mean=%8.0f  p50=%8.0f  p90=%8.0f  p99=%8.0f  max=%8.0f  (sampleNs)\n",
-                tag, samples.size(), mean, percentile(samples, 0.50), percentile(samples, 0.90),
-                percentile(samples, 0.99), percentile(samples, 1.0));
+                tag, samples.size(), mean, harness::percentile(samples, 0.50), harness::percentile(samples, 0.90),
+                harness::percentile(samples, 0.99), harness::percentile(samples, 1.0));
 }
 
 void printReport(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& state,
@@ -359,8 +362,8 @@ void writeCsvRow(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& sta
     if (FILE* out = std::fopen(opt.csvPath, "a"))
     {
         std::fprintf(out, "%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", opt.numPeers, dataDomains,
-                     meanUs, percentile(samples, 0.50) / 1000.0, percentile(samples, 0.90) / 1000.0,
-                     percentile(samples, 0.99) / 1000.0, samples.size());
+                     meanUs, harness::percentile(samples, 0.50) / 1000.0, harness::percentile(samples, 0.90) / 1000.0,
+                     harness::percentile(samples, 0.99) / 1000.0, samples.size());
         std::fclose(out);
     }
 }
@@ -378,7 +381,7 @@ void runBody(harness::TestContext& ctx)
 
     const cme::Geometry::FormatOpts_t fmtOpts{opt.strategy};
     cme::Geometry region = ctx.memory().createRegion(opt.maxDomains, opt.maxPeers, fmtOpts);
-    seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
+    harness::seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
     std::vector<std::unique_ptr<cme::Peer>> peers = buildPeers(opt, region, ctx.coherency());
 
     const cme::DomainId domainId = 1;  // single fixed domain -- only peer order varies
@@ -409,7 +412,9 @@ void runBody(harness::TestContext& ctx)
     ctx.check(!(state.latAll.empty() && state.timeouts > 0), "at least one acquire completed");
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

@@ -22,6 +22,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -70,7 +72,7 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── duplicate name refused ────────────────────────────────────
-    const bool duplicateRefused = threw<cme::DomainExistsError>(
+    const bool duplicateRefused = harness::threw<cme::DomainExistsError>(
         [&]
         {
             owner.createDomain("inv");
@@ -87,7 +89,7 @@ void runBody(harness::TestContext& ctx)
     {
         return;
     }
-    const bool overflowRefused = threw<cme::DomainLimitError>(
+    const bool overflowRefused = harness::threw<cme::DomainLimitError>(
         [&]
         {
             owner.createDomain("extra");
@@ -110,7 +112,7 @@ void runBody(harness::TestContext& ctx)
     {
         return;
     }
-    const bool lockAfterDeleteRefused = threw<cme::UnknownDomainError>(
+    const bool lockAfterDeleteRefused = harness::threw<cme::UnknownDomainError>(
         [&]
         {
             (void)owner.lock("jobs");
@@ -138,7 +140,7 @@ void runBody(harness::TestContext& ctx)
     // ── delete refused while another peer participates ────────────
     auto joiner = cme::Session::open(uri);  // peer 1
     joiner.joinDomain("inv");               // opt-in: joiner now a participant of inv
-    const bool deleteWithParticipantRefused = threw<cme::NotParticipatingError>(
+    const bool deleteWithParticipantRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
             owner.deleteDomain("inv");
@@ -159,7 +161,7 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── unknown name ──────────────────────────────────────────────
-    const bool unknownDeleteRefused = threw<cme::UnknownDomainError>(
+    const bool unknownDeleteRefused = harness::threw<cme::UnknownDomainError>(
         [&]
         {
             owner.deleteDomain("ghost");
@@ -172,7 +174,9 @@ void runBody(harness::TestContext& ctx)
 
 }  // namespace
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

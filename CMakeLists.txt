@@ -52,6 +52,18 @@ option(CME_PROFILE "Accumulate worker CPU, publish to the SWPC profile slot" OFF
 option(CME_LOGGING "Emit stderr DBG trace lines from the ME core" OFF)
 option(CME_LATENCY "Latency breakdown and trace instrumentation" OFF)
 
+# Line and branch coverage, for answering which code no case reaches. -O0 because
+# an optimised build attributes lines to whatever the inliner merged them into,
+# and -fprofile-update=atomic because most cases here are multi-threaded and
+# multi-process: the default non-atomic counter loses increments under both.
+# A coverage run answers reachability. Timing shifts at -O0, so a fairness or
+# latency verdict from this tree is not comparable to one from a Release build.
+option(CME_COVERAGE "Instrument for gcov line/branch coverage (see note above)" OFF)
+if(CME_COVERAGE)
+    add_compile_options(-O0 -g --coverage -fprofile-update=atomic)
+    add_link_options(--coverage)
+endif()
+
 # -march=native widens a 64B slot get/set to one AVX-512 transaction. With
 # SSE2 the same access becomes 16B x4, and a torn 64B slot is a correctness
 # problem, not a slower one. So this is semantics, not tuning -- and it ties
@@ -202,3 +214,6 @@ else()
                    "dax and uc cases will report skipped")
 endif()
 message(STATUS "  observe     : stats=${CME_STATS} profile=${CME_PROFILE} logging=${CME_LOGGING} latency=${CME_LATENCY}")
+if(CME_COVERAGE)
+    message(STATUS "  coverage    : ON (-O0; reachability, not timing)")
+endif()

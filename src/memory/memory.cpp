@@ -36,7 +36,7 @@ struct UriParts_t
     const auto pos = uri.find(':');
     if (pos == std::string_view::npos || pos == 0 || pos + 1 >= uri.size())
     {
-        throw FormatError{"cme: malformed URI (expected scheme:path)"};
+        throw InvalidArgumentError{"cme: malformed URI (expected scheme:path)"};
     }
     UriParts_t parts{std::string{uri.substr(0, pos)}, std::string{uri.substr(pos + 1)}, 0};
     if (parts.scheme != "dax")
@@ -56,11 +56,11 @@ struct UriParts_t
     }
     catch (const std::exception&)
     {
-        throw FormatError{std::string{"cme::Memory: malformed dax offset: "} + suffix};
+        throw InvalidArgumentError{std::string{"cme::Memory: malformed dax offset: "} + suffix};
     }
     if (consumed != suffix.size())
     {
-        throw FormatError{std::string{"cme::Memory: malformed dax offset: "} + suffix};
+        throw InvalidArgumentError{std::string{"cme::Memory: malformed dax offset: "} + suffix};
     }
     parts.path.resize(atSign);
     return parts;
@@ -93,8 +93,8 @@ std::unique_ptr<Memory> Memory::open(std::string_view uri)
     {
         return std::make_unique<FileMemory>(parts.path);
     }
-    throw FormatError{std::string{"cme::Memory::open: unsupported scheme: "} +
-                      parts.scheme};
+    throw InvalidArgumentError{std::string{"cme::Memory::open: unsupported scheme: "} +
+                               parts.scheme};
 }
 
 std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaSize)
@@ -112,8 +112,8 @@ std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaS
     {
         return std::make_unique<FileMemory>(parts.path, areaSize);
     }
-    throw FormatError{std::string{"cme::Memory::create: unsupported scheme: "} +
-                      parts.scheme};
+    throw InvalidArgumentError{std::string{"cme::Memory::create: unsupported scheme: "} +
+                               parts.scheme};
 }
 
 }  // namespace cme

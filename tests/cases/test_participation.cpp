@@ -23,6 +23,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -44,7 +46,7 @@ void runBody(harness::TestContext& ctx)
 
     // ── opt-in: a domain is not joined by default ─────────────────
     // The joiner has not joined "inv" -> locking it is refused.
-    const bool lockWithoutJoinRefused = threw<cme::NotParticipatingError>(
+    const bool lockWithoutJoinRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
             (void)joiner.lock("inv");
@@ -68,7 +70,7 @@ void runBody(harness::TestContext& ctx)
 
     // ── leaveDomain -> lock refused on that domain ────────────────
     owner.leaveDomain("orders");  // the joiner still participates -> allowed
-    const bool lockAfterLeaveRefused = threw<cme::NotParticipatingError>(
+    const bool lockAfterLeaveRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
             (void)owner.lock("orders");
@@ -108,7 +110,7 @@ void runBody(harness::TestContext& ctx)
     // Drop the joiner from orders, leaving the owner the only participant; the owner then
     // cannot leave (the domain would be orphaned -- deleteDomain is the only exit).
     joiner.leaveDomain("orders");
-    const bool soleParticipantLeaveRefused = threw<cme::NotParticipatingError>(
+    const bool soleParticipantLeaveRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
             owner.leaveDomain("orders");
@@ -128,7 +130,7 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── unknown domain ────────────────────────────────────────────
-    const bool unknownJoinRefused = threw<cme::UnknownDomainError>(
+    const bool unknownJoinRefused = harness::threw<cme::UnknownDomainError>(
         [&]
         {
             owner.joinDomain("ghost");
@@ -137,7 +139,7 @@ void runBody(harness::TestContext& ctx)
     {
         return;
     }
-    const bool unknownLeaveRefused = threw<cme::UnknownDomainError>(
+    const bool unknownLeaveRefused = harness::threw<cme::UnknownDomainError>(
         [&]
         {
             owner.leaveDomain("ghost");
@@ -150,7 +152,9 @@ void runBody(harness::TestContext& ctx)
 
 }  // namespace
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

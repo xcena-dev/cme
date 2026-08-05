@@ -85,6 +85,11 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.StructSuffix
     value: '_t'
+  # Impl is the pimpl idiom's own name, and _t means a record: a struct whose fields are the
+  # point. An Impl is the opposite -- the type a header refuses to show. Renaming it would spend
+  # the suffix's meaning on the one struct that is not a record.
+  - key: readability-identifier-naming.StructIgnoredRegexp
+    value: '^Impl$'
   - key: readability-identifier-naming.UnionCase
     value: CamelCase
   - key: readability-identifier-naming.UnionSuffix

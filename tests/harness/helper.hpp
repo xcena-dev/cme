@@ -7,6 +7,9 @@
 // Header-only: each test is its own binary, so the inline functions resolve to one
 // instance per executable -- no helper.cpp to link. What a *run* is lives in
 // test_context.hpp; nothing here reads the harness flags.
+//
+// In namespace harness with the rest of the shared test code, which is also what keeps `log` from
+// sharing the global namespace with ::log(double) from <math.h>.
 
 #pragma once
 
@@ -22,6 +25,9 @@
 #include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
+
+namespace harness
+{
 
 // xorshift64. Per-thread state, so the sweeps stay independent without sharing.
 inline std::uint64_t nextRandom(std::uint64_t& state) noexcept
@@ -143,3 +149,5 @@ inline void seedDataDomains(cme::Geometry& region, std::uint32_t count,
         (void)creator.createDomain("lane" + std::to_string(i));
     }
 }
+
+}  // namespace harness

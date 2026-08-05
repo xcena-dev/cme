@@ -202,6 +202,10 @@ cme_test_exe(cme-departure-strand-test test_departure_strand.cpp)
 cme_test_exe(cme-seq-latency-test test_seq_latency.cpp)
 cme_test_exe(cme-tiered-lock-test test_tiered_lock.cpp)
 cme_test_exe(cme-shared-session-test test_shared_session.cpp)
+cme_test_exe(cme-shared-lifecycle-test test_shared_lifecycle.cpp)
+cme_test_exe(cme-region-reject-test test_region_reject.cpp)
+cme_test_exe(cme-api-contract-test test_api_contract.cpp)
+cme_test_exe(cme-memory-reject-test test_memory_reject.cpp)
 cme_test_exe(cme-mutex-baseline-test test_mutex_baseline.cpp)
 
 # ── CASES ───────────────────────────────────────────────────────────────
@@ -218,6 +222,17 @@ cme_case(util_test TARGET cme-util-test BACKENDS shm SHM_TIMEOUT 60 LABELS commo
 # pass/fail and is not a ctest concern. See run_mutex_sweep.sh for the comparison.
 cme_case(mutex_baseline TARGET cme-mutex-baseline-test BACKENDS shm SHM_TIMEOUT 60 LABELS common
     ARGS --verify -n 4 -d 2 -i 200 --warmup 20)
+
+# Header rejection: the one case that hands the library a region it did not format. shm because
+# the mappedSize-below-area check needs a mapping sized to the region, which neither a fixed
+# 2 MiB dax window nor a pre-sized uc file is. The checks themselves read header bytes, so one
+# medium answers for all three.
+cme_case(region_reject TARGET cme-region-reject-test BACKENDS shm SHM_TIMEOUT 60)
+
+# Backend rejection: bad URIs, names that cannot exist, sizes that cannot be mapped, a devdax
+# offset off its PMD boundary. shm because the case builds its own URIs and scratch files instead
+# of using the medium it was handed, so a dax or uc variant would repeat identical assertions.
+cme_case(memory_reject TARGET cme-memory-reject-test BACKENDS shm SHM_TIMEOUT 60)
 
 # Smoke and lifecycle: no policy axis, every backend.
 cme_case(fairness_smoke TARGET cme-fairness-smoke-test SHM_TIMEOUT 60)
@@ -265,6 +280,17 @@ cme_case(mutex TARGET cme-mutex-test STRATEGIES)
 # SharedSession: the public intra-node tier. One session, N threads, exclusion must
 # hold -- the case a bare Session does not cover, since the token is per peer.
 cme_case(shared_session TARGET cme-shared-session-test STRATEGIES)
+
+# SharedSession's exit side: leaveDomain, deleteDomain, and the ownership drop both of them run.
+# One policy suffices -- participation and the domain registry sit above the successor policy, so
+# the four would exercise the same code four times. Also the only case that reaches the OpenOpts_t
+# overload of open, Guard's move constructor, and the public cme::flush.
+cme_case(shared_lifecycle TARGET cme-shared-lifecycle-test STRATEGY request SHM_TIMEOUT 60)
+
+# Declared contracts nothing else reaches: move assignment on Session and Guard, and that
+# makeSuccessorPolicy hands back the kind it was asked for. One policy, because the factory check
+# walks all four itself and the move-assignment half does not depend on which one is installed.
+cme_case(api_contract TARGET cme-api-contract-test STRATEGY request SHM_TIMEOUT 60)
 
 # Two-tier lock: SharedSession's per-domain mutex (intra-node) over CXL ownership
 # (inter-node), N sessions x T threads each. Only the outer region switches backend;

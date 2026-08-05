@@ -39,8 +39,12 @@ A case registered with all four strategies appears four times per backend.
 |---|---|---|---|
 | Primitives | `test_util.cpp` | `util_test` (shm) | `endian.hpp` + `coherency.hpp`: Field_t round-trip, wmb/rmb ordering, torn-pair, publishCas, cross-process |
 | Primitives | `test_region_smoke.cpp` | `region_smoke` (shm) | Memory + formatRegion + `Memory::header()`; no Peer, no policy |
+| Primitives | `test_region_reject.cpp` | `region_reject` (shm) | The rejection side: cleared magic, unsupported version, out-of-range dims, area past the mapping. `Session::open` throws, `Inspector::readHeader` returns nullopt, and an intact region is still accepted |
+| Primitives | `test_memory_reject.cpp` | `memory_reject` (shm) | The backends' refusals: malformed URIs, an unknown scheme, a dax offset off its PMD boundary, shm names that are empty, too long, absent or unsized, an empty file, and sizes beyond the machine. Asserted by message, since all of them are `FormatError` |
 | Public API | `test_shared_smoke.cpp` | `shared_smoke` | `Session::format/open`, lock + Guard RAII, tryLock, withLock, getDomainNames, re-format idempotency |
 | Public API | `test_shared_session.cpp` | `shared_session` x4 strategies | One session shared by N threads of one process still excludes, which a per-peer token does not cover alone |
+| Public API | `test_shared_lifecycle.cpp` | `shared_lifecycle` (request) | SharedSession's exit side: leaveDomain leaves the domain standing, rejoin reuses the tier, deleteDomain removes the name. Also the `OpenOpts_t` overload, Guard move, move assignment, and `cme::flush` |
+| Public API | `test_api_contract.cpp` | `api_contract` (request) | Declared contracts no scenario reaches: move assignment on `Session`, into an empty `Guard` and over a live one, moving a `Peer` while its poll thread holds a reference into its state, and `makeSuccessorPolicy` reporting back the kind it was asked for |
 | Public API | `test_tiered_lock.cpp` | `tiered` x4 strategies | Both tiers together: N sessions x T threads, inter-node ownership over intra-node mutex |
 | Exclusion | `test_mutual_exclusion.cpp` | `mutex` x4 strategies | The core contract. N peers non-atomically RMW one counter in the CS; a second holder loses an update and the total falls short |
 | Exclusion | `test_fairness_smoke.cpp` | `fairness_smoke` | ORDER and REQUEST round-trip at two sizes; no timeout, per-peer spread within bound |

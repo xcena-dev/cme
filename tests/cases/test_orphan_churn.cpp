@@ -43,6 +43,8 @@
 #include "helper.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -89,7 +91,7 @@ void worker(PeerSlot_t* peerSlot)
         }
         catch (const std::exception& e)
         {
-            log("worker %u spawn threw: %s", peerSlot->peerId, e.what());
+            harness::log("worker %u spawn threw: %s", peerSlot->peerId, e.what());
             peerSlot->rc.store(1);
             return false;
         }
@@ -114,7 +116,7 @@ void worker(PeerSlot_t* peerSlot)
         peerSlot->peerInstance->setFreeze(peerSlot->freezeReq.load(std::memory_order_acquire));
         if (peerSlot->freezeReq.load() || peerSlot->paused.load())
         {
-            sleepMs(20);
+            harness::sleepMs(20);
             continue;
         }
         try
@@ -142,7 +144,7 @@ void worker(PeerSlot_t* peerSlot)
             peerSlot->ops.fetch_add(1, std::memory_order_relaxed);
             // Think-time: without it the soak degenerates into a control-lock contention
             // storm rather than the moderate churn recovery is meant to see.
-            sleepMs(2);
+            harness::sleepMs(2);
         }
         catch (const cme::JoinError&)
         {
@@ -171,7 +173,7 @@ void worker(PeerSlot_t* peerSlot)
 
 void runBody(harness::TestContext& ctx)
 {
-    startLogClock();
+    harness::startLogClock();
 
     const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
@@ -180,8 +182,8 @@ void runBody(harness::TestContext& ctx)
     const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
 
-    log("orphan churn: %u workers, %u data slots (%s, backend=%s)", Workers, DataSlots,
-        stratSuffix, ctx.backendName());
+    harness::log("orphan churn: %u workers, %u data slots (%s, backend=%s)", Workers, DataSlots,
+                 stratSuffix, ctx.backendName());
 
     std::array<PeerSlot_t, Workers> peers{};
     for (cme::PeerId i = 0; i < Workers; ++i)
@@ -195,13 +197,13 @@ void runBody(harness::TestContext& ctx)
     {
         while (!peers[i].ready.load())
         {
-            sleepMs(5);
+            harness::sleepMs(5);
         }
     }
 
     // ── churn: random freeze/thaw for 10 s, always leave >=2 workers active ──
-    sleepMs(500);
-    log("churn 10 s (freeze/thaw every ~600 ms)");
+    harness::sleepMs(500);
+    harness::log("churn 10 s (freeze/thaw every ~600 ms)");
     std::array<bool, Workers> frozen{};
     cme::PeerId frozenCount = 0;
     std::mt19937 rng{0xC0FFEEu};
@@ -222,17 +224,17 @@ void runBody(harness::TestContext& ctx)
             frozen[target] = true;
             ++frozenCount;
         }
-        sleepMs(600);
+        harness::sleepMs(600);
     }
 
     // ── quiesce: thaw all, idle the op loops, let recovery reclaim every orphan ──
-    log("thaw all + settle (recovery drains orphans, fenced peers re-admit)");
+    harness::log("thaw all + settle (recovery drains orphans, fenced peers re-admit)");
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
         peers[i].freezeReq.store(false);
         peers[i].paused.store(true);
     }
-    sleepMs(5000);
+    harness::sleepMs(5000);
 
     // ── leak audit: a fresh peer must still create >= (slots - workers) domains. ──
     std::uint32_t auditCreated = 0;
@@ -251,7 +253,7 @@ void runBody(harness::TestContext& ctx)
             }
         }
     }
-    log("audit created %u domains (expect >= %u)", auditCreated, DataSlots - Workers);
+    harness::log("audit created %u domains (expect >= %u)", auditCreated, DataSlots - Workers);
 
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
@@ -276,7 +278,9 @@ void runBody(harness::TestContext& ctx)
     region.reset();
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

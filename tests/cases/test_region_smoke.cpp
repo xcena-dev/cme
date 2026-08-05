@@ -19,6 +19,8 @@
 #include "observe/inspector.hpp"
 #include "test_context.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -232,7 +234,9 @@ void runBody(harness::TestContext& ctx)
     checkUnlinkedJoinerFails(ctx, Name, shmUri);
 }
 
+}  // namespace test
+
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }

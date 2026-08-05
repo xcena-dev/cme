@@ -31,6 +31,8 @@
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 
+namespace test
+{
 namespace
 {
 
@@ -65,10 +67,16 @@ cme::PeerId pollAggregatorUntil(cme::Geometry& region, std::uint32_t groupId,
     cme::PeerId aggregator = readAggregatorPeerId(region, groupId, mode);
     for (std::uint32_t waited = 0; waited < maxMs && !done(aggregator); waited += 100)
     {
-        sleepMs(100);
+        harness::sleepMs(100);
         aggregator = readAggregatorPeerId(region, groupId, mode);
     }
     return aggregator;
+}
+
+// The other member of @peerId's group, with two groups over four peers: group g = {g, g + 2}.
+[[nodiscard]] cme::PeerId groupPartner(cme::PeerId peerId) noexcept
+{
+    return static_cast<cme::PeerId>(peerId < 2 ? peerId + 2 : peerId - 2);
 }
 
 struct PeerSlot_t
@@ -97,7 +105,7 @@ void worker(PeerSlot_t* slot)
     }
     catch (const std::exception& error)
     {
-        log("peer %u: ctor exception: %s", slot->peerId, error.what());
+        harness::log("peer %u: ctor exception: %s", slot->peerId, error.what());
         slot->rc.store(1);
         return;
     }
@@ -108,7 +116,7 @@ void worker(PeerSlot_t* slot)
         slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
         if (slot->freezeReq.load(std::memory_order_acquire))
         {
-            sleepMs(50);
+            harness::sleepMs(50);
             continue;
         }
         try
@@ -140,10 +148,9 @@ void spawnPeer(PeerSlot_t& slot, cme::PeerId peerId, cme::Geometry* region,
 
 void runBody(harness::TestContext& ctx)
 {
-    startLogClock();
+    harness::startLogClock();
 
-    // Fixed dims: 2 groups over 4 peers -> group0 = {0,2}, group1 = {1,3}; format
-    // seeds each group's aggregator = its first member (group g -> peer g).
+    // Fixed dims: 2 groups over 4 peers -> group0 = {0,2}, group1 = {1,3}.
     constexpr cme::DomainId NumDomains = 2;
     constexpr cme::PeerId MaxPeers = 4;
     constexpr std::uint32_t Groups = 2;
@@ -155,60 +162,67 @@ void runBody(harness::TestContext& ctx)
 
     std::optional<cme::Geometry> region;
     region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
-    seedDataDomains(*region, NumDomains, ctx.coherency());
+    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
-    // seedDataDomains' transient creator left group0's aggregator at NoPeer, and join does
-    // not re-claim the duty. Reset both groups: the re-election needs a live aggregator.
+    // seedDataDomains' transient creator leaves group0's aggregator at NoPeer, and the crash below
+    // needs a named holder. Which member ends up holding it is settled by the peers, not here.
     writeAggregatorPeerId(*region, 0, 0, ctx.coherency());
     writeAggregatorPeerId(*region, 1, 1, ctx.coherency());
 
     std::vector<PeerSlot_t> peers(MaxPeers);
-    log("starting %u peers (request-agg, groups=%u, domains=%u, backend=%s)", MaxPeers, Groups,
-        NumDomains, ctx.backendName());
+    harness::log("starting %u peers (request-agg, groups=%u, domains=%u, backend=%s)", MaxPeers, Groups,
+                 NumDomains, ctx.backendName());
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
         spawnPeer(peers[i], i, &*region, NumDomains, ctx.coherency());
     }
 
-    sleepMs(1000);  // steady state
+    harness::sleepMs(1000);  // steady state
 
-    // Initial: format names group g's aggregator = peer g.
-    ctx.check(readAggregatorPeerId(*region, 0, ctx.coherency()) == 0,
-              "group0 aggregator starts as peer 0");
-    ctx.check(readAggregatorPeerId(*region, 1, ctx.coherency()) == 1,
-              "group1 aggregator starts as peer 1");
+    // The duty goes to whichever member first finds it named on a peer that is not Active, and
+    // these records are seeded before any peer exists, so both members of a group race for it.
+    // Read the winner rather than name one; everything below works from it.
+    const cme::PeerId group0Start = readAggregatorPeerId(*region, 0, ctx.coherency());
+    const cme::PeerId group1Start = readAggregatorPeerId(*region, 1, ctx.coherency());
+    ctx.checkf(group0Start == 0 || group0Start == 2,
+               "group0 aggregator starts on one of its members (peer %u)", group0Start);
+    ctx.checkf(group1Start == 1 || group1Start == 3,
+               "group1 aggregator starts on one of its members (peer %u)", group1Start);
 
-    // ── crash group0's aggregator (peer 0) ─────────────────────────
-    log("freeze peer 0 (group0 aggregator crashes)");
-    peers[0].freezeReq.store(true);
-    // Poll until recovery re-elects (record no longer names the dead peer 0).
-    const cme::PeerId reelected =
-        pollAggregatorUntil(*region, 0, ctx.coherency(), RecoveryWaitMs, [](cme::PeerId aggregator)
-                            {
-                                return aggregator != 0;
-                            });
-    // group0 = {0,2}; peer 2 is the only other member -> the re-election must pick it.
-    ctx.check(reelected == 2, "group0 aggregator re-elected to live member peer 2");
-    ctx.check(reelected != 0, "group0 aggregator no longer names the dead peer 0");
+    // ── crash group0's aggregator, whichever member that is ────────
+    const cme::PeerId group0Survivor = groupPartner(group0Start);
+    harness::log("freeze peer %u (group0 aggregator crashes; peer %u survives)", group0Start,
+                 group0Survivor);
+    peers[group0Start].freezeReq.store(true);
+    // Poll until recovery re-elects: the record no longer names the frozen peer.
+    const cme::PeerId reelected = pollAggregatorUntil(
+        *region, 0, ctx.coherency(), RecoveryWaitMs, [group0Start](cme::PeerId aggregator)
+        {
+            return aggregator != group0Start;
+        });
+    // A group has two members, so the survivor is the only candidate the re-election can pick.
+    ctx.checkf(reelected == group0Survivor, "group0 aggregator re-elected to live member peer %u",
+               group0Survivor);
 
-    // group1 is untouched -- a crash in group0 must not disturb its record.
-    ctx.check(readAggregatorPeerId(*region, 1, ctx.coherency()) == 1,
-              "group1 aggregator unchanged");
+    // A crash in group0 must not disturb group1's record. Against the observed value, not a
+    // literal, since the winner above is not fixed.
+    const cme::PeerId group1After = readAggregatorPeerId(*region, 1, ctx.coherency());
+    ctx.checkf(group1After == group1Start, "group1 aggregator unchanged (peer %u)", group1Start);
 
     // Survivors resume progress once recovery settles. Poll for it -- a peer can stall
     // briefly mid-takeover, so a fixed window right after re-election flakes.
-    const std::uint64_t before = peers[2].acqCount.load();
+    const std::uint64_t before = peers[group0Survivor].acqCount.load();
     bool progressed = false;
     for (std::uint32_t waited = 0; waited < RecoveryWaitMs && !progressed; waited += 100)
     {
-        sleepMs(100);
-        progressed = peers[2].acqCount.load() > before;
+        harness::sleepMs(100);
+        progressed = peers[group0Survivor].acqCount.load() > before;
     }
-    ctx.check(progressed, "group0 survivor peer 2 keeps acquiring");
+    ctx.checkf(progressed, "group0 survivor peer %u keeps acquiring", group0Survivor);
 
     // ── crash the re-elected aggregator too: whole group gone -> NoPeer ───
-    log("freeze peer 2 (group0's last member crashes)");
-    peers[2].freezeReq.store(true);
+    harness::log("freeze peer %u (group0's last member crashes)", group0Survivor);
+    peers[group0Survivor].freezeReq.store(true);
     const cme::PeerId finalAgg = pollAggregatorUntil(
         *region, 0, ctx.coherency(), RecoveryWaitMs, [](cme::PeerId aggregator)
         {
@@ -229,10 +243,12 @@ void runBody(harness::TestContext& ctx)
             peers[i].tid.join();
         }
     }
-    log("shutdown");
+    harness::log("shutdown");
 }
+
+}  // namespace test
 
 int main(int argc, char** argv)
 {
-    return harness::runCase(argc, argv, runBody);
+    return harness::runCase(argc, argv, test::runBody);
 }
