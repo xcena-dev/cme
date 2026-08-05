@@ -1,0 +1,41 @@
+name: Bug report
+description: Something behaves differently from what the docs or the specification say.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you saw instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: A ctest case name, an example, or a code fragment. Shortest you have.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: setup
+    attributes:
+      label: Setup
+      description: >-
+        Backend, successor policy, and how many peers and domains. These decide most
+        behaviour here, so a report without them often cannot be reproduced.
+      placeholder: "dax backend, Peterson, 16 peers, 4 domains"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and output
+      description: >-
+        Compiler, kernel, CPU, your CMake line, and whatever the failure printed. Intermittent
+        is worth reporting too; say so rather than waiting for a clean reproduction.
+      render: shell

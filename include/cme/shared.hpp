@@ -4,7 +4,7 @@
 // shared.hpp -- cme v0.2 user-facing API: name-based mutual exclusion over a shared region.
 //
 // Two classes: cme::Session (region participant, static factories format/open) and
-// cme::Guard (RAII lock holder for one domain, dtor releases). See DESIGN_v0.2.md.
+// cme::Guard (RAII lock holder for one domain, dtor releases). See docs/design/technical_report.md.
 //
 // THREADING. One Session serves several threads of one process, with one exception:
 // lock/tryLock/withLock on the SAME domain do not exclude each other. The ownership token is

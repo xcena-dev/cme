@@ -2,10 +2,10 @@
 
 **A Design Philosophy and Architecture Reference**
 
-> Status: DRAFT v0.1 (2026-07-03). This is the canonical internal reference for the CME
-> project. It records design principles and the decisions behind them — not implementation
-> details, which live in `docs/` and the code. Medium-facing articles are derived from this
-> document, not the other way around.
+> Status: DRAFT v0.1 (2026-07-03).
+> This is the canonical reference for the CME project.
+> It records design principles and the decisions behind them, not the implementation details, which live in the code.
+> The articles under `docs/articles/` are derived from this document, not the other way around.
 
 ---
 

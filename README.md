@@ -2,8 +2,11 @@
 
 ## Recovery-aware ownership coordination framework for atomic-free, non-coherent shared memory.
 
+[![test](https://github.com/xcena-dev/cme/actions/workflows/test.yml/badge.svg)](https://github.com/xcena-dev/cme/actions/workflows/test.yml)
+[![style](https://github.com/xcena-dev/cme/actions/workflows/style.yml/badge.svg)](https://github.com/xcena-dev/cme/actions/workflows/style.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)
+[![spec](https://img.shields.io/badge/spec-TLA%2B-blueviolet.svg)](docs/spec/)
 ![Status](https://img.shields.io/badge/status-experimental-orange.svg)
 
 ![Without CME, two hosts writing one cacheline race. With CME, one current owner writes.](docs/articles/figs/medium-cover.png)
@@ -170,8 +173,16 @@ cp config.example.yaml config.yaml
 | Design record — why it is shaped this way | [`docs/design/technical_report.md`](docs/design/technical_report.md) |
 | Normative specification, machine-checked | [`docs/spec/`](docs/spec/) |
 | Article drafts, derived from the design record | [`docs/articles/`](docs/articles/) |
+| The vocabulary, in the sense used here | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) |
 
 `docs/spec/` is normative; `src/core/` implements it.
+
+**Taking part**
+
+| | |
+|---|---|
+| Style rules, tests to run, what a PR needs | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| How to cite it | [`CITATION.cff`](CITATION.cff) |
 
 ## Troubleshooting
 

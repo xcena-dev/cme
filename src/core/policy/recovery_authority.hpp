@@ -4,7 +4,7 @@
 // recovery_authority.hpp -- RecoveryAuthorityPolicy hierarchy (SWOT oracle C).
 //
 // Mirrors TLA+ recoveryAuthorityOf (DesignateRA). An implementation must be unique per dead
-// peer, available whenever any peer is active, and deterministic (SWOT_analysis.md §5.1).
+// peer, available whenever any peer is active, and deterministic (docs/spec/).
 // Default ChainRecoveryAuthorityPolicy: RA(dead) = first alive peer clockwise after @dead.
 
 #pragma once

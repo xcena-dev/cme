@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you refer to CME, please cite the design record below."
+title: CME
+type: software
+authors:
+  - family-names: Park
+    given-names: Moonchan
+    affiliation: "XCENA Inc."
+    orcid: "https://orcid.org/0000-0001-5075-7114"
+version: 0.1.0
+date-released: "2026-08-04"
+license: Apache-2.0
+repository-code: "https://github.com/xcena-dev/cme"
+keywords:
+  - CXL
+  - fabric-attached memory
+  - non-coherent memory
+  - mutual exclusion
+  - fault tolerance
+  - TLA+
+preferred-citation:
+  type: report
+  title: "CME: Ownership Coordination on Non-Coherent Shared Memory"
+  authors:
+    - family-names: Park
+      given-names: Moonchan
+      affiliation: "XCENA Inc."
+      orcid: "https://orcid.org/0000-0001-5075-7114"
+  institution:
+    name: "XCENA Inc."
+  year: 2026
+  url: "https://github.com/xcena-dev/cme/blob/main/docs/design/technical_report.md"

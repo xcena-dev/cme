@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or a design discussion
+    url: https://github.com/xcena-dev/cme/discussions
+    about: >-
+      Ask whether CME fits your substrate, how it compares to other approaches, or why the
+      design is shaped this way. Discussions keep the issue tracker to things that are
+      actionable.
+  - name: Security vulnerability
+    url: https://github.com/xcena-dev/cme/security/advisories/new
+    about: >-
+      Report privately. Read the failure model in the README first: CME provides no
+      authentication or authorization, and any host that can map the region can write it, so
+      several things that look like vulnerabilities are stated design boundaries.

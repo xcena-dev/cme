@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a change to the API, a policy, the tooling, or the docs.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What you were trying to do, and where CME got in the way. Describing the situation
+        rather than the fix keeps the fix open.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. A problem with no proposed fix is still worth filing.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Does it reach the region or the protocol
+      description: >-
+        Either one means the TLA+ specification changes with it, which makes this a larger
+        piece of work than it may look.
+      options:
+        - label: It changes the on-region layout or the recovery protocol.
+        - label: "No, it is above the region. The API, the tooling, or the docs."
