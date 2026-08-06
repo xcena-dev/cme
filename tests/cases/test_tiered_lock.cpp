@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "args.hpp"
-#include "cme/shared.hpp"
 #include "cme/shared_session.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -100,13 +99,13 @@ struct Tiers_t
 // Built and joined up front so every peer is Active before the threads race. One SharedSession
 // per node, its T threads sharing it: the per-domain mutex inside is the intra-node tier, and
 // cohorting bounds how long remote peers wait for the handoff.
-Tiers_t buildTiers(const Config_t& cfg, const std::string& uri)
+Tiers_t buildTiers(const Config_t& cfg, const harness::TestContext& ctx)
 {
     Tiers_t tiers;
     tiers.shared.reserve(cfg.numPeers);
     for (std::uint32_t pid = 0; pid < cfg.numPeers; ++pid)
     {
-        tiers.shared.emplace_back(cme::SharedSession::open(uri));
+        tiers.shared.emplace_back(harness::openSharedSession(ctx));
         tiers.shared[pid].setCohortCap(cfg.cohortCap);
         for (std::uint32_t domainId = 1; domainId <= cfg.numDomains; ++domainId)
         {
@@ -157,42 +156,32 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
     }
 }
 
-void runThreads(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>& done,
+// The worker index IS the slot: peer p's threads occupy p * threadsPerPeer .. +threadsPerPeer-1,
+// so the flat index carries both and the peer id divides back out of it.
+void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>& done,
                 std::vector<std::uint32_t>& acqLatNs, std::atomic<int>& failures)
 {
     std::mutex latMutex;
-    std::vector<std::thread> threads;
-    threads.reserve(static_cast<std::size_t>(cfg.numPeers) * cfg.threadsPerPeer);
 
-    for (std::uint32_t pid = 0; pid < cfg.numPeers; ++pid)
-    {
-        for (std::uint32_t index = 0; index < cfg.threadsPerPeer; ++index)
+    harness::runThreads(
+        cfg.numPeers * cfg.threadsPerPeer,
+        [&](std::uint32_t slot)
         {
-            const std::size_t slot = static_cast<std::size_t>(pid) * cfg.threadsPerPeer + index;
-            threads.emplace_back(
-                [&, pid, slot]()
-                {
-                    try
-                    {
-                        std::vector<std::uint32_t> localLat;
-                        localLat.reserve(static_cast<std::size_t>(cfg.itersPerThread) *
-                                         cfg.numDomains);
-                        runSweeps(cfg, tiers, Worker_t{pid, slot}, done, localLat);
-                        const std::lock_guard<std::mutex> merge(latMutex);
-                        acqLatNs.insert(acqLatNs.end(), localLat.begin(), localLat.end());
-                    }
-                    catch (const std::exception& e)
-                    {
-                        std::fprintf(stderr, "peer %u thread %zu: %s\n", pid, slot, e.what());
-                        failures.fetch_add(1);
-                    }
-                });
-        }
-    }
-    for (auto& thread : threads)
-    {
-        thread.join();
-    }
+            const std::uint32_t pid = slot / cfg.threadsPerPeer;
+            try
+            {
+                std::vector<std::uint32_t> localLat;
+                localLat.reserve(static_cast<std::size_t>(cfg.itersPerThread) * cfg.numDomains);
+                runSweeps(cfg, tiers, Worker_t{pid, slot}, done, localLat);
+                const std::lock_guard<std::mutex> merge(latMutex);
+                acqLatNs.insert(acqLatNs.end(), localLat.begin(), localLat.end());
+            }
+            catch (const std::exception& e)
+            {
+                std::fprintf(stderr, "peer %u thread %u: %s\n", pid, slot, e.what());
+                failures.fetch_add(1);
+            }
+        });
 }
 
 // Each domain is locked once per (thread, iter), so a correct two-tier lock leaves every
@@ -258,20 +247,15 @@ void teardown(Tiers_t& tiers)
 
 void runBody(harness::TestContext& ctx)
 {
-    const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
 
     const Config_t cfg = readConfig();
     g_counter.assign(cfg.numDomains + 1, 0);  // index 1..D used
 
-    const std::string& uri = ctx.uri();
-    cme::Session::FormatOpts_t fmtOpts{};
-    fmtOpts.maxDomains = cfg.domainCeiling;  // control(0) + D data domains
-    fmtOpts.maxPeers = cfg.numPeers;
-    fmtOpts.strategy = strategy;
-    cme::Session::format(uri, fmtOpts);
+    // domainCeiling = control(0) + D data domains.
+    harness::formatSession(ctx, cfg.domainCeiling, cfg.numPeers);
 
-    Tiers_t tiers = buildTiers(cfg, uri);
+    Tiers_t tiers = buildTiers(cfg, ctx);
 
     // Let membership settle before the threads race. Without this, early acquires can
     // misroute to a not-yet-Active peer and strand the token into starvation timeouts.
@@ -280,7 +264,7 @@ void runBody(harness::TestContext& ctx)
     std::vector<std::uint32_t> done(static_cast<std::size_t>(cfg.numPeers) * cfg.threadsPerPeer, 0);
     std::vector<std::uint32_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)
     std::atomic<int> failures{0};
-    runThreads(cfg, tiers, done, acqLatNs, failures);
+    runWorkers(cfg, tiers, done, acqLatNs, failures);
 
     const bool meOk = countersMatch(cfg, stratSuffix);
     ctx.check(failures.load() == 0, "every thread ran without exception");

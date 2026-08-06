@@ -16,8 +16,8 @@
 // every other case in the tree, because a region formatted with one strategy and read with one
 // impl agrees with itself.
 
+#include <cstdint>
 #include <memory>
-#include <string>
 #include <utility>
 
 #include "cme/shared.hpp"
@@ -26,6 +26,7 @@
 #include "core/policy/successor.hpp"
 #include "core/policy/successor_policy.hpp"
 #include "core/types.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 #include "test_options.hpp"
 
@@ -36,6 +37,10 @@ namespace
 
 constexpr const char* Domain = "lane0";
 constexpr const char* OtherDomain = "lane1";  // the guard move-assign needs two held at once
+
+// 3 = control(0) + the two data domains the guard case holds at once.
+constexpr std::uint32_t FormatDomains = 3;
+constexpr std::uint32_t FormatPeers = 4;
 
 // Every strategy the public enum offers. Kept here rather than derived from a count, so adding a
 // kind to the enum without teaching the factory about it fails this case instead of being skipped.
@@ -62,17 +67,16 @@ void checkFactoryRoundTrip(harness::TestContext& ctx)
     }
 }
 
-void checkSessionMoveAssign(harness::TestContext& ctx, const cme::Session::FormatOpts_t& fmtOpts)
+void checkSessionMoveAssign(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
-    cme::Session::format(uri, fmtOpts);
+    harness::formatSession(ctx, FormatDomains, FormatPeers);
 
-    auto source = cme::Session::open(uri);
+    auto source = harness::openSession(ctx);
     source.createDomain(Domain);
 
     // The target is a live session, not a default-constructed one: Session has no default ctor,
     // and overwriting a live object is the case that has to give the old peer slot back.
-    auto target = cme::Session::open(uri);
+    auto target = harness::openSession(ctx);
     target = std::move(source);
 
     // The domain was created through the object now moved from, and participation travelled with
@@ -81,12 +85,11 @@ void checkSessionMoveAssign(harness::TestContext& ctx, const cme::Session::Forma
     ctx.check(static_cast<bool>(guard), "session move assignment: the target locks the moved domain");
 }
 
-void checkGuardMoveAssign(harness::TestContext& ctx, const cme::Session::FormatOpts_t& fmtOpts)
+void checkGuardMoveAssign(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
-    cme::Session::format(uri, fmtOpts);
+    harness::formatSession(ctx, FormatDomains, FormatPeers);
 
-    auto session = cme::Session::open(uri);
+    auto session = harness::openSession(ctx);
     session.createDomain(Domain);
     session.createDomain(OtherDomain);
 
@@ -162,17 +165,12 @@ void checkPeerMove(harness::TestContext& ctx)
 
 void runBody(harness::TestContext& ctx)
 {
-    cme::Session::FormatOpts_t fmtOpts;
-    fmtOpts.maxDomains = 3;  // control(0) + the two data domains the guard case holds at once
-    fmtOpts.maxPeers = 4;
-    fmtOpts.strategy = ctx.strategy();
-
     // No region needed: the factory builds a policy that has not been bound to one yet.
     checkFactoryRoundTrip(ctx);
 
     // Each of these formats the region again, so none inherits another's peer slots.
-    checkSessionMoveAssign(ctx, fmtOpts);
-    checkGuardMoveAssign(ctx, fmtOpts);
+    checkSessionMoveAssign(ctx);
+    checkGuardMoveAssign(ctx);
     checkPeerMove(ctx);
 }
 

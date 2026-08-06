@@ -47,7 +47,6 @@
 #include "observe/latency.hpp"
 #include "test_context.hpp"
 #include "test_options.hpp"
-#include "util/time.hpp"
 
 namespace test
 {
@@ -433,21 +432,20 @@ void runPeer(PeerArgs_t arg)
             opt.asymmetric ? (arg.peerId == 0 ? opt.csLoop / 10 + 1 : opt.csLoop * 5) : opt.csLoop;
 
         std::atomic<std::uint64_t> wallTotal{0};
-        std::vector<std::thread> helpers;
-        helpers.reserve(opt.threadsPerPeer);
-
         const std::uint32_t workerCount = opt.numPeers * opt.threadsPerPeer;
 
         const WorkerContext_t shared{peer, opt, arg, wallTotal, workerCount, spinCount};
-        for (std::uint32_t index = 1; index < opt.threadsPerPeer; ++index)
-        {
-            helpers.emplace_back(runWorker, std::cref(shared));
-        }
+        // This thread is one of the workers, so it runs a body itself between the spawn and the
+        // wait. The explicit join is what the barrier below needs: it must not open until every
+        // helper of this peer has stopped acquiring.
+        harness::ThreadGroup helpers;
+        helpers.spawn(opt.threadsPerPeer - 1,
+                      [&shared](std::uint32_t)
+                      {
+                          runWorker(shared);
+                      });
         runWorker(shared);
-        for (auto& helper : helpers)
-        {
-            helper.join();
-        }
+        helpers.join();
 
         // An early leaver flips its slot to None, and a still-measuring peer's successor
         // cache could then hand the token to it. Keep membership static.
@@ -460,19 +458,6 @@ void runPeer(PeerArgs_t arg)
         std::fprintf(stderr, "peer %u: %s\n", arg.peerId, e.what());
         arg.result->returnCode = 1;
     }
-}
-
-// Cycles per ns (== GHz), measured over a 50 ms steady-clock window.
-double measureTscGhz()
-{
-    const auto startCycles = cme::time::readTimestampCounter();
-    const auto startWall = std::chrono::steady_clock::now();
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
-    const auto endCycles = cme::time::readTimestampCounter();
-    const auto endWall = std::chrono::steady_clock::now();
-    const double winNs = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(endWall - startWall).count());
-    return winNs > 0 ? static_cast<double>(endCycles - startCycles) / winNs : 0.0;
 }
 
 void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t>& results,
@@ -676,8 +661,7 @@ void runBody(harness::TestContext& ctx)
     // Every peer thread has exited, so the worker and poll trace buffers are flushed.
     if (opt.traceJsonl != nullptr)
     {
-        cme::trace::writeJsonl(opt.traceJsonl, measureTscGhz());
-        std::printf("trace-jsonl -> %s\n", opt.traceJsonl);
+        harness::dumpLatencyTrace(opt.traceJsonl);
     }
 
     const Spread_t spread = computeSpread(results);

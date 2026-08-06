@@ -12,9 +12,6 @@
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -24,6 +21,7 @@
 #include "admission/claim.hpp"
 #include "cme/shared.hpp"
 #include "core/layout/geometry.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -51,15 +49,9 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
     }
     __atomic_store_n(barrier, 0, __ATOMIC_RELEASE);
 
-    for (std::uint32_t i = 0; i < numClaimers; ++i)
-    {
-        const pid_t pid = ::fork();
-        if (pid < 0)
-        {
-            std::perror("fork");
-            std::exit(2);
-        }
-        if (pid == 0)
+    const std::uint32_t spawned = harness::spawnChildren(
+        numClaimers,
+        [&uri, results, barrier, coherency](std::uint32_t index)
         {
             std::int32_t claimed = Failed;
             try
@@ -76,17 +68,15 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
             {
                 claimed = Failed;  // NoFreeSlotError or any bind/open failure
             }
-            results[i] = claimed;
-            std::_Exit(0);
-        }
-    }
+            results[index] = claimed;
+        });
 
     __atomic_store_n(barrier, 1, __ATOMIC_RELEASE);  // release all claimers together
 
-    for (std::uint32_t i = 0; i < numClaimers; ++i)
+    harness::reapChildren(spawned);
+    if (spawned != numClaimers)
     {
-        int status = 0;
-        ::wait(&status);
+        std::exit(2);  // a round short of its claimers proves nothing about the race
     }
 }
 
@@ -136,8 +126,6 @@ void runBody(harness::TestContext& ctx)
         return;
     }
 
-    const cme::Geometry::FormatOpts_t fmtOpts{cme::Strategy::Request};
-
     // ── Part 1: exact fit (N claimers, N slots), repeated ──────────────
     bool p1ok = true;
     bool p1full = true;
@@ -146,7 +134,7 @@ void runBody(harness::TestContext& ctx)
         ctx.memory().remove();
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
-        static_cast<void>(ctx.memory().createRegion(Domains, Slots, fmtOpts));
+        static_cast<void>(harness::createRegion(ctx, Domains, Slots));
         runRound(uri, Slots, results.data(), barrier.data(), ctx.coherency());
 
         bool valid = true;
@@ -171,7 +159,7 @@ void runBody(harness::TestContext& ctx)
         ctx.memory().remove();
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
-        static_cast<void>(ctx.memory().createRegion(Domains, Slots, fmtOpts));
+        static_cast<void>(harness::createRegion(ctx, Domains, Slots));
         runRound(uri, Oversub, results.data(), barrier.data(), ctx.coherency());
 
         bool valid = true;

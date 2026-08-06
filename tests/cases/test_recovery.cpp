@@ -53,31 +53,25 @@ enum class PState
     Dead,
 };
 
-struct PeerSlot_t
+// The shared slot plus the state this case drives its workers with. `state` replaces the base's
+// `stop`: this timeline pauses a peer as well as stopping it, and it reads back whether a worker has
+// actually gone, which one flag cannot say.
+struct TimelineSlot_t : harness::PeerSlot_t
 {
-    std::thread tid;
-    std::unique_ptr<cme::Peer> peer;  // WORKER-THREAD-ONLY (main drives freeze via freezeReq)
-    cme::Geometry* region{nullptr};
-    cme::PeerId peerId{0};
-    cme::CoherencyMode coherency{};
-    cme::DomainId numDomains{0};
     std::atomic<PState> state{PState::Running};
-    std::atomic<bool> freezeReq{false};  // main raises; worker applies to its own Peer
-    std::atomic<std::uint64_t> acqCount{0};
-    std::atomic<int> rc{0};
 };
 
-void worker(PeerSlot_t* slot)
+void worker(TimelineSlot_t* slot)
 {
     // Create our Peer and join the data domains. Only this thread touches ps->peer;
-    // main drives freeze via ps->freezeReq, so no race. A frozen peer stays frozen
+    // main drives freeze via ps->frozen, so no race. A frozen peer stays frozen
     // for good (permanent-crash model) -- recovery hands its domains to survivors.
     auto spawn = [&]() -> bool
     {
         try
         {
             slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
-            for (cme::DomainId domainId = 1; domainId <= slot->numDomains; ++domainId)
+            for (cme::DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
             {
                 slot->peer->joinDomain(domainId);
             }
@@ -86,7 +80,7 @@ void worker(PeerSlot_t* slot)
         catch (const std::exception& e)
         {
             harness::log("peer %u: ctor exception: %s", slot->peerId, e.what());
-            slot->rc.store(1);
+            slot->failed.store(true);
             return false;
         }
     };
@@ -105,8 +99,8 @@ void worker(PeerSlot_t* slot)
         {
             break;
         }
-        slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
-        if (status == PState::Paused || slot->freezeReq.load(std::memory_order_acquire))
+        slot->peer->setFreeze(slot->frozen.load(std::memory_order_acquire));
+        if (status == PState::Paused || slot->frozen.load(std::memory_order_acquire))
         {
             harness::sleepMs(50);
             continue;
@@ -114,39 +108,39 @@ void worker(PeerSlot_t* slot)
         try
         {
             auto guard = slot->peer->lock(domainId);
-            slot->acqCount.fetch_add(1, std::memory_order_relaxed);
+            slot->acquires.fetch_add(1, std::memory_order_relaxed);
         }
         catch (const cme::LockTimeoutError&)
         {
             harness::log("peer %u: lock(d=%u) timed out (takeover path)", slot->peerId, domainId);
         }
-        domainId = (domainId % slot->numDomains) + 1;
+        domainId = (domainId % slot->domainCount) + 1;
     }
     slot->peer.reset();  // Peer dtor calls leave + destroy
     slot->state.store(PState::Dead);
 }
 
-void spawnPeer(PeerSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry* region,
-               cme::DomainId numDomains, cme::CoherencyMode coherency)
+void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry* region,
+               cme::DomainId domainCount, cme::CoherencyMode coherency)
 {
     peerSlot.peerId = peerId;
     peerSlot.region = region;
     peerSlot.coherency = coherency;
-    peerSlot.numDomains = numDomains;
+    peerSlot.domainCount = domainCount;
     peerSlot.state.store(PState::Running);
-    peerSlot.freezeReq.store(false);
-    peerSlot.acqCount.store(0);
-    peerSlot.rc.store(0);
-    peerSlot.tid = std::thread{worker, &peerSlot};
+    peerSlot.frozen.store(false);
+    peerSlot.acquires.store(0);
+    peerSlot.failed.store(false);
+    peerSlot.runner = std::thread{worker, &peerSlot};
 }
 
 // Per-peer acquire counters at a phase boundary.
-std::vector<std::uint64_t> snapshotAcq(const std::vector<PeerSlot_t>& peers, cme::PeerId count)
+std::vector<std::uint64_t> snapshotAcq(const std::vector<TimelineSlot_t>& peers, cme::PeerId count)
 {
     std::vector<std::uint64_t> snap(count);
     for (cme::PeerId i = 0; i < count; ++i)
     {
-        snap[i] = peers[i].acqCount.load();
+        snap[i] = peers[i].acquires.load();
     }
     return snap;
 }
@@ -168,7 +162,7 @@ std::vector<bool> skipSet(cme::PeerId count, std::initializer_list<cme::PeerId> 
 // and which peers are excluded because this phase is the one that stopped them.
 struct SurvivorBaseline_t
 {
-    const std::vector<PeerSlot_t>& peers;
+    const std::vector<TimelineSlot_t>& peers;
     const std::vector<std::uint64_t>& before;
     const std::vector<bool>& skip;
     cme::PeerId count;
@@ -184,7 +178,7 @@ void expectSurvivorsAdvanced(harness::TestContext& ctx, const SurvivorBaseline_t
         {
             continue;
         }
-        const auto current = baseline.peers[peerId].acqCount.load();
+        const auto current = baseline.peers[peerId].acquires.load();
         ctx.checkf(current > baseline.before[peerId],
                    "survivor peer %u advanced past %s (%" PRIu64 " -> %" PRIu64 ")", peerId, phase,
                    baseline.before[peerId], current);
@@ -192,18 +186,18 @@ void expectSurvivorsAdvanced(harness::TestContext& ctx, const SurvivorBaseline_t
 }
 
 // Simulated crash. Main only raises the request; the worker applies it to its own Peer.
-void freezePeer(PeerSlot_t& slot)
+void freezePeer(TimelineSlot_t& slot)
 {
     slot.state.store(PState::Paused);
-    slot.freezeReq.store(true);
+    slot.frozen.store(true);
 }
 
 // A frozen peer's counter may still tick a few times before its worker notices.
-void expectFlat(harness::TestContext& ctx, const PeerSlot_t& slot, std::uint64_t before,
+void expectFlat(harness::TestContext& ctx, const TimelineSlot_t& slot, std::uint64_t before,
                 cme::PeerId peerId)
 {
     constexpr std::uint64_t Slop = 4;
-    const auto cur = slot.acqCount.load();
+    const auto cur = slot.acquires.load();
     ctx.checkf(cur - before <= Slop,
                "frozen peer %u flat (%" PRIu64 " -> %" PRIu64 ", slop<=%" PRIu64 ")", peerId, before,
                cur, Slop);
@@ -211,7 +205,7 @@ void expectFlat(harness::TestContext& ctx, const PeerSlot_t& slot, std::uint64_t
 
 // Freeze a random live peer every 800 ms until @duration elapses, never dropping below two
 // survivors. Permanent-crash model: a churn freeze sticks, so @frozen only grows.
-void runChurn(std::vector<PeerSlot_t>& peers, cme::PeerId count, std::vector<bool>& frozen,
+void runChurn(std::vector<TimelineSlot_t>& peers, cme::PeerId count, std::vector<bool>& frozen,
               std::chrono::seconds duration)
 {
     std::mt19937 rng{std::random_device{}()};
@@ -233,7 +227,7 @@ void runChurn(std::vector<PeerSlot_t>& peers, cme::PeerId count, std::vector<boo
     }
 }
 
-void shutdownPeers(std::vector<PeerSlot_t>& peers, cme::PeerId count)
+void shutdownPeers(std::vector<TimelineSlot_t>& peers, cme::PeerId count)
 {
     for (cme::PeerId i = 0; i < count; ++i)
     {
@@ -244,9 +238,9 @@ void shutdownPeers(std::vector<PeerSlot_t>& peers, cme::PeerId count)
     }
     for (cme::PeerId i = 0; i < count; ++i)
     {
-        if (peers[i].tid.joinable())
+        if (peers[i].runner.joinable())
         {
-            peers[i].tid.join();
+            peers[i].runner.join();
         }
     }
 }
@@ -257,8 +251,6 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
     constexpr cme::DomainId NumDomains = 4;
     constexpr cme::PeerId MaxPeers = 8;
     constexpr cme::PeerId InitialPeers = 6;
@@ -270,15 +262,14 @@ void runBody(harness::TestContext& ctx)
     // Slot ceiling = control(0) + NumDomains data domains.
     constexpr cme::DomainId DomainCeiling = NumDomains + 1;
     std::optional<cme::Geometry> region;
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, DomainCeiling, MaxPeers));
 
     // Create the NumDomains data domains (slots 1..NumDomains) before peers start.
     harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
-    std::vector<PeerSlot_t> peers(MaxPeers + 1);
+    std::vector<TimelineSlot_t> peers(MaxPeers + 1);
     harness::log("starting %u peers (%s, domains=%u, max_peers=%u, backend=%s)", InitialPeers,
-                 stratSuffix, NumDomains, MaxPeers, ctx.backendName());
+                 ctx.strategySuffix(), NumDomains, MaxPeers, ctx.backendName());
     for (cme::PeerId i = 0; i < InitialPeers; ++i)
     {
         spawnPeer(peers[i], i, &*region, NumDomains, ctx.coherency());
@@ -297,7 +288,7 @@ void runBody(harness::TestContext& ctx)
     // FreezeTarget stays frozen for good (permanent-crash model); the survivor-progress
     // check is what confirms recovery reclaimed its domains.
     harness::log("freezing peer %u (simulated crash)", FreezeTarget);
-    const auto bFreeze = peers[FreezeTarget].acqCount.load();
+    const auto bFreeze = peers[FreezeTarget].acquires.load();
     freezePeer(peers[FreezeTarget]);
 
     harness::sleepMs(7500);  // > AcquireTimeout (config.hpp) so survivors take over
@@ -309,7 +300,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("graceful leave: peer %u stop + destroy", LeaveTarget);
     const auto dPre = snapshotAcq(peers, InitialPeers);
     peers[LeaveTarget].state.store(PState::Stop);
-    peers[LeaveTarget].tid.join();
+    peers[LeaveTarget].runner.join();
     ctx.checkf(peers[LeaveTarget].state.load() == PState::Dead,
                "peer %u joined out as Dead", LeaveTarget);
 
@@ -322,7 +313,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("rejoin slot %u", LeaveTarget);
     spawnPeer(peers[LeaveTarget], LeaveTarget, &*region, NumDomains, ctx.coherency());
     harness::sleepMs(2000);
-    ctx.checkf(peers[LeaveTarget].acqCount.load() > 0, "rejoined peer %u acquired",
+    ctx.checkf(peers[LeaveTarget].acquires.load() > 0, "rejoined peer %u acquired",
                LeaveTarget);
 
     // ── Phase F: concurrent multi-freeze ───────────────────────────
@@ -353,7 +344,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("final acq counts:");
     for (cme::PeerId i = 0; i < InitialPeers; ++i)
     {
-        harness::log("  peer %u : %" PRIu64 "  rc=%d", i, peers[i].acqCount.load(), peers[i].rc.load());
+        harness::log("  peer %u : %" PRIu64 "  rc=%d", i, peers[i].acquires.load(), peers[i].failed.load());
     }
 }
 

@@ -205,8 +205,16 @@ cme_test_exe(cme-shared-session-test test_shared_session.cpp)
 cme_test_exe(cme-shared-lifecycle-test test_shared_lifecycle.cpp)
 cme_test_exe(cme-region-reject-test test_region_reject.cpp)
 cme_test_exe(cme-api-contract-test test_api_contract.cpp)
+cme_test_exe(cme-api-reject-test test_api_reject.cpp)
+cme_test_exe(cme-region-corrupt-test test_region_corrupt.cpp)
+cme_test_exe(cme-lease-steal-test test_lease_steal.cpp)
 cme_test_exe(cme-memory-reject-test test_memory_reject.cpp)
 cme_test_exe(cme-mutex-baseline-test test_mutex_baseline.cpp)
+cme_test_exe(cme-shadow-authority-test test_shadow_authority.cpp)
+cme_test_exe(cme-coherency-modes-test test_coherency_modes.cpp)
+cme_test_exe(cme-slot-inherit-test test_slot_inherit.cpp)
+cme_test_exe(cme-domain-incarnation-test test_domain_incarnation.cpp)
+cme_test_exe(cme-file-presized-test test_file_presized.cpp)
 
 # ── CASES ───────────────────────────────────────────────────────────────
 
@@ -233,6 +241,11 @@ cme_case(region_reject TARGET cme-region-reject-test BACKENDS shm SHM_TIMEOUT 60
 # offset off its PMD boundary. shm because the case builds its own URIs and scratch files instead
 # of using the medium it was handed, so a dax or uc variant would repeat identical assertions.
 cme_case(memory_reject TARGET cme-memory-reject-test BACKENDS shm SHM_TIMEOUT 60)
+
+# The file backend's creator-sizing rule, both answers: a fresh file is grown to the mapping and a
+# pre-sized one is left alone, which is what a WORM mount requires. shm for the same reason as
+# memory_reject -- the case seals its own memfd and never opens the medium it was handed.
+cme_case(file_presized TARGET cme-file-presized-test BACKENDS shm SHM_TIMEOUT 60)
 
 # Smoke and lifecycle: no policy axis, every backend.
 cme_case(fairness_smoke TARGET cme-fairness-smoke-test SHM_TIMEOUT 60)
@@ -292,6 +305,42 @@ cme_case(shared_lifecycle TARGET cme-shared-lifecycle-test STRATEGY request SHM_
 # walks all four itself and the move-assignment half does not depend on which one is installed.
 cme_case(api_contract TARGET cme-api-contract-test STRATEGY request SHM_TIMEOUT 60)
 
+# The refusal side of the same API: dimensions format rejects, the not-joined guard on a moved-from
+# handle, domain ids and names Peer rejects, and the two lifecycle answers that mean "already so".
+# One policy, because argument validation sits above the successor policy entirely.
+cme_case(api_reject TARGET cme-api-reject-test STRATEGY request SHM_TIMEOUT 60)
+
+# The slot-level magic checks below the header: member slot, control record, a data record, and the
+# strategy field. One policy, because each check fails before the successor policy is built or
+# reaches code that does not consult it.
+cme_case(region_corrupt TARGET cme-region-corrupt-test STRATEGY request SHM_TIMEOUT 60)
+
+# The shadow is a hint and the truth line decides: a shadow forged to name the waiter must not
+# hand it the domain. One policy, because waitForOwnership sits below the successor policy and
+# every one of them reaches the same wait.
+cme_case(shadow_authority TARGET cme-shadow-authority-test STRATEGY request SHM_TIMEOUT 60)
+
+# All three coherency regimes over one medium, with the mode named by the case rather than taken
+# from the backend. shm only: it is the medium every machine has, and carrying all three there is
+# the whole point -- on a hosted runner nothing else executes the Flush barrier path.
+cme_case(coherency_modes TARGET cme-coherency-modes-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 60)
+
+# A member slot's next occupant inherits no participation from the peer that left cleanly.
+# readmit_gate covers the dead-peer route to the same bits; one policy, because membership sits
+# above the successor policy.
+cme_case(slot_inherit TARGET cme-slot-inherit-test STRATEGY request SHM_TIMEOUT 60)
+
+# A reused domain slot is a new incarnation: generation rises, epoch does not reset, and a peer
+# holding the old view is refused until it re-joins. One policy, for the same reason as
+# domain_lifecycle -- the registry sits above the successor policy.
+cme_case(domain_incarnation TARGET cme-domain-incarnation-test STRATEGY request SHM_TIMEOUT 60)
+
+# The admission lease's failure side: a stalled lease stolen after LeaseTimeout, and a lease that
+# keeps moving until the joiner's deadline runs out. shm only -- both cases assert wall-clock
+# windows on one 64 B line and read no other medium state.
+cme_case(lease_steal TARGET cme-lease-steal-test STRATEGY request BACKENDS shm SHM_TIMEOUT 60)
+
 # Two-tier lock: SharedSession's per-domain mutex (intra-node) over CXL ownership
 # (inter-node), N sessions x T threads each. Only the outer region switches backend;
 # the inner tier is a std::mutex in DRAM. UC_VIA_DAX because this binary unlinks its
@@ -313,8 +362,14 @@ foreach(entry IN LISTS CME_STRATEGY_MAP)
         ARGS --${policy} -n 8 -d 4 -i 600 --warmup 50 --asymmetric --bound 0.15)
     # Uncontended sequential acquire latency. The bench prints latency; ctest only
     # checks that it runs. Run it standalone with a larger -i for real numbers.
+    #
+    # --trace-jsonl is passed so the dump path runs at all: without it nothing in the suite
+    # reaches trace::writeJsonl or the TSC read that sizes its output, and both read as dead.
+    # In a build without CME_LATENCY the write itself is an empty inline, so no file appears
+    # and the only cost is the 50 ms frequency window.
     cme_case(seq_latency_${infix} TARGET cme-seq-latency-test
-        ARGS --${policy} -n 8 -d 8 -i 2000 --warmup 200)
+        ARGS --${policy} -n 8 -d 8 -i 2000 --warmup 200
+             --trace-jsonl seq_latency_${infix}.jsonl)
 endforeach()
 
 # ── shm labelling sweep ─────────────────────────────────────────────────

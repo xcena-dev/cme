@@ -47,6 +47,7 @@
 #include <vector>
 
 #include "args.hpp"
+#include "helper_util.hpp"
 #include "test_memory.hpp"
 
 namespace
@@ -220,37 +221,28 @@ struct RoundStamps_t
             gate.store(1, std::memory_order_release);  // OPEN via DRAM gate; nonce is already 0
         });
 
-    std::vector<std::thread> stakers;
-    stakers.reserve(contenders);
-    for (std::uint32_t index = 0; index < contenders; ++index)
-    {
-        stakers.emplace_back(
-            [&, index]
+    harness::runThreads(
+        contenders,
+        [&](std::uint32_t index)
+        {
+            const std::uint64_t myNonce = static_cast<std::uint64_t>(index) + 1;  // distinct, nonzero
+            pinTo(index);                                                         // one staker per core
+            ready.fetch_add(1);
+            while (gate.load(std::memory_order_acquire) == 0)
             {
-                const std::uint64_t myNonce = static_cast<std::uint64_t>(index) + 1;  // distinct, nonzero
-                pinTo(index);                                                         // one staker per core
-                ready.fetch_add(1);
-                while (gate.load(std::memory_order_acquire) == 0)
-                {
-                    _mm_pause();
-                }  // DRAM spin, no FAM poll
-                const std::uint64_t origin = originNs.load(std::memory_order_acquire);
-                const std::uint64_t seen = readNonce(nonce);  // one UC read: free(0)? then stake
-                readNs[index] = nowNs() - origin;
-                if (seen == 0)  // saw it free -> stake (claim.cpp case 1)
-                {
-                    writeNonce(nonce, myNonce);
-                    writeNs[index] = nowNs() - origin;
-                    staked[index] = true;
-                }
-                // else: door already closed; wait for next round (no re-contend).
-            });
-    }
-
-    for (std::thread& staker : stakers)
-    {
-        staker.join();
-    }
+                _mm_pause();
+            }  // DRAM spin, no FAM poll
+            const std::uint64_t origin = originNs.load(std::memory_order_acquire);
+            const std::uint64_t seen = readNonce(nonce);  // one UC read: free(0)? then stake
+            readNs[index] = nowNs() - origin;
+            if (seen == 0)  // saw it free -> stake (claim.cpp case 1)
+            {
+                writeNonce(nonce, myNonce);
+                writeNs[index] = nowNs() - origin;
+                staked[index] = true;
+            }
+            // else: door already closed; wait for next round (no re-contend).
+        });
     opener.join();
 
     return reduceRound({readNs, writeNs, staked}, contenders);

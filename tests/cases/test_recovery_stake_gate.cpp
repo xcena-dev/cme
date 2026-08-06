@@ -19,12 +19,8 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <memory>
 #include <optional>
-#include <thread>
 
-#include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/policy/recovery_authority_layout.hpp"
@@ -42,81 +38,10 @@ using Status = cme::Geometry::Member_t::Status;
 
 constexpr std::uint32_t RecoveryDeadlineMs = 15000;
 
-// Holds true for the whole window (no rival wrote the word / drove the slot).
-template <typename T>
-bool holdsFor(T pred, std::uint32_t windowMs)
-{
-    for (std::uint32_t waited = 0; waited < windowMs; waited += harness::PollStepMs)
-    {
-        if (!pred())
-        {
-            return false;
-        }
-        harness::sleepMs(harness::PollStepMs);
-    }
-    return pred();
-}
-
-// Minimal lock-loop worker (mirrors test_recovery_resume): joins the data domains and
-// keeps acquiring so ownership spreads and a frozen peer likely holds a domain at crash.
-struct PeerSlot_t
-{
-    std::thread tid;
-    std::unique_ptr<cme::Peer> peer;
-    cme::Geometry* region{nullptr};
-    cme::PeerId peerId{0};
-    cme::CoherencyMode coherency{};
-    cme::DomainId numDomains{0};
-    std::atomic<bool> stop{false};
-    std::atomic<bool> freezeReq{false};
-    std::atomic<bool> abandon{false};  // on stop, leak the Peer (don't run its dtor)
-    std::atomic<std::uint64_t> acqCount{0};
-};
-
-void worker(PeerSlot_t* slot)
-{
-    slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
-    for (cme::DomainId domainId = 1; domainId <= slot->numDomains; ++domainId)
-    {
-        slot->peer->joinDomain(domainId);
-    }
-    cme::DomainId domainId = 1;
-    while (!slot->stop.load(std::memory_order_acquire))
-    {
-        slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
-        if (slot->freezeReq.load(std::memory_order_acquire))
-        {
-            harness::sleepMs(20);
-            continue;
-        }
-        try
-        {
-            auto guard = slot->peer->lock(domainId);
-            slot->acqCount.fetch_add(1, std::memory_order_relaxed);
-        }
-        catch (const cme::LockTimeoutError&)
-        {
-            // @expected a lock attempt that times out under contention is a normal outcome, not a failure: the loop moves on to the next domain.
-        }
-        domainId = (domainId % slot->numDomains) + 1;
-    }
-    if (slot->abandon.load(std::memory_order_acquire))
-    {
-        static_cast<void>(slot->peer.release());  // crashed peer: never run its dtor on a recovered slot
-    }
-    else
-    {
-        slot->peer.reset();
-    }
-}
-
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
 {
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
-
     constexpr cme::PeerId MaxPeers = 4;
     constexpr cme::DomainId NumDomains = 2;
     constexpr cme::DomainId Ceiling = NumDomains + 1;  // control + data
@@ -124,27 +49,23 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId LiveRA = 2;                  // peer named by the seeded claim
 
     std::optional<cme::Geometry> region;
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
     harness::seedDataDomains(*region, NumDomains, ctx.coherency());
 
-    std::printf("recovery stake-gate: %u peers (%s, backend=%s)\n", MaxPeers, stratSuffix,
-                ctx.backendName());
+    std::printf("recovery stake-gate: %u peers (%s, backend=%s)\n", MaxPeers,
+                ctx.strategySuffix(), ctx.backendName());
 
-    std::array<PeerSlot_t, MaxPeers> peers{};
+    std::array<harness::PeerSlot_t, MaxPeers> peers{};
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
-        peers[i].region = &*region;
-        peers[i].peerId = i;
-        peers[i].numDomains = NumDomains;
-        peers[i].coherency = ctx.coherency();
-        peers[i].tid = std::thread{worker, &peers[i]};
+        harness::spawnPeerWorker(peers[i], i, *region, ctx.coherency(), NumDomains);
     }
     harness::sleepMs(1000);  // memberships go Active; ownership spreads
+    ctx.check(harness::allPeersJoined(peers, MaxPeers), "every worker joined its domains");
 
     auto deadStatusIs = [&](Status status)
     {
-        return cme::coherency::get(region->getMemberSlot(Dead), ctx.coherency()).hasStatus(status);
+        return harness::hasMemberStatus(*region, Dead, status, ctx.coherency());
     };
     auto* claimSlot = cme::RecoveryAuthorityLayout{*region}.getClaim(Dead);
     auto claimRA = [&]() -> cme::PeerId
@@ -157,7 +78,7 @@ void runBody(harness::TestContext& ctx)
     // Construct the "live claim in progress" residue: crash the target (leave it Active,
     // heartbeat stalled) and stamp its claim word with a LIVE RA (LiveRA). Seeded inside
     // the liveness grace window, before hasFailed(Dead) trips and peer 0 reaches claim().
-    peers[Dead].freezeReq.store(true);
+    peers[Dead].frozen.store(true);
     harness::sleepMs(150);
     cme::coherency::rmwIfTrue(claimSlot, ctx.coherency(),
                               [](auto* claim)
@@ -175,16 +96,16 @@ void runBody(harness::TestContext& ctx)
     // Once hasFailed(Dead) trips, peer 0 must yield to the live claim: the word stays
     // LiveRA and the slot Active well past the grace plus a normal takeover span.
     const bool wordHeld =
-        holdsFor([&]
-                 {
-                     return claimRA() == LiveRA && deadStatusIs(Status::Active);
-                 },
-                 4000);
+        harness::holdsFor([&]
+                          {
+                              return claimRA() == LiveRA && deadStatusIs(Status::Active);
+                          },
+                          4000);
     ctx.check(wordHeld, "live claim not overwritten; slot not taken over while RA alive");
 
     // Phase B: kill the recorded RA. Its word now names a dead peer -> a surviving RA
     // stakes over it (branch (b)) and drives the stranded slot to None.
-    peers[LiveRA].freezeReq.store(true);
+    peers[LiveRA].frozen.store(true);
     const bool becameNone = harness::waitUntil([&]
                                                {
                                                    return deadStatusIs(Status::None);
@@ -196,7 +117,7 @@ void runBody(harness::TestContext& ctx)
     std::array<std::uint64_t, MaxPeers> pre{};
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
-        pre[i] = peers[i].acqCount.load();
+        pre[i] = peers[i].acquires.load();
     }
     harness::sleepMs(500);
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
@@ -205,24 +126,14 @@ void runBody(harness::TestContext& ctx)
         {
             continue;
         }
-        ctx.check(peers[i].acqCount.load() > pre[i], "survivor advanced after resume");
+        ctx.check(peers[i].acquires.load() > pre[i], "survivor advanced after resume");
     }
 
     // Teardown. The two frozen peers never rejoin: leak their Peer so no dtor touches the
     // recovered slots; the rest leave cleanly.
     peers[Dead].abandon.store(true);
     peers[LiveRA].abandon.store(true);
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        peers[i].stop.store(true);
-    }
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        if (peers[i].tid.joinable())
-        {
-            peers[i].tid.join();
-        }
-    }
+    harness::joinPeerWorkers(peers, MaxPeers);
     region.reset();
 }
 

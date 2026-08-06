@@ -3,8 +3,7 @@
 //
 // test_shared_smoke.cpp -- smoke test for the public Session API. Exercises:
 //   - Session::format(shm)
-//   - Session::open(uri)
-//   - Session::open(uri, OpenOpts)
+//   - Session::open(uri) where the medium is cache-coherent, Session::open(uri, OpenOpts) elsewhere
 //   - Session::lock("name") + Guard RAII
 //   - Session::tryLock(name, timeout)
 //   - Session::withLock(name, fn)
@@ -22,6 +21,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -34,14 +34,11 @@ void runBody(harness::TestContext& ctx)
     const std::string& uri = ctx.uri();
 
     // ── format ─────────────────────────────────────────────────────
-    cme::Session::FormatOpts_t fopts;
-    fopts.maxDomains = 4;  // control(0) + 3 data slots
-    fopts.maxPeers = 4;
-    fopts.strategy = cme::Strategy::Request;
-    cme::Session::format(uri, fopts);
+    // 4 = control(0) + 3 data slots.
+    harness::formatSession(ctx, 4, 4);
 
-    // ── open w/ default opts ──────────────────────────────────────
-    auto first = cme::Session::open(uri);
+    // ── open ──────────────────────────────────────────────────────
+    auto first = harness::openSession(ctx);
     // Data domains are created at runtime (slots fill in ascending order).
     // Opt-in: create does not participate, so join each before locking.
     for (const char* name : {"inv", "orders", "cache"})
@@ -139,8 +136,14 @@ void runBody(harness::TestContext& ctx)
         }
     }
 
-    // ── second open ───────────────────────────────────────────────
-    auto second = cme::Session::open(uri);
+    // ── second open, through the one-argument overload ────────────
+    // That overload fills OpenOpts_t with its defaults, and coherency defaults there to
+    // CacheCoherent. So it runs only where the medium is cache-coherent. On the other two the
+    // default would be the wrong barrier discipline, and the open would say nothing about the
+    // medium the variant exists to cover.
+    auto second = (ctx.coherency() == cme::CoherencyMode::CacheCoherent)
+                      ? cme::Session::open(uri)
+                      : harness::openSession(ctx);
     second.joinDomain("orders");  // opt-in: join before locking
 
     // ── two sessions, distinct domains, no contention ─────────────

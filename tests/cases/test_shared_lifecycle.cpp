@@ -22,11 +22,11 @@
 #include <cstdio>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
 #include "cme/shared_session.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -57,43 +57,24 @@ bool refusesLock(cme::SharedSession& shared, const char* name)
     }
 }
 
-bool listsDomain(const cme::Session& session, const char* name)
-{
-    const std::vector<std::string> names = session.getDomainNames();
-    for (const std::string& entry : names)
-    {
-        if (entry == name)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
+    // 4 domains = control(0) + the two data domains below, one spare.
+    // 4 peers = shared, the verifier, and the move-assign target.
+    harness::formatSession(ctx, 4, 4);
 
-    cme::Session::FormatOpts_t fmtOpts;
-    fmtOpts.maxDomains = 4;  // control(0) + the two data domains below, one spare
-    fmtOpts.maxPeers = 4;    // shared, the verifier, and the move-assign target
-    fmtOpts.strategy = ctx.strategy();
-    cme::Session::format(uri, fmtOpts);
-
-    // The OpenOpts_t overload. Coherency has to match how this run reaches the medium, and the
-    // harness already resolved that from --backend.
-    cme::Session::OpenOpts_t openOpts;
-    openOpts.coherency = ctx.coherency();
-    auto shared = cme::SharedSession::open(uri, openOpts);
+    // Through the OpenOpts_t overload, since coherency has to match how this run reaches the
+    // medium and the harness already resolved that from --backend.
+    auto shared = harness::openSharedSession(ctx);
 
     shared.createDomain(LeaveDomain);
     shared.createDomain(DeleteDomain);
 
     // A plain Session, for the two questions SharedSession deliberately cannot answer: it owns
     // its Session and hands out no reference, so the domain list has to come from elsewhere.
-    auto verifier = cme::Session::open(uri);
+    auto verifier = harness::openSession(ctx);
     verifier.joinDomain(LeaveDomain);
 
     // ── leaveDomain ────────────────────────────────────────────────────
@@ -107,7 +88,7 @@ void runBody(harness::TestContext& ctx)
     shared.leaveDomain(LeaveDomain);
     ctx.check(refusesLock(shared, LeaveDomain),
               "after leaveDomain: lock on the left domain is refused");
-    ctx.check(listsDomain(verifier, LeaveDomain),
+    ctx.check(harness::listsDomain(verifier, LeaveDomain),
               "after leaveDomain: the domain itself still exists, only participation ended");
 
     // Rejoining reuses the tier the leave deliberately kept in the map.
@@ -141,14 +122,14 @@ void runBody(harness::TestContext& ctx)
         ctx.check(static_cast<bool>(guard), "sole-participant domain locks before deletion");
     }
     shared.deleteDomain(DeleteDomain);
-    ctx.check(!listsDomain(verifier, DeleteDomain), "after deleteDomain: the name is gone");
+    ctx.check(!harness::listsDomain(verifier, DeleteDomain), "after deleteDomain: the name is gone");
     ctx.check(refusesLock(shared, DeleteDomain),
               "after deleteDomain: lock on the deleted domain is refused");
 
     // ── SharedSession move assignment ──────────────────────────────────
     // The target is opened first so the assignment overwrites a live object, which is the case
     // that has to release the old Impl rather than leak its peer slot.
-    auto sink = cme::SharedSession::open(uri);
+    auto sink = harness::openSharedSession(ctx);
     sink = std::move(shared);
     {
         const auto guard = sink.lock(LeaveDomain);

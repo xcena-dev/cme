@@ -10,9 +10,6 @@
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -20,8 +17,7 @@
 #include <string>
 
 #include "admission/claim.hpp"
-#include "cme/shared.hpp"
-#include "core/layout/geometry.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -39,12 +35,9 @@ constexpr std::int32_t Failed = -1;
 
 void runBody(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
-
     // Parent formats the region and lets the mapping go; the children each open it for
     // themselves and claim.
-    static_cast<void>(ctx.memory().createRegion(
-        Domains, Claimers, cme::Geometry::FormatOpts_t{cme::Strategy::Request}));
+    static_cast<void>(harness::createRegion(ctx, Domains, Claimers));
 
     const auto results = ctx.scratch<std::int32_t>("results", Claimers);
     if (!results)
@@ -54,37 +47,27 @@ void runBody(harness::TestContext& ctx)
     }
     results.fill(Unset);
 
-    for (std::uint32_t i = 0; i < Claimers; ++i)
-    {
-        const pid_t pid = ::fork();
-        if (pid < 0)
-        {
-            std::perror("fork");
-            ctx.check(false, "fork failed");
-            return;
-        }
-        if (pid == 0)
+    const std::uint32_t spawned = harness::spawnChildren(
+        Claimers,
+        [&ctx, &results](std::uint32_t index)
         {
             std::int32_t claimed = Failed;
             try
             {
-                auto region = cme::Geometry::open(uri);
-                region.bindBlocking(std::chrono::milliseconds{5000}, ctx.coherency());
+                auto region = harness::openBoundRegion(ctx, std::chrono::milliseconds{5000});
                 claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, ctx.coherency()));
             }
             catch (...)
             {
                 claimed = Failed;
             }
-            results[i] = claimed;
-            std::_Exit(0);
-        }
-    }
+            results[index] = claimed;
+        });
 
-    for (std::uint32_t i = 0; i < Claimers; ++i)
+    harness::reapChildren(spawned);
+    if (!ctx.check(spawned == Claimers, "every claimer forked"))
     {
-        int status = 0;
-        ::wait(&status);
+        return;
     }
 
     // Every claimer won a distinct, in-range slot.

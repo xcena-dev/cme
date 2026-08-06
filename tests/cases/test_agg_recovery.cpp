@@ -15,13 +15,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
-#include <memory>
 #include <optional>
-#include <thread>
 #include <vector>
 
-#include "cme/errors.hpp"
 #include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -79,70 +75,9 @@ cme::PeerId pollAggregatorUntil(cme::Geometry& region, std::uint32_t groupId,
     return static_cast<cme::PeerId>(peerId < 2 ? peerId + 2 : peerId - 2);
 }
 
-struct PeerSlot_t
-{
-    std::thread tid;
-    std::unique_ptr<cme::Peer> peer;  // WORKER-THREAD-ONLY
-    cme::Geometry* region{nullptr};
-    cme::PeerId peerId{0};
-    cme::CoherencyMode coherency{};
-    cme::DomainId numDomains{0};
-    std::atomic<bool> stopReq{false};
-    std::atomic<bool> freezeReq{false};  // main raises; worker applies to its own Peer
-    std::atomic<std::uint64_t> acqCount{0};
-    std::atomic<int> rc{0};
-};
-
-void worker(PeerSlot_t* slot)
-{
-    try
-    {
-        slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
-        for (cme::DomainId joinDomainId = 1; joinDomainId <= slot->numDomains; ++joinDomainId)
-        {
-            slot->peer->joinDomain(joinDomainId);
-        }
-    }
-    catch (const std::exception& error)
-    {
-        harness::log("peer %u: ctor exception: %s", slot->peerId, error.what());
-        slot->rc.store(1);
-        return;
-    }
-
-    cme::DomainId nextDomainId = 1;
-    while (!slot->stopReq.load(std::memory_order_acquire))
-    {
-        slot->peer->setFreeze(slot->freezeReq.load(std::memory_order_acquire));
-        if (slot->freezeReq.load(std::memory_order_acquire))
-        {
-            harness::sleepMs(50);
-            continue;
-        }
-        try
-        {
-            auto ownershipGuard = slot->peer->lock(nextDomainId);
-            slot->acqCount.fetch_add(1, std::memory_order_relaxed);
-            (void)ownershipGuard;
-        }
-        catch (const cme::LockTimeoutError&)
-        {
-            // @expected a lock attempt that times out under contention is a normal outcome, not a failure: the loop moves on to the next domain.
-        }
-        nextDomainId = (nextDomainId % slot->numDomains) + 1;
-    }
-    slot->peer.reset();  // dtor leaves membership
-}
-
-void spawnPeer(PeerSlot_t& slot, cme::PeerId peerId, cme::Geometry* region,
-               cme::DomainId numDomains, cme::CoherencyMode coherency)
-{
-    slot.peerId = peerId;
-    slot.region = region;
-    slot.coherency = coherency;
-    slot.numDomains = numDomains;
-    slot.tid = std::thread{worker, &slot};
-}
+// A group's aggregator is re-elected only while its members keep asking, so the frozen worker here
+// idles longer than the harness default: this case watches the region rather than a thaw.
+constexpr std::uint32_t FrozenSleepMs = 50;
 
 }  // namespace
 
@@ -169,15 +104,17 @@ void runBody(harness::TestContext& ctx)
     writeAggregatorPeerId(*region, 0, 0, ctx.coherency());
     writeAggregatorPeerId(*region, 1, 1, ctx.coherency());
 
-    std::vector<PeerSlot_t> peers(MaxPeers);
+    std::vector<harness::PeerSlot_t> peers(MaxPeers);
     harness::log("starting %u peers (request-agg, groups=%u, domains=%u, backend=%s)", MaxPeers, Groups,
                  NumDomains, ctx.backendName());
     for (cme::PeerId i = 0; i < MaxPeers; ++i)
     {
-        spawnPeer(peers[i], i, &*region, NumDomains, ctx.coherency());
+        peers[i].idleMs = FrozenSleepMs;
+        harness::spawnPeerWorker(peers[i], i, *region, ctx.coherency(), NumDomains);
     }
 
     harness::sleepMs(1000);  // steady state
+    ctx.check(harness::allPeersJoined(peers, MaxPeers), "every worker joined its domains");
 
     // The duty goes to whichever member first finds it named on a peer that is not Active, and
     // these records are seeded before any peer exists, so both members of a group race for it.
@@ -193,7 +130,7 @@ void runBody(harness::TestContext& ctx)
     const cme::PeerId group0Survivor = groupPartner(group0Start);
     harness::log("freeze peer %u (group0 aggregator crashes; peer %u survives)", group0Start,
                  group0Survivor);
-    peers[group0Start].freezeReq.store(true);
+    peers[group0Start].frozen.store(true);
     // Poll until recovery re-elects: the record no longer names the frozen peer.
     const cme::PeerId reelected = pollAggregatorUntil(
         *region, 0, ctx.coherency(), RecoveryWaitMs, [group0Start](cme::PeerId aggregator)
@@ -211,18 +148,18 @@ void runBody(harness::TestContext& ctx)
 
     // Survivors resume progress once recovery settles. Poll for it -- a peer can stall
     // briefly mid-takeover, so a fixed window right after re-election flakes.
-    const std::uint64_t before = peers[group0Survivor].acqCount.load();
-    bool progressed = false;
-    for (std::uint32_t waited = 0; waited < RecoveryWaitMs && !progressed; waited += 100)
-    {
-        harness::sleepMs(100);
-        progressed = peers[group0Survivor].acqCount.load() > before;
-    }
+    const std::uint64_t before = peers[group0Survivor].acquires.load();
+    const bool progressed = harness::waitUntil(
+        [&peers, group0Survivor, before]
+        {
+            return peers[group0Survivor].acquires.load() > before;
+        },
+        RecoveryWaitMs, 100);
     ctx.checkf(progressed, "group0 survivor peer %u keeps acquiring", group0Survivor);
 
     // ── crash the re-elected aggregator too: whole group gone -> NoPeer ───
     harness::log("freeze peer %u (group0's last member crashes)", group0Survivor);
-    peers[group0Survivor].freezeReq.store(true);
+    peers[group0Survivor].frozen.store(true);
     const cme::PeerId finalAgg = pollAggregatorUntil(
         *region, 0, ctx.coherency(), RecoveryWaitMs, [](cme::PeerId aggregator)
         {
@@ -231,18 +168,8 @@ void runBody(harness::TestContext& ctx)
     ctx.check(finalAgg == cme::NoPeer,
               "group0 aggregator = NoPeer once the whole group is gone (holder fallback)");
 
-    // ── shutdown: worker loop re-checks stopReq even while frozen, so all join ──
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        peers[i].stopReq.store(true);
-    }
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        if (peers[i].tid.joinable())
-        {
-            peers[i].tid.join();
-        }
-    }
+    // ── shutdown: the worker loop re-checks stop even while frozen, so all join ──
+    harness::joinPeerWorkers(peers, MaxPeers);
     harness::log("shutdown");
 }
 

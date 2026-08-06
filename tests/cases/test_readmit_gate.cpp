@@ -25,13 +25,11 @@
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
-#include "util/coherency.hpp"
 
 namespace test
 {
@@ -48,18 +46,14 @@ void runBody(harness::TestContext& ctx)
 {
     using Status = cme::Geometry::Member_t::Status;
 
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
-
     constexpr cme::PeerId MaxPeers = 4;   // every slot filled below
     constexpr cme::DomainId Ceiling = 3;  // control + 2 data (unused; just room)
 
     std::optional<cme::Geometry> region;
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
 
-    std::printf("readmit gate: %u peers (%s, backend=%s)\n", MaxPeers, stratSuffix,
-                ctx.backendName());
+    std::printf("readmit gate: %u peers (%s, backend=%s)\n",
+                MaxPeers, ctx.strategySuffix(), ctx.backendName());
 
     // Fill every slot: no None remains anywhere.
     std::array<std::unique_ptr<cme::Peer>, MaxPeers> peers{};
@@ -72,7 +66,7 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId Dead = MaxPeers - 1;
     auto deadStatusIs = [&](Status status)
     {
-        return cme::coherency::get(region->getMemberSlot(Dead), ctx.coherency()).hasStatus(status);
+        return harness::hasMemberStatus(*region, Dead, status, ctx.coherency());
     };
 
     ctx.check(deadStatusIs(Status::Active), "dead slot Active before freeze");

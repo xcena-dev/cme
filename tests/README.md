@@ -41,11 +41,14 @@ A case registered with all four strategies appears four times per backend.
 | Primitives | `test_region_smoke.cpp` | `region_smoke` (shm) | Memory + formatRegion + `Memory::header()`; no Peer, no policy |
 | Primitives | `test_region_reject.cpp` | `region_reject` (shm) | The rejection side: cleared magic, unsupported version, out-of-range dims, area past the mapping. `Session::open` throws, `Inspector::readHeader` returns nullopt, and an intact region is still accepted |
 | Primitives | `test_memory_reject.cpp` | `memory_reject` (shm) | The backends' refusals: malformed URIs, an unknown scheme, a dax offset off its PMD boundary, shm names that are empty, too long, absent or unsized, an empty file, and sizes beyond the machine. Asserted by message, since all of them are `FormatError` |
+| Primitives | `test_file_presized.cpp` | `file_presized` (shm) | `FileMemory`'s creator sizing rule: a fresh file is grown to the mapping, a pre-sized one is mapped untouched. The pre-sized file is a memfd sealed against shrinking, which is how a WORM mount refuses the second truncate |
 | Public API | `test_shared_smoke.cpp` | `shared_smoke` | `Session::format/open`, lock + Guard RAII, tryLock, withLock, getDomainNames, re-format idempotency |
 | Public API | `test_shared_session.cpp` | `shared_session` x4 strategies | One session shared by N threads of one process still excludes, which a per-peer token does not cover alone |
 | Public API | `test_shared_lifecycle.cpp` | `shared_lifecycle` (request) | SharedSession's exit side: leaveDomain leaves the domain standing, rejoin reuses the tier, deleteDomain removes the name. Also the `OpenOpts_t` overload, Guard move, move assignment, and `cme::flush` |
 | Public API | `test_api_contract.cpp` | `api_contract` (request) | Declared contracts no scenario reaches: move assignment on `Session`, into an empty `Guard` and over a live one, moving a `Peer` while its poll thread holds a reference into its state, and `makeSuccessorPolicy` reporting back the kind it was asked for |
 | Public API | `test_tiered_lock.cpp` | `tiered` x4 strategies | Both tiers together: N sessions x T threads, inter-node ownership over intra-node mutex |
+| Exclusion | `test_shadow_authority.cpp` | `shadow_authority` (request) | The group shadow is a cost filter and the truth line decides: a shadow forged to name the waiter must not hand it the domain, and the same acquire must succeed once the truth agrees |
+| Exclusion | `test_coherency_modes.cpp` | `coherency_modes` (shm, request) | One handoff under each of `CacheCoherent`, `Uncached` and `Flush`, with the mode named by the case rather than taken from the backend. The only case that runs the Flush barrier path on a machine with no device |
 | Exclusion | `test_mutual_exclusion.cpp` | `mutex` x4 strategies | The core contract. N peers non-atomically RMW one counter in the CS; a second holder loses an update and the total falls short |
 | Exclusion | `test_fairness_smoke.cpp` | `fairness_smoke` | ORDER and REQUEST round-trip at two sizes; no timeout, per-peer spread within bound |
 | Exclusion | `test_fairness.cpp` | `fairness_order_sym`, `fairness_request_sym` | N x T x D contended workload; max-min per-peer spread within `--bound * mean` |
@@ -53,8 +56,10 @@ A case registered with all four strategies appears four times per backend.
 | Admission | `test_admission_stress.cpp` | `admission_stress` | The same protocol over many rounds behind a spin barrier, exact-fit and over-subscribed. The only lock-free multi-writer race in cme |
 | Admission | `test_readmit_gate.cpp` | `readmit_gate` (request) | C1: a dead peer's slot is re-claimable only after recovery marks it None |
 | Registry | `test_domain_lifecycle.cpp` | `domain_lifecycle` | create/delete over the control domain: duplicate, ceiling, delete, slot reuse, foreign participant, unknown name |
+| Registry | `test_domain_incarnation.cpp` | `domain_incarnation` (request) | A reused domain slot is a new incarnation: `generation` rises, `epoch` is not reset, the old name resolves to nothing, and a peer holding the old view is refused until it re-joins |
 | Registry | `test_create_race.cpp` | `create_race` | N processes createDomain at once; the control lock serialises the registry, so none is lost |
 | Registry | `test_participation.cpp` | `participation` | Opt-in participation: join, leave, rejoin, sole-participant leave refused, unknown name |
+| Admission | `test_slot_inherit.cpp` | `slot_inherit` (request) | A member slot's next occupant inherits no participation from the peer that left cleanly. `readmit_gate` covers the dead-peer route to the same bits |
 | Recovery | `test_recovery.cpp` | `recovery` x4 strategies | Scripted timeline: freeze, thaw, leave, rejoin, multi-freeze, 10 s churn |
 | Recovery | `test_recovery_orphan.cpp` | `recovery_orphan` x4 strategies | The orphan-free path: a sole participant crashes, and the participation scrub unblocks delete |
 | Recovery | `test_recovery_resume.cpp` | `recovery_resume` x4 strategies | A peer stranded in Recovering by an RA that died mid-recovery is resumed to None |

@@ -18,17 +18,15 @@
 #include <unistd.h>
 
 #include <atomic>
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <thread>
-#include <vector>
 
 #include "cme/shared.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
@@ -405,30 +403,30 @@ void hammerRead(HammerState_t& state, std::int32_t samples) noexcept
 void testHammerU64(harness::TestContext& ctx)
 {
     std::printf("== Field_t<u64> multi-writer / multi-reader hammer\n");
-    constexpr std::int32_t Writers = 4;
-    constexpr std::int32_t Readers = 4;
+    constexpr std::uint32_t Writers = 4;
+    constexpr std::uint32_t Readers = 4;
     constexpr std::int32_t SamplesPerReader = 250'000;
 
     HammerState_t state{};
     state.slot = HammerValues[0];
 
-    std::vector<std::thread> threads;
-    threads.reserve(static_cast<std::size_t>(Writers) + static_cast<std::size_t>(Readers));
-    for (std::int32_t writer = 0; writer < Writers; ++writer)
-    {
-        threads.emplace_back(hammerWrite, std::ref(state), writer);
-    }
-    for (std::int32_t reader = 0; reader < Readers; ++reader)
-    {
-        threads.emplace_back(hammerRead, std::ref(state), SamplesPerReader);
-    }
+    // Writers and readers are one group: the stop flag below ends both, so waiting for one
+    // without the other says nothing.
+    harness::ThreadGroup hammers;
+    hammers.spawn(Writers,
+                  [&state](std::uint32_t writer)
+                  {
+                      hammerWrite(state, static_cast<std::int32_t>(writer));
+                  });
+    hammers.spawn(Readers,
+                  [&state](std::uint32_t)
+                  {
+                      hammerRead(state, SamplesPerReader);
+                  });
     // give readers time to start, then stop
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    harness::sleepMs(50);
     state.stop.store(true, std::memory_order_relaxed);
-    for (auto& thread : threads)
-    {
-        thread.join();
-    }
+    hammers.join();
 
     char buf[96];
     std::snprintf(buf, sizeof(buf), "no torn samples (torn=%" PRIu64 ")", state.torn.load());

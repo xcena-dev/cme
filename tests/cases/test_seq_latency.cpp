@@ -32,9 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <memory>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -44,10 +42,8 @@
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
-#include "observe/latency.hpp"  // trace::writeJsonl (no-op unless CME_LATENCY)
 #include "test_context.hpp"
 #include "test_options.hpp"
-#include "util/time.hpp"
 
 namespace test
 {
@@ -171,7 +167,7 @@ std::vector<std::unique_ptr<cme::Peer>> buildPeers(const Opts_t& opt, cme::Geome
 
 // Hands exactly one lock request at a time to a dedicated acquire thread per peer, so the
 // trace splits into per-peer lanes instead of collapsing to one. Store order and memory
-// order below are load-bearing -- see spawnAcquireThreads/oneAcquire.
+// order below are load-bearing -- see runAcquireLane/oneAcquire.
 struct Baton_t
 {
     std::atomic<int> turn{-1};  // peer id whose turn it is (-1 = idle)
@@ -220,20 +216,6 @@ void runAcquireLane(Baton_t& baton, cme::Peer* self, cme::DomainId domain, cme::
         }
         serveOneTurn(baton, self, domain);
     }
-}
-
-// One thread per peer, parked on its own baton slot until told to acquire @domain.
-std::vector<std::thread> spawnAcquireThreads(std::vector<std::unique_ptr<cme::Peer>>& peers,
-                                             cme::DomainId domain, Baton_t& baton)
-{
-    std::vector<std::thread> acq;
-    acq.reserve(peers.size());
-    for (std::size_t i = 0; i < peers.size(); ++i)
-    {
-        const auto pid = static_cast<cme::PeerId>(i);
-        acq.emplace_back(runAcquireLane, std::ref(baton), peers[i].get(), domain, pid);
-    }
-    return acq;
 }
 
 // Mutable state threaded through the measured loop: current holder + latency samples.
@@ -296,22 +278,6 @@ void runLoop(const Opts_t& opt, Baton_t& baton, DriveState_t& state)
     {
         oneAcquire(opt, baton, state, rng, true);
     }
-}
-
-// --trace-jsonl: dump the CME_LATENCY span trace (no-op unless built CME_LATENCY).
-// Sample the TSC frequency over a short window so the plotter can render sampleNs.
-void dumpTraceJsonl(const char* path)
-{
-    const auto startCycles = cme::time::readTimestampCounter();
-    const auto startWall = std::chrono::steady_clock::now();
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
-    const auto endCycles = cme::time::readTimestampCounter();
-    const auto endWall = std::chrono::steady_clock::now();
-    const double winNs = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(endWall - startWall).count());
-    const double ghz = winNs > 0 ? static_cast<double>(endCycles - startCycles) / winNs : 0.0;
-    cme::trace::writeJsonl(path, ghz);
-    std::printf("trace-jsonl -> %s\n", path);
 }
 
 void report(const char* tag, std::vector<std::uint32_t>& samples)
@@ -388,21 +354,25 @@ void runBody(harness::TestContext& ctx)
     const std::uint32_t dataDomains = 1;
 
     Baton_t baton;
-    std::vector<std::thread> acq = spawnAcquireThreads(peers, domainId, baton);
+    // One thread per peer, each parked on its own baton slot. Joined after the drive loop below,
+    // since that loop is what hands them the turns they are waiting for.
+    harness::ThreadGroup acq;
+    acq.spawn(static_cast<std::uint32_t>(peers.size()),
+              [&baton, &peers, domainId](std::uint32_t pid)
+              {
+                  runAcquireLane(baton, peers[pid].get(), domainId, pid);
+              });
 
     DriveState_t state;
     runLoop(opt, baton, state);
 
     baton.stopThreads.store(true, std::memory_order_release);
-    for (auto& thread : acq)
-    {
-        thread.join();
-    }
+    acq.join();
     peers.clear();  // stop poll threads before summarising (their span buffers flush on exit)
 
     if (opt.traceJsonl != nullptr)
     {
-        dumpTraceJsonl(opt.traceJsonl);
+        harness::dumpLatencyTrace(opt.traceJsonl);
     }
 
     printReport(opt, dataDomains, state, ctx.backendName());

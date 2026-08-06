@@ -54,13 +54,7 @@ constexpr std::uint32_t CountCeiling = 64;
 
 // A short format timeout, so the unformatted case does not spend the default five seconds
 // waiting for a formatter that will never come.
-cme::Session::OpenOpts_t joinOpts(cme::CoherencyMode coherency)
-{
-    cme::Session::OpenOpts_t opts;
-    opts.coherency = coherency;
-    opts.formatTimeout = std::chrono::milliseconds{100};
-    return opts;
-}
+constexpr auto JoinTimeout = std::chrono::milliseconds{100};
 
 // Re-format, then overwrite the header line with @mutate applied to it. Returns nothing: what
 // the injection did is asserted through the two readers, not through this.
@@ -93,14 +87,11 @@ void runBody(harness::TestContext& ctx)
     const std::string& uri = ctx.uri();
     const auto coherency = ctx.coherency();
 
-    cme::Session::FormatOpts_t fmtOpts;
-    fmtOpts.maxDomains = FormatDomains;
-    fmtOpts.maxPeers = FormatPeers;
-    fmtOpts.strategy = ctx.strategy();
+    const auto fmtOpts = harness::makeFormatOpts(FormatDomains, FormatPeers, ctx.strategy());
 
-    const auto openRegion = [&uri, coherency]()
+    const auto openRegion = [&ctx]()
     {
-        auto session = cme::Session::open(uri, joinOpts(coherency));
+        auto session = harness::openSession(ctx, JoinTimeout);
         (void)session.getDomainNames();
     };
 

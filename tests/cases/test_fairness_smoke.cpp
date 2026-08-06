@@ -15,7 +15,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -23,6 +22,7 @@
 #include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -124,18 +124,13 @@ void runOne(harness::TestContext& ctx, const Scenario_t& scenario)
     std::atomic<std::uint32_t> atStart{0};
     std::atomic<std::uint32_t> atEnd{0};
     std::vector<WorkerResult_t> results(numPeers);
-    std::vector<std::thread> threads;
-    threads.reserve(numPeers);
 
     const WorkerContext_t shared{ctx, region, atStart, atEnd, results, numPeers, scenario.iterPerPeer};
-    for (std::uint32_t pid = 0; pid < numPeers; ++pid)
-    {
-        threads.emplace_back(runWorker, std::cref(shared), pid);
-    }
-    for (auto& thread : threads)
-    {
-        thread.join();
-    }
+    harness::runThreads(numPeers,
+                        [&shared](std::uint32_t pid)
+                        {
+                            runWorker(shared, pid);
+                        });
 
     std::uint64_t total = 0;
     std::uint64_t maxv = 0;

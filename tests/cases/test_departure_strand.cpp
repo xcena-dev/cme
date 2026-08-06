@@ -23,10 +23,10 @@
 #include <thread>
 
 #include "args.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
 #include "util/time.hpp"
@@ -48,15 +48,12 @@ void runBody(harness::TestContext& ctx)
 {
     using Status = cme::Geometry::Member_t::Status;
 
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
     const int iters = static_cast<int>(harness::argU64("--iters", DefaultIters));
 
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    cme::Geometry region = ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts);
+    cme::Geometry region = harness::createRegion(ctx, Ceiling, MaxPeers);
 
     std::printf("departure strand: %d forced grants at departure (%s, backend=%s)\n", iters,
-                stratSuffix, ctx.backendName());
+                ctx.strategySuffix(), ctx.backendName());
 
     auto keeper = std::make_unique<cme::Peer>(region, Keeper, ctx.coherency());
     const cme::DomainId domainId = keeper->createDomain("churn");

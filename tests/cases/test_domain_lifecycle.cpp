@@ -27,30 +27,12 @@ namespace test
 namespace
 {
 
-bool hasName(const std::vector<std::string>& names, const std::string& wanted)
-{
-    for (const auto& name : names)
-    {
-        if (name == wanted)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 void runBody(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
-
     // Ceiling = control(0) + 3 data slots.
-    cme::Session::FormatOpts_t formatOpts;
-    formatOpts.maxDomains = 4;
-    formatOpts.maxPeers = 4;
-    formatOpts.strategy = cme::Strategy::Request;
-    cme::Session::format(uri, formatOpts);
+    harness::formatSession(ctx, 4, 4);
 
-    auto owner = cme::Session::open(uri);  // peer 0, control genesis holder
+    auto owner = harness::openSession(ctx);  // peer 0, control genesis holder
 
     // ── create makes a name lockable (opt-in: join before lock) ───
     owner.createDomain("inv");
@@ -62,7 +44,7 @@ void runBody(harness::TestContext& ctx)
             return;
         }
     }
-    if (!ctx.check(hasName(owner.getDomainNames(), "inv"), "getDomainNames lists inv"))
+    if (!ctx.check(harness::listsDomain(owner, "inv"), "getDomainNames lists inv"))
     {
         return;
     }
@@ -103,7 +85,7 @@ void runBody(harness::TestContext& ctx)
     // deleteDomain acquires the domain lock, so the deleter must participate.
     owner.joinDomain("jobs");
     owner.deleteDomain("jobs");
-    if (!ctx.check(!hasName(owner.getDomainNames(), "jobs"),
+    if (!ctx.check(!harness::listsDomain(owner, "jobs"),
                    "deleted name gone from getDomainNames"))
     {
         return;
@@ -125,7 +107,7 @@ void runBody(harness::TestContext& ctx)
     // ── freed entry is reusable ───────────────────────────────────
     owner.createDomain("audit");  // reuses the entry "jobs" vacated
     owner.joinDomain("audit");
-    if (!ctx.check(hasName(owner.getDomainNames(), "audit"), "recreated name present"))
+    if (!ctx.check(harness::listsDomain(owner, "audit"), "recreated name present"))
     {
         return;
     }
@@ -138,8 +120,8 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── delete refused while another peer participates ────────────
-    auto joiner = cme::Session::open(uri);  // peer 1
-    joiner.joinDomain("inv");               // opt-in: joiner now a participant of inv
+    auto joiner = harness::openSession(ctx);  // peer 1
+    joiner.joinDomain("inv");                 // opt-in: joiner now a participant of inv
     const bool deleteWithParticipantRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
@@ -154,7 +136,7 @@ void runBody(harness::TestContext& ctx)
     // ── after the other peer leaves, sole participant can delete ──
     joiner.leaveDomain("inv");
     owner.deleteDomain("inv");  // owner now sole participant
-    if (!ctx.check(!hasName(owner.getDomainNames(), "inv"),
+    if (!ctx.check(!harness::listsDomain(owner, "inv"),
                    "inv deleted after the other participant left"))
     {
         return;

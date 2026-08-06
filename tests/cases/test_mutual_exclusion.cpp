@@ -17,10 +17,8 @@
 #include <cstdlib>
 #include <exception>
 #include <optional>
-#include <thread>
 #include <vector>
 
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -44,51 +42,41 @@ std::uint64_t g_counter = 0;
 
 void runBody(harness::TestContext& ctx)
 {
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
     constexpr cme::DomainId DomainCeiling = 2;  // control(0) + 1 data domain
 
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
     std::optional<cme::Geometry> region;
-    region.emplace(ctx.memory().createRegion(DomainCeiling, NumPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, DomainCeiling, NumPeers));
     harness::seedDataDomains(*region, 1, ctx.coherency());  // creates data domain id 1
 
     std::vector<std::uint32_t> done(NumPeers, 0);
-    std::vector<std::thread> threads;
     std::atomic<int> ctorFailures{0};
 
-    for (cme::PeerId pid = 0; pid < NumPeers; ++pid)
-    {
-        threads.emplace_back(
-            [&, pid]()
+    harness::runThreads(
+        NumPeers,
+        [&](cme::PeerId pid)
+        {
+            try
             {
-                try
+                cme::Peer peer{*region, pid, ctx.coherency()};
+                peer.joinDomain(SharedDomain);
+                for (std::uint32_t i = 0; i < ItersPerPeer; ++i)
                 {
-                    cme::Peer peer{*region, pid, ctx.coherency()};
-                    peer.joinDomain(SharedDomain);
-                    for (std::uint32_t i = 0; i < ItersPerPeer; ++i)
-                    {
-                        auto guard = peer.lock(SharedDomain);  // exclusive
-                        // Critical section: non-atomic RMW, serialized only by the lock.
-                        ++g_counter;
-                        ++done[pid];
-                    }
+                    auto guard = peer.lock(SharedDomain);  // exclusive
+                    // Critical section: non-atomic RMW, serialized only by the lock.
+                    ++g_counter;
+                    ++done[pid];
                 }
-                catch (const std::exception& e)
-                {
-                    std::fprintf(stderr, "peer %u: %s\n", pid, e.what());
-                    ctorFailures.fetch_add(1);
-                }
-            });
-    }
-    for (auto& thread : threads)
-    {
-        thread.join();
-    }
+            }
+            catch (const std::exception& e)
+            {
+                std::fprintf(stderr, "peer %u: %s\n", pid, e.what());
+                ctorFailures.fetch_add(1);
+            }
+        });
 
     const std::uint64_t expected = static_cast<std::uint64_t>(NumPeers) * ItersPerPeer;
     std::printf("strategy=%s peers=%u iters=%u counter=%" PRIu64 " expected=%" PRIu64 "\n",
-                stratSuffix, NumPeers, ItersPerPeer, g_counter, expected);
+                ctx.strategySuffix(), NumPeers, ItersPerPeer, g_counter, expected);
 
     ctx.check(ctorFailures.load() == 0, "every peer joined + ran without exception");
     ctx.check(g_counter == expected, "mutual exclusion: no lost update (counter == N*M)");

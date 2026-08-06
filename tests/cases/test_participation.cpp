@@ -16,7 +16,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <string>
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
@@ -30,19 +29,14 @@ namespace
 
 void runBody(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
+    // 3 = control(0) + "inv" + "orders".
+    harness::formatSession(ctx, 3, 4);
 
-    cme::Session::FormatOpts_t formatOpts;
-    formatOpts.maxDomains = 3;  // control(0) + "inv" + "orders"
-    formatOpts.maxPeers = 4;
-    formatOpts.strategy = cme::Strategy::Request;
-    cme::Session::format(uri, formatOpts);
-
-    auto owner = cme::Session::open(uri);
+    auto owner = harness::openSession(ctx);
     // The owner (peer 0, control genesis holder) creates the data domains.
     owner.createDomain("inv");
     owner.createDomain("orders");
-    auto joiner = cme::Session::open(uri);
+    auto joiner = harness::openSession(ctx);
 
     // ── opt-in: a domain is not joined by default ─────────────────
     // The joiner has not joined "inv" -> locking it is refused.

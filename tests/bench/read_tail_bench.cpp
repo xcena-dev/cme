@@ -44,6 +44,7 @@
 #include <vector>
 
 #include "args.hpp"
+#include "helper_util.hpp"
 #include "test_memory.hpp"
 
 namespace
@@ -292,24 +293,27 @@ int main(int argc, char** argv)
     // Untimed spin readers, approximating several waiters on one controller queue. These
     // are same-host threads, so this is queue pressure rather than true cross-host
     // contention.
-    std::vector<std::thread> pollerThreads;
-    pollerThreads.reserve(options.pollers);
+    // Touch every poller line from this thread first: the fault belongs to the setup, not to the
+    // loop the pollers are about to run.
     for (std::uint32_t index = 0; index < options.pollers; ++index)
     {
-        std::uint8_t* const pollerLine = timedLine + (index + 1) * options.stride;
-        static_cast<void>(*static_cast<volatile std::uint8_t*>(pollerLine));
-        pollerThreads.emplace_back(
-            [&stop, pollerLine]
-            {
-                std::uint64_t sink = 0;
-                while (!stop.load(std::memory_order_relaxed))
-                {
-                    const __m512i loaded = _mm512_loadu_si512(static_cast<const void*>(pollerLine));
-                    sink += static_cast<std::uint64_t>(_mm512_reduce_add_epi64(loaded));
-                }
-                static_cast<void>(sink);
-            });
+        static_cast<void>(*static_cast<volatile std::uint8_t*>(timedLine + (index + 1) * options.stride));
     }
+
+    harness::ThreadGroup pollerThreads;
+    pollerThreads.spawn(
+        options.pollers,
+        [&stop, timedLine, &options](std::uint32_t index)
+        {
+            std::uint8_t* const pollerLine = timedLine + (index + 1) * options.stride;
+            std::uint64_t sink = 0;
+            while (!stop.load(std::memory_order_relaxed))
+            {
+                const __m512i loaded = _mm512_loadu_si512(static_cast<const void*>(pollerLine));
+                sink += static_cast<std::uint64_t>(_mm512_reduce_add_epi64(loaded));
+            }
+            static_cast<void>(sink);
+        });
 
     std::vector<std::uint32_t> cycles;
     cycles.reserve(options.iterations);
@@ -343,10 +347,7 @@ int main(int argc, char** argv)
     {
         writer.join();
     }
-    for (std::thread& poller : pollerThreads)
-    {
-        poller.join();
-    }
+    pollerThreads.join();
 
     reportResults(options, *mapping, tscGhz, cycles, sink);
     return 0;

@@ -27,7 +27,6 @@
 #include <optional>
 
 #include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -49,20 +48,16 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
-
     // Slot ceiling = control(0) + 3 data slots; 5 peer slots (4 active here).
     constexpr cme::DomainId DomainCeiling = 4;
     constexpr cme::PeerId MaxPeers = 5;
     constexpr cme::PeerId ActivePeers = 4;
 
     std::optional<cme::Geometry> region;
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, DomainCeiling, MaxPeers));
 
     harness::log("starting %u peers (%s, ceiling=%u, max_peers=%u, backend=%s)", ActivePeers,
-                 stratSuffix, DomainCeiling, MaxPeers, ctx.backendName());
+                 ctx.strategySuffix(), DomainCeiling, MaxPeers, ctx.backendName());
 
     std::array<std::unique_ptr<cme::Peer>, MaxPeers> peers{};
     for (cme::PeerId i = 0; i < ActivePeers; ++i)

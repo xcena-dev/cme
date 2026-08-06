@@ -8,20 +8,24 @@ The library reads no configuration and takes no flags; the harness is where both
 
 | | |
 |---|---|
-| [`test_options.hpp`](test_options.hpp) | The flags one run was given: `--backend shm\|dax\|uc`, `--slot N`, `--strategy`, `--config`, `--cleanup`. ctest passes them one registration at a time. |
+| [`test_options.hpp`](test_options.hpp) | The flags one run was given: which medium, which slot on it, which successor policy, where the config file is, and whether this invocation is the cleanup pass rather than the run. ctest passes them one registration at a time. |
 | [`config_reader.hpp`](config_reader.hpp) | `config.yaml`, read once and checked against the machine: which devdax node this host has, where the uncacheable mount is. |
 | [`test_memory.hpp`](test_memory.hpp) | One named area on the medium, owned by one run. Names it, starts it clean, hands out a URI or a mapped region, removes it afterwards. |
-| [`test_context.hpp`](test_context.hpp) | The three above in the one order that works, plus the verdict and `runCase`. Also `SharedBuffer<T>`, a named shm segment for a forked child to report through. |
-| [`helper.hpp`](helper.hpp) | What a case wants whatever medium it runs on: randomness, `waitUntil`, `percentile`, `threw<T>`, `seedDataDomains`. |
+| [`test_context.hpp`](test_context.hpp) | The three above in the one order that works, plus the verdict a case records against and the entry point that runs one. Also a named shm segment for a forked child to report through. |
+| [`helper.hpp`](helper.hpp) | The three below together, so a case includes one name and gets all of `harness`. |
+| [`helper_util.hpp`](helper_util.hpp) | What a case needs that has nothing to do with cme: randomness, a timestamped log line, waiting for a predicate to hold and holding one across a window, running a fixed set of threads to completion, catching a single exception type, and one summary statistic. No cme header, no `TestContext`. |
+| [`helper_process.hpp`](helper_process.hpp) | Forking a case into several processes over one region, and collecting them afterwards. POSIX only. |
+| [`helper_cme.hpp`](helper_cme.hpp) | The library calls every case makes the same way: formatting a region, opening one at each tier, seeding it with domains, asking it what it holds, and reading a member slot or a domain record past the public API. |
 | [`args.hpp`](args.hpp) | `--flag value` lookup over `argv`, with no dependency on libcme. |
 
 The order in `TestContext` is the point of it.
 Flags come before config, config before medium, medium before region, and the verdict after everything.
 Member declaration order is what enforces that, so a run cannot read a fact that is not settled yet.
 
-`args.hpp` sits apart from `helper.hpp` for one reason.
+The helper split follows the same rule, and `args.hpp` is why the rule exists.
 The standalone probes in `bench/` need argument parsing and must not link libcme, because they measure the medium with `mmap` and intrinsics and pulling in `cme/shared.hpp` would defeat what they exist to measure.
-So `args.hpp` holds the part that needs nothing, and `helper.hpp` includes it and adds the part that needs the library.
+So each of these headers is separated by what it drags in rather than by what it is about: `args.hpp` and `helper_util.hpp` need nothing, `helper_process.hpp` needs POSIX, and `helper_cme.hpp` needs the library.
+A file that includes `helper.hpp` takes all three, which is what a case wants and what a probe must not do.
 
 ## What the scripts source
 

@@ -18,12 +18,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <string>
-#include <thread>
-#include <vector>
 
-#include "cme/shared.hpp"
 #include "cme/shared_session.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -44,33 +41,25 @@ std::uint32_t hammer(cme::SharedSession& shared)
 {
     g_counter = 0;
     std::atomic<std::uint32_t> failures{0};
-    std::vector<std::thread> threads;
-    threads.reserve(Threads);
 
-    for (std::uint32_t thread = 0; thread < Threads; ++thread)
-    {
-        threads.emplace_back(
-            [&shared, &failures]()
+    harness::runThreads(
+        Threads,
+        [&shared, &failures](std::uint32_t)
+        {
+            try
             {
-                try
+                for (std::uint32_t i = 0; i < ItersPerThread; ++i)
                 {
-                    for (std::uint32_t i = 0; i < ItersPerThread; ++i)
-                    {
-                        const auto guard = shared.lock(Domain);
-                        ++g_counter;
-                    }
+                    const auto guard = shared.lock(Domain);
+                    ++g_counter;
                 }
-                catch (const std::exception& e)
-                {
-                    std::fprintf(stderr, "thread: %s\n", e.what());
-                    failures.fetch_add(1);
-                }
-            });
-    }
-    for (auto& thread : threads)
-    {
-        thread.join();
-    }
+            }
+            catch (const std::exception& e)
+            {
+                std::fprintf(stderr, "thread: %s\n", e.what());
+                failures.fetch_add(1);
+            }
+        });
     return failures.load();
 }
 
@@ -78,19 +67,13 @@ std::uint32_t hammer(cme::SharedSession& shared)
 
 void runBody(harness::TestContext& ctx)
 {
-    const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
-    const std::string& uri = ctx.uri();
 
-    cme::Session::FormatOpts_t fmtOpts;
-    fmtOpts.maxDomains = 2;  // control(0) + one data domain
-    fmtOpts.maxPeers = 4;
-    fmtOpts.strategy = strategy;
-
-    cme::Session::format(uri, fmtOpts);
+    // 2 = control(0) + one data domain.
+    harness::formatSession(ctx, 2, 4);
 
     // One session for the whole process; every thread below goes through it.
-    auto shared = cme::SharedSession::open(uri);
+    auto shared = harness::openSharedSession(ctx);
     shared.createDomain(Domain);  // creator participates, so lock() is legal straight away
 
     const std::uint64_t expected = static_cast<std::uint64_t>(Threads) * ItersPerThread;

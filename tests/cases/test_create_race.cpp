@@ -11,15 +11,13 @@
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 
 #include "cme/shared.hpp"
+#include "helper.hpp"
 #include "test_context.hpp"
 
 namespace test
@@ -38,13 +36,7 @@ constexpr std::int32_t Failed = -1;
 
 void runBody(harness::TestContext& ctx)
 {
-    const std::string& uri = ctx.uri();
-
-    cme::Session::FormatOpts_t fopts;
-    fopts.maxDomains = MaxDomains;
-    fopts.maxPeers = Creators;
-    fopts.strategy = cme::Strategy::Request;
-    cme::Session::format(uri, fopts);
+    harness::formatSession(ctx, MaxDomains, Creators);
 
     // 0 = created ok, else failure
     const auto results = ctx.scratch<std::int32_t>("results", Creators);
@@ -55,37 +47,28 @@ void runBody(harness::TestContext& ctx)
     }
     results.fill(Unset);
 
-    for (std::uint32_t i = 0; i < Creators; ++i)
-    {
-        const pid_t pid = ::fork();
-        if (pid < 0)
-        {
-            std::perror("fork");
-            ctx.check(false, "fork failed");
-            return;
-        }
-        if (pid == 0)
+    const std::uint32_t spawned = harness::spawnChildren(
+        Creators,
+        [&ctx, &results](std::uint32_t index)
         {
             std::int32_t exitCode = Failed;
             try
             {
-                auto session = cme::Session::open(uri);
-                session.createDomain("dom" + std::to_string(i));
+                auto session = harness::openSession(ctx);
+                session.createDomain("dom" + std::to_string(index));
                 exitCode = 0;
             }
             catch (...)
             {
                 exitCode = Failed;
             }
-            results[i] = exitCode;
-            std::_Exit(0);
-        }
-    }
+            results[index] = exitCode;
+        });
 
-    for (std::uint32_t i = 0; i < Creators; ++i)
+    harness::reapChildren(spawned);
+    if (!ctx.check(spawned == Creators, "every creator forked"))
     {
-        int status = 0;
-        ::wait(&status);
+        return;
     }
 
     // Every creator succeeded.
@@ -100,7 +83,7 @@ void runBody(harness::TestContext& ctx)
     ctx.check(allOk, "every concurrent createDomain succeeded (control serialized, no loss)");
 
     // The region now lists all N distinct names in distinct slots.
-    auto session = cme::Session::open(uri);
+    auto session = harness::openSession(ctx);
     const auto domainNames = session.getDomainNames();
     ctx.check(domainNames.size() == Creators, "all N data domains present (distinct slots)");
     bool allNamesFound = true;

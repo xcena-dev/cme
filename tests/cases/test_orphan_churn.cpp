@@ -36,7 +36,6 @@
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -48,19 +47,12 @@ namespace test
 namespace
 {
 
-struct PeerSlot_t
+// The shared slot plus the two flags this case alone needs. Its worker is its own: a re-admit here
+// claims a fresh peer id rather than keeping one, which the shared loop does not do.
+struct ChurnSlot_t : harness::PeerSlot_t
 {
-    std::thread tid;
-    std::unique_ptr<cme::Peer> peerInstance;  // WORKER-THREAD-ONLY access
-    cme::Geometry* region{nullptr};
-    cme::PeerId peerId{0};
-    cme::CoherencyMode coherency{};
-    std::atomic<bool> ready{false};
-    std::atomic<bool> stop{false};
-    std::atomic<bool> freezeReq{false};  // churn raises; worker applies to its Peer
-    std::atomic<bool> paused{false};     // worker idles its op loop while quiescing
-    std::atomic<std::uint64_t> ops{0};
-    std::atomic<int> rc{0};
+    std::atomic<bool> ready{false};   // the worker has spawned, so churn may start on it
+    std::atomic<bool> paused{false};  // worker idles its op loop while quiescing
 };
 
 constexpr cme::PeerId Workers = 4;  // concurrent worker threads
@@ -74,7 +66,7 @@ constexpr cme::DomainId Ceiling = DataSlots + 1;
 // Each worker keeps one private data domain it solely participates in, churning
 // create/lock/delete on it. The churn thread's freezeReq flag (applied here)
 // crashes it; if it was recovered, its ops throw JoinError and it re-spawns.
-void worker(PeerSlot_t* peerSlot)
+void worker(ChurnSlot_t* peerSlot)
 {
     // Re-admit claims a FRESH slot (claimPeerSlot skips Recovering slots), modelling
     // a real service: a crashed peer's identity dies with it: the new incarnation is a
@@ -85,19 +77,19 @@ void worker(PeerSlot_t* peerSlot)
         {
             const cme::PeerId claimedId =
                 cme::admission::claimPeerSlot(*peerSlot->region, peerSlot->coherency);
-            peerSlot->peerInstance =
+            peerSlot->peer =
                 std::make_unique<cme::Peer>(*peerSlot->region, claimedId, peerSlot->coherency);
             return true;
         }
         catch (const std::exception& e)
         {
             harness::log("worker %u spawn threw: %s", peerSlot->peerId, e.what());
-            peerSlot->rc.store(1);
+            peerSlot->failed.store(true);
             return false;
         }
     };
 
-    // (peerInstance is worker-local: declared on the slot only so spawn() can set
+    // (peer is worker-local: declared on the slot only so spawn() can set
     // it, but ONLY this thread ever reads/writes it.)
     if (!spawn())
     {
@@ -113,8 +105,8 @@ void worker(PeerSlot_t* peerSlot)
 
     while (!peerSlot->stop.load(std::memory_order_acquire))
     {
-        peerSlot->peerInstance->setFreeze(peerSlot->freezeReq.load(std::memory_order_acquire));
-        if (peerSlot->freezeReq.load() || peerSlot->paused.load())
+        peerSlot->peer->setFreeze(peerSlot->frozen.load(std::memory_order_acquire));
+        if (peerSlot->frozen.load() || peerSlot->paused.load())
         {
             harness::sleepMs(20);
             continue;
@@ -122,7 +114,7 @@ void worker(PeerSlot_t* peerSlot)
         try
         {
             if (privateId != cme::NoDomain &&
-                peerSlot->peerInstance->resolveDomainName(privateName) != privateId)
+                peerSlot->peer->resolveDomainName(privateName) != privateId)
             {
                 privateId = cme::NoDomain;  // reclaimed while we were away
             }
@@ -130,18 +122,18 @@ void worker(PeerSlot_t* peerSlot)
             if (privateId == cme::NoDomain)
             {
                 privateName = "p" + std::to_string(peerSlot->peerId) + "_" + std::to_string(seq++);
-                privateId = peerSlot->peerInstance->createDomain(privateName);  // creator auto-joins
+                privateId = peerSlot->peer->createDomain(privateName);  // creator auto-joins
             }
             else if (rng() % 10u < 7u)
             {
-                auto guard = peerSlot->peerInstance->tryLock(privateId, std::chrono::milliseconds{2});
+                auto guard = peerSlot->peer->tryLock(privateId, std::chrono::milliseconds{2});
             }
             else
             {
-                peerSlot->peerInstance->deleteDomain(privateId);
+                peerSlot->peer->deleteDomain(privateId);
                 privateId = cme::NoDomain;
             }
-            peerSlot->ops.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
             // Think-time: without it the soak degenerates into a control-lock contention
             // storm rather than the moderate churn recovery is meant to see.
             harness::sleepMs(2);
@@ -149,24 +141,24 @@ void worker(PeerSlot_t* peerSlot)
         catch (const cme::JoinError&)
         {
             // Fenced (recovered) or not-joined: re-admit a fresh peer, like a
-            // real service. Only this thread touches peerInstance -> no race.
+            // real service. Only this thread touches peer -> no race.
             privateId = cme::NoDomain;
-            peerSlot->peerInstance.reset();
+            peerSlot->peer.reset();
             if (!spawn())
             {
                 return;
             }
-            peerSlot->ops.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
         }
         catch (const std::exception&)
         {
             // Expected churn race, usually a control-lock timeout. The domain may still
             // exist and be ours, so keep privateId -- forgetting it here would leak the
             // domain and spawn a second. The loop-top resync drops it if it truly vanished.
-            peerSlot->ops.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
         }
     }
-    peerSlot->peerInstance.reset();
+    peerSlot->peer.reset();
 }
 
 }  // namespace
@@ -175,23 +167,19 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    const cme::Strategy strategy = ctx.strategy();
-    const char* const stratSuffix = ctx.strategySuffix();
-
     std::optional<cme::Geometry> region;
-    const cme::Geometry::FormatOpts_t fmtOpts{strategy};
-    region.emplace(ctx.memory().createRegion(Ceiling, MaxPeers, fmtOpts));
+    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
 
     harness::log("orphan churn: %u workers, %u data slots (%s, backend=%s)", Workers, DataSlots,
-                 stratSuffix, ctx.backendName());
+                 ctx.strategySuffix(), ctx.backendName());
 
-    std::array<PeerSlot_t, Workers> peers{};
+    std::array<ChurnSlot_t, Workers> peers{};
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
         peers[i].peerId = i;
         peers[i].region = &*region;
         peers[i].coherency = ctx.coherency();
-        peers[i].tid = std::thread{worker, &peers[i]};
+        peers[i].runner = std::thread{worker, &peers[i]};
     }
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
@@ -214,13 +202,13 @@ void runBody(harness::TestContext& ctx)
         const auto target = pick(rng);
         if (frozen[target])
         {
-            peers[target].freezeReq.store(false);
+            peers[target].frozen.store(false);
             frozen[target] = false;
             --frozenCount;
         }
         else if (frozenCount + 2 < Workers)
         {
-            peers[target].freezeReq.store(true);
+            peers[target].frozen.store(true);
             frozen[target] = true;
             ++frozenCount;
         }
@@ -231,7 +219,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("thaw all + settle (recovery drains orphans, fenced peers re-admit)");
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
-        peers[i].freezeReq.store(false);
+        peers[i].frozen.store(false);
         peers[i].paused.store(true);
     }
     harness::sleepMs(5000);
@@ -261,16 +249,16 @@ void runBody(harness::TestContext& ctx)
     }
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
-        if (peers[i].tid.joinable())
+        if (peers[i].runner.joinable())
         {
-            peers[i].tid.join();
+            peers[i].runner.join();
         }
     }
 
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
-        ctx.check(peers[i].ops.load() > 0, "worker made forward progress");
-        ctx.check(peers[i].rc.load() == 0, "worker hit no unexpected fatal");
+        ctx.check(peers[i].acquires.load() > 0, "worker made forward progress");
+        ctx.check(!peers[i].failed.load(), "worker hit no unexpected fatal");
     }
     ctx.check(auditCreated >= DataSlots - Workers,
               "slots not leaked: fresh peer created >= (slots - workers) domains");
