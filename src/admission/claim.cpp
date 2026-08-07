@@ -20,6 +20,7 @@
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
+#include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
 #include "util/time.hpp"
@@ -170,10 +171,12 @@ PeerId claimPeerSlot(const Geometry& geometry, CoherencyMode mode)
     const std::uint64_t nonce = getRandomNonce();
 
     acquireLease(admissionControl, nonce, mode);
+    CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionBeforeCommit);
     try
     {
         const PeerId peerId = reserveMemberSlot(geometry, mode);
         growPeerScanBound(admissionControl, peerId, mode);
+        CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionAfterCommit);
         releaseLease(admissionControl, nonce, mode);
         return peerId;
     }

@@ -21,7 +21,7 @@ Reading order for a newcomer: `shared.cpp` for what a caller triggers, then `cor
 | `core/` | `types.hpp` for private identifier types, `domain_bitmap.hpp` for the packed domain-id set backing the participation and demand bitmaps. |
 | `admission/` | Peer-slot claim, on the `Session::open` path. A process takes a slot in the region before it can own anything. |
 | `memory/` | The mmap backends. `shm.cpp`, `dax.cpp`, and `file.cpp` each turn a URI into mapped bytes; `memory.cpp` picks between them. Layout interpretation is not here, it is in `core/layout/`. |
-| [`observe/`](observe/) | Instrumentation. Counters, stderr tracing, latency breakdown, and a read-only region inspector, each independently compiled in or out. |
+| [`observe/`](observe/) | Instrumentation. Counters, stderr tracing, latency breakdown, a read-only region inspector, and the test-only failpoint boundaries, each independently compiled in or out. Nothing here changes what a shipped build does. |
 | `serializers/` | `SharedSession`, which lets many threads of one process share a single `Session`. |
 | `util/` | Cross-cutting helpers: `coherency.hpp` for the cross-host visibility fences, `endian.hpp` for tear-free access to region-resident scalars, plus time and small utilities. |
 

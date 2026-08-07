@@ -344,6 +344,35 @@ void checkFlushNoOp(harness::TestContext& ctx)
     ctx.check(target == 0, "flush with no range leaves the target alone");
 }
 
+// ── participation is opt-in ────────────────────────────────────────
+// Only the creator of a domain gets participation for free; anyone else joins first. The rule is
+// stated in shared.hpp and nothing held it, which is how four failpoint cases came to lock a domain
+// they had never joined and read the refusal as the crash they were arming for.
+void checkParticipationRequired(harness::TestContext& ctx)
+{
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
+    auto owner = harness::makePeer(region, 0);
+    const cme::DomainId lane = owner.createDomain(Domain);
+
+    auto stranger = harness::makePeer(region, 1);  // never joins lane
+    const auto lockUnjoined = [&stranger, lane]
+    {
+        const auto guard = stranger.lock(lane);
+    };
+    ctx.check(harness::threw<cme::NotParticipatingError>(lockUnjoined),
+              "lock refuses a domain the peer never joined");
+
+    // tryLock refuses on the same guard. Asserted as "no guard" rather than as a type, because
+    // whether a non-participant is a timeout or an error is a contract question of its own.
+    ctx.check(!stranger.tryLock(lane, std::chrono::milliseconds{1}).has_value(),
+              "tryLock hands out no guard for a domain the peer never joined");
+
+    // And the rule is only about participation: joining makes the same call succeed.
+    stranger.joinDomain(lane);
+    ctx.check(stranger.tryLock(lane, std::chrono::milliseconds{1000}).has_value(),
+              "the same call succeeds once the peer has joined");
+}
+
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
@@ -354,6 +383,7 @@ void runBody(harness::TestContext& ctx)
     checkPeerArguments(ctx);
     checkMovedFromPeer(ctx);
     checkFlushNoOp(ctx);
+    checkParticipationRequired(ctx);
 }
 
 }  // namespace test

@@ -51,6 +51,7 @@ option(CME_STATS "Bump PeerDiag counters from emit() handlers" OFF)
 option(CME_PROFILE "Accumulate worker CPU, publish to the SWPC profile slot" OFF)
 option(CME_LOGGING "Emit stderr DBG trace lines from the ME core" OFF)
 option(CME_LATENCY "Latency breakdown and trace instrumentation" OFF)
+option(CME_FAILPOINT "Compile the test-only failpoint boundaries (see observe/failpoint.hpp)" OFF)
 
 # Line and branch coverage, for answering which code no case reaches. -O0 because
 # an optimised build attributes lines to whatever the inliner merged them into,
@@ -62,6 +63,23 @@ option(CME_COVERAGE "Instrument for gcov line/branch coverage (see note above)" 
 if(CME_COVERAGE)
     add_compile_options(-O0 -g --coverage -fprofile-update=atomic)
     add_link_options(--coverage)
+endif()
+
+# address, thread or none. The two are mutually exclusive in one binary, and they answer different
+# questions: address finds a leaked mapping or fd across repeated lifecycles, thread finds a race on
+# DRAM-side state. Neither sees FAM slot tearing -- that is a coherence question the sanitizers do
+# not model, so a clean run here says nothing about it.
+#
+# -O1 and -fno-omit-frame-pointer are what makes a report name a line rather than an address, and
+# -fno-optimize-sibling-calls keeps the frame that called it in the trace.
+set(CME_SANITIZE "none" CACHE STRING "Sanitizer to build with: none, address, thread")
+set_property(CACHE CME_SANITIZE PROPERTY STRINGS none address thread)
+if(NOT CME_SANITIZE STREQUAL "none")
+    if(CME_COVERAGE)
+        message(FATAL_ERROR "CME_SANITIZE and CME_COVERAGE instrument the same code differently; build them separately")
+    endif()
+    add_compile_options(-fsanitize=${CME_SANITIZE} -fno-omit-frame-pointer -fno-optimize-sibling-calls -O1 -g)
+    add_link_options(-fsanitize=${CME_SANITIZE})
 endif()
 
 # -march=native widens a 64B slot get/set to one AVX-512 transaction. With
@@ -110,6 +128,7 @@ set(CME_SOURCES
     src/observe/stats.cpp
     src/observe/logging.cpp
     src/observe/latency.cpp
+    src/observe/failpoint.cpp
 )
 
 add_library(cme STATIC ${CME_SOURCES})
@@ -131,6 +150,7 @@ target_compile_definitions(cme
     PUBLIC
         $<$<BOOL:${CME_PROFILE}>:CME_PROFILE>
         $<$<BOOL:${CME_LATENCY}>:CME_LATENCY>
+        $<$<BOOL:${CME_FAILPOINT}>:CME_FAILPOINT>
 )
 
 target_compile_options(cme PRIVATE
@@ -214,6 +234,8 @@ else()
                    "dax and uc cases will report skipped")
 endif()
 message(STATUS "  observe     : stats=${CME_STATS} profile=${CME_PROFILE} logging=${CME_LOGGING} latency=${CME_LATENCY}")
+message(STATUS "  sanitize    : ${CME_SANITIZE}")
+message(STATUS "  failpoint   : ${CME_FAILPOINT}")
 if(CME_COVERAGE)
     message(STATUS "  coverage    : ON (-O0; reachability, not timing)")
 endif()

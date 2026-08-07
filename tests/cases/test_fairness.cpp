@@ -249,7 +249,7 @@ struct PeerResult_t
     // Per-acquire wall latency (lock() call -> Guard returned), elapsedNs. Bench-level
     // measurement spanning fast-path AND wait-path, complementing telemetry
     // waitTime (wait-phase only). Filled by workers under latMutex.
-    std::vector<std::uint32_t> acqLatNs;
+    std::vector<std::uint64_t> acqLatNs;
     std::mutex latMutex;
 };
 
@@ -280,7 +280,7 @@ void awaitBarrier(std::atomic<std::uint32_t>& counter, std::uint32_t participant
 // touches neither the latency vector nor the fairness counter.
 struct Tally_t
 {
-    std::vector<std::uint32_t>& localLat;
+    std::vector<std::uint64_t>& localLat;
     PeerResult_t& result;
     bool record;
 };
@@ -296,10 +296,7 @@ void lockOnce(cme::Peer& peer, cme::DomainId domainId, const Opts_t& opt, std::u
         const auto held = std::chrono::steady_clock::now();
         if (tally.record)
         {
-            const auto elapsedNs =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(held - began).count();
-            tally.localLat.push_back(
-                static_cast<std::uint32_t>(std::min<std::int64_t>(elapsedNs, UINT32_MAX)));
+            tally.localLat.push_back(harness::nsBetween(began, held));
             tally.result.measuredAcq.fetch_add(1, std::memory_order_relaxed);
         }
         csWork(spinCount);
@@ -375,7 +372,7 @@ void runWorker(const WorkerContext_t& shared)
     {
         awaitBarrier(*shared.arg.startBarrier, shared.workerCount);
 
-        std::vector<std::uint32_t> localLat;
+        std::vector<std::uint64_t> localLat;
         localLat.reserve(static_cast<std::size_t>(shared.opt.iterPerThread) *
                          shared.opt.numDomains);
 
@@ -400,9 +397,7 @@ void runWorker(const WorkerContext_t& shared)
             sweepDomains(shared, visit, rng, Tally_t{localLat, *shared.arg.result, true});
         }
         const auto ended = std::chrono::steady_clock::now();
-        const auto wallNs =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(ended - began).count();
-        shared.wallTotal.fetch_add(static_cast<std::uint64_t>(wallNs));
+        shared.wallTotal.fetch_add(harness::nsBetween(began, ended));
 
         const std::lock_guard<std::mutex> merge(shared.arg.result->latMutex);
         auto& dst = shared.arg.result->acqLatNs;
@@ -543,7 +538,7 @@ void printPerPeerTotals(const std::vector<PeerResult_t>& results)
     }
 }
 
-void dumpLatencyCsv(const char* path, const std::vector<std::uint32_t>& sortedLat)
+void dumpLatencyCsv(const char* path, const std::vector<std::uint64_t>& sortedLat)
 {
     std::FILE* out = std::fopen(path, "w");
     if (out == nullptr)
@@ -554,7 +549,7 @@ void dumpLatencyCsv(const char* path, const std::vector<std::uint32_t>& sortedLa
     std::fprintf(out, "latency_ns\n");
     for (const auto sample : sortedLat)
     {
-        std::fprintf(out, "%u\n", sample);
+        std::fprintf(out, "%" PRIu64 "\n", sample);
     }
     std::fclose(out);
     std::printf("lat-csv -> %s (%zu samples)\n", path, sortedLat.size());
@@ -563,7 +558,7 @@ void dumpLatencyCsv(const char* path, const std::vector<std::uint32_t>& sortedLa
 // Perf signal, not a gate.
 void printLatencyDistribution(const Opts_t& opt, const std::vector<PeerResult_t>& results)
 {
-    std::vector<std::uint32_t> allLat;
+    std::vector<std::uint64_t> allLat;
     for (const auto& result : results)
     {
         allLat.insert(allLat.end(), result.acqLatNs.begin(), result.acqLatNs.end());

@@ -19,6 +19,7 @@
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/event.hpp"
+#include "observe/failpoint.hpp"
 #include "observe/observe.hpp"
 #include "util/coherency.hpp"
 
@@ -54,6 +55,8 @@ void seizeDeadPeerSlot(LocalPeerState& peerState, PeerId deadPeerId)
 // separately by resetClaim, since the RA policy owns it.
 void finishRecoveryCleanup(LocalPeerState& peerState, PeerId deadPeerId)
 {
+    CME_FAILPOINT_REACH(failpoint::Boundary::RecoveryBeforeScrub);
+
     // Strategy-private state the generic record takeover misses: demand line, tournament
     // interest, aggregator duty. RA is the single writer here.
     if (auto* successor = peerState.getSuccessorPolicy())
@@ -64,6 +67,8 @@ void finishRecoveryCleanup(LocalPeerState& peerState, PeerId deadPeerId)
     // Arm one sweep unconditionally: reclaimOrphansLocked re-checks each domain under the
     // control lock, so arming costs nothing when there is no orphan.
     peerState.requestOrphanSweep();
+
+    CME_FAILPOINT_REACH(failpoint::Boundary::RecoveryBeforeFinish);
 
     // None goes last, after every scrub above: getRecoveryTarget skips a None slot, so an RA dying
     // before those writes would leave the tournament interest pinning a live climber with nobody left
@@ -100,6 +105,7 @@ bool takeoverDomainsHeldByDeadPeer(LocalPeerState& peerState, PeerId deadPeerId)
             ownership_transfer::takeoverOwnership(peerState, domainId, record);
             OBSERVE_EVENT(Event::RecoveryTakeover, peerState, domainId);
             touched = true;
+            CME_FAILPOINT_REACH(failpoint::Boundary::TakeoverMidLoop);
         }
     }
     return touched;
@@ -140,6 +146,8 @@ void serviceRecovery(LocalPeerState& peerState)
 
     // Confirmed RA. Arm the takeover span on the first confirmed tick only
     // (isRecoveryArmed peeks the countdown with no side effect).
+    CME_FAILPOINT_REACH(failpoint::Boundary::RecoveryAfterClaim);
+
     if (!peerState.isRecoveryArmed(targetPeerId))
     {
         seizeDeadPeerSlot(peerState, targetPeerId);

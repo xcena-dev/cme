@@ -51,12 +51,11 @@ std::vector<std::uint64_t> g_counter;
 // The critical section itself, plus the acquire-latency sample. Called with both tiers held,
 // so @began is the instant the acquire started.
 void recordCriticalSection(std::uint32_t domainId, std::chrono::steady_clock::time_point began,
-                           std::vector<std::uint32_t>& localLat)
+                           std::vector<std::uint64_t>& localLat)
 {
     const auto held = std::chrono::steady_clock::now();
     ++g_counter[domainId];  // non-atomic on purpose: a lost update means ME broke
-    const auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(held - began).count();
-    localLat.push_back(static_cast<std::uint32_t>(std::min<std::int64_t>(elapsedNs, UINT32_MAX)));
+    localLat.push_back(harness::nsBetween(began, held));
 }
 
 struct Config_t
@@ -128,7 +127,7 @@ struct Worker_t
 
 // One thread's whole run: itersPerThread sweeps, each locking every data domain once.
 void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
-               std::vector<std::uint32_t>& done, std::vector<std::uint32_t>& localLat)
+               std::vector<std::uint32_t>& done, std::vector<std::uint64_t>& localLat)
 {
     std::vector<std::uint32_t> visit(cfg.numDomains);
     for (std::uint32_t k = 0; k < cfg.numDomains; ++k)
@@ -159,7 +158,7 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
 // The worker index IS the slot: peer p's threads occupy p * threadsPerPeer .. +threadsPerPeer-1,
 // so the flat index carries both and the peer id divides back out of it.
 void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>& done,
-                std::vector<std::uint32_t>& acqLatNs, std::atomic<int>& failures)
+                std::vector<std::uint64_t>& acqLatNs, std::atomic<int>& failures)
 {
     std::mutex latMutex;
 
@@ -170,7 +169,7 @@ void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>&
             const std::uint32_t pid = slot / cfg.threadsPerPeer;
             try
             {
-                std::vector<std::uint32_t> localLat;
+                std::vector<std::uint64_t> localLat;
                 localLat.reserve(static_cast<std::size_t>(cfg.itersPerThread) * cfg.numDomains);
                 runSweeps(cfg, tiers, Worker_t{pid, slot}, done, localLat);
                 const std::lock_guard<std::mutex> merge(latMutex);
@@ -207,13 +206,13 @@ void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>&
 }
 
 // Two-tier acquire latency: intra-node mutex wait plus inter-node CXL handoff.
-void reportLatency(const Config_t& cfg, std::vector<std::uint32_t>& acqLatNs)
+void reportLatency(const Config_t& cfg, std::vector<std::uint64_t>& acqLatNs)
 {
     std::sort(acqLatNs.begin(), acqLatNs.end());
     double sum = 0.0;
     for (const auto sample : acqLatNs)
     {
-        sum += sample;
+        sum += static_cast<double>(sample);
     }
     const double meanNs = acqLatNs.empty() ? 0.0 : sum / static_cast<double>(acqLatNs.size());
     std::printf("acquire latency : n=%zu mean=%.0f p50=%.0f p90=%.0f p99=%.0f max=%.0f (ns)\n",
@@ -262,7 +261,7 @@ void runBody(harness::TestContext& ctx)
     std::this_thread::sleep_for(std::chrono::milliseconds{100});
 
     std::vector<std::uint32_t> done(static_cast<std::size_t>(cfg.numPeers) * cfg.threadsPerPeer, 0);
-    std::vector<std::uint32_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)
+    std::vector<std::uint64_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)
     std::atomic<int> failures{0};
     runWorkers(cfg, tiers, done, acqLatNs, failures);
 

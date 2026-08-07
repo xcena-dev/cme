@@ -48,6 +48,12 @@ TelemetrySnapshot_t getTelemetrySnapshot(LocalPeerState& peerState) noexcept
         snapshot.handoffLat.cycles[bucket] = latency.cycles[bucket].load(std::memory_order_relaxed);
         snapshot.handoffLat.count[bucket] = latency.count[bucket].load(std::memory_order_relaxed);
     }
+    snapshot.recovery.takeover = telemetry.recovery.takeover.load(std::memory_order_relaxed);
+    snapshot.recovery.completed = telemetry.recovery.completed.load(std::memory_order_relaxed);
+    snapshot.recovery.rejoined = telemetry.recovery.rejoined.load(std::memory_order_relaxed);
+#if defined(CME_STATS)
+    snapshot.countersLive = true;
+#endif
     return snapshot;
 }
 

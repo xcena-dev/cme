@@ -53,6 +53,23 @@ inline void shuffleVisitOrder(std::vector<T_Id>& visit, std::uint64_t& rng) noex
         .count();
 }
 
+// The same span in whatever unit the caller works in, kept as a duration so it compares against a
+// config constant without either side being unwrapped first.
+template <typename T_Duration>
+[[nodiscard]] inline T_Duration since(std::chrono::steady_clock::time_point startedAt)
+{
+    return std::chrono::duration_cast<T_Duration>(std::chrono::steady_clock::now() - startedAt);
+}
+
+// Between two points a caller already took, for a measurement whose end is not now. Reading the
+// clock again to close the span would put this call's own cost inside what it reports.
+[[nodiscard]] inline std::uint64_t nsBetween(std::chrono::steady_clock::time_point startedAt,
+                                             std::chrono::steady_clock::time_point endedAt)
+{
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(endedAt - startedAt).count());
+}
+
 // Where the timestamps on log lines are measured from. Set at static init so a case that
 // never calls startLogClock() still prints a sane elapsed time rather than time since the
 // epoch.
@@ -212,7 +229,8 @@ template <typename T_Exc, typename T_Body>
 }
 
 // Value at @fraction of a sample the caller has already sorted.
-[[nodiscard]] inline double percentile(const std::vector<std::uint32_t>& sorted, double fraction)
+[[nodiscard]] inline double
+percentile(const std::vector<std::uint64_t>& sorted, double fraction)
 {
     if (sorted.empty())
     {

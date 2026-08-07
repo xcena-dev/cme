@@ -14,9 +14,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// SIGKILL reaches us through <csignal> on a POSIX libc, but the standard promises only the six C
+// signals, so include-cleaner cannot see it there and would send us to the deprecated signal.h.
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 
 namespace harness
 {
@@ -43,7 +47,23 @@ template <typename T_Body>
         }
         if (child == 0)
         {
-            body(index);
+            // A child leaves only through _Exit, never by unwinding: past the fork it holds copies
+            // of its parent's sessions, whose poll threads do not exist here, so a destructor
+            // joining one raises ESRCH and aborts -- which reapChildSignalled would read as a kill.
+            try
+            {
+                body(index);
+            }
+            catch (const std::exception& error)
+            {
+                std::fprintf(stderr, "child %u: %s\n", index, error.what());
+                std::_Exit(1);
+            }
+            catch (...)
+            {
+                std::fprintf(stderr, "child %u: unknown exception\n", index);
+                std::_Exit(1);
+            }
             std::_Exit(0);
         }
     }
@@ -59,6 +79,17 @@ inline void reapChildren(std::uint32_t count)
         int status = 0;
         static_cast<void>(::wait(&status));
     }
+}
+
+// Wait for one child and report whether the failpoint is what ended it. SIGKILL only, because
+// reach() raises exactly that: any other signal means the child died of something else, and
+// counting it here would let a boundary nobody reached read as a boundary nothing went wrong at.
+[[nodiscard]] inline bool reapChildSignalled()
+{
+    int status = 0;
+    static_cast<void>(::wait(&status));
+    return WIFSIGNALED(status) &&
+           WTERMSIG(status) == SIGKILL;  // NOLINT(misc-include-cleaner) POSIX, via <csignal>
 }
 
 }  // namespace harness

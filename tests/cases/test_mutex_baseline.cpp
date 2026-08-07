@@ -158,7 +158,7 @@ struct Region_t
     harness::SharedBuffer<Control_t> controlBlock;  // [1]
     harness::SharedBuffer<PagedMutex_t> mutexes;    // [domains]
     harness::SharedBuffer<std::uint64_t> counters;  // [domains], --verify only
-    harness::SharedBuffer<std::uint32_t> results;   // [peers * iters * domains] ns, sweep only
+    harness::SharedBuffer<std::uint64_t> results;   // [peers * iters * domains] ns, sweep only
 
     [[nodiscard]] Control_t& control() const noexcept
     {
@@ -207,7 +207,7 @@ Region_t openRegion(const harness::TestContext& ctx, const Opts_t& opt)
     }
     else
     {
-        region.results = ctx.scratch<std::uint32_t>(
+        region.results = ctx.scratch<std::uint64_t>(
             "results", static_cast<std::uint64_t>(opt.peers) * opt.iters * opt.domains);
     }
     return region;
@@ -274,11 +274,8 @@ void runPeer(const Opts_t& opt, Region_t& region, std::uint32_t peerIndex)
             pthread_mutex_unlock(region.mutexAt(domainIndex));
             if (!opt.verify)
             {
-                const auto elapsedNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                           acquireEnd - acquireStart)
-                                           .count();
                 region.results[sampleBase + sampleIndex++] =
-                    static_cast<std::uint32_t>(std::min<std::int64_t>(elapsedNs, UINT32_MAX));
+                    harness::nsBetween(acquireStart, acquireEnd);
             }
         }
     }
@@ -351,13 +348,13 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
         std::chrono::duration_cast<std::chrono::duration<double>>(sweepEnd - sweepStart).count();
 
     const std::size_t sampleCount = static_cast<std::size_t>(opt.peers) * opt.iters * opt.domains;
-    std::vector<std::uint32_t> samples(region.results.data(),
+    std::vector<std::uint64_t> samples(region.results.data(),
                                        region.results.data() + sampleCount);
     std::sort(samples.begin(), samples.end());
     double sum = 0.0;
     for (auto sample : samples)
     {
-        sum += sample;
+        sum += static_cast<double>(sample);
     }
     const double meanNs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
     const double meanUs = meanNs / 1000.0;

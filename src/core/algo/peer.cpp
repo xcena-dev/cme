@@ -30,6 +30,7 @@
 #include "core/policy/successor.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
+#include "observe/failpoint.hpp"
 #include "observe/latency.hpp"
 #include "observe/stats.hpp"
 
@@ -170,6 +171,8 @@ Peer::~Peer()
 
     state.requestPollStop();
     state.joinPollThread();
+
+    CME_FAILPOINT_REACH(failpoint::Boundary::LeaveBeforeHandoff);
 
     if (state.getSuccessorPolicy())
     {

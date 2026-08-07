@@ -23,6 +23,7 @@
 #include "cme/shared.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
+#include "core/policy/successor_peterson_layout.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/latency.hpp"
@@ -35,53 +36,13 @@ namespace cme
 namespace
 {
 
-// ── tournament node layout (FAM-resident) ──────────────────────────
-// Interest and fairness turn are distinct 64B line types, so get/set moves either as one
-// single-writer transaction with no false sharing. FAM base is line-aligned, hence no alignas.
-
-struct PetersonNode_t
-{
-    // A node is a 2-contender Peterson lock; Role names its two slots. A climber's
-    // role at a node = which child it came up from (left -> Peer0, right -> Peer1).
-    enum class Role : std::uint32_t
-    {
-        Peer0 = 0,
-        Peer1 = 1,
-    };
-
-    // The opposing slot -- Peterson's "the other thread".
-    [[nodiscard]] static constexpr Role other(Role role) noexcept
-    {
-        return role == Role::Peer0 ? Role::Peer1 : Role::Peer0;
-    }
-
-    // Peterson's flag[i], but identified: storing the peer id rather than a bare 0/1 lets
-    // recovery clear only a dead peer's residue from a slot every climber shares over time.
-    struct PeerLine_t
-    {
-        std::uint32_t owner = NoPeer;  // NoPeer = idle
-        std::uint8_t reserved[CacheLineBytes - sizeof(std::uint32_t)]{};
-    };
-    // Tie-breaker line: turn = the role whose turn it is to yield.
-    struct FairnessLine_t
-    {
-        std::uint32_t turn;
-        std::uint8_t reserved[CacheLineBytes - sizeof(std::uint32_t)];
-    };
-
-    PeerLine_t peer[2];  // indexed by Role
-    FairnessLine_t fairness;
-
-    [[nodiscard]] PeerLine_t& getPeerLine(Role role) noexcept
-    {
-        return peer[static_cast<std::uint32_t>(role)];
-    }
-};
-
-static_assert(sizeof(PetersonNode_t::PeerLine_t) == CacheLineBytes, "PeerLine_t must be one cacheline");
-static_assert(sizeof(PetersonNode_t::FairnessLine_t) == CacheLineBytes, "FairnessLine_t must be one cacheline");
-static_assert(sizeof(PetersonNode_t) == 3 * CacheLineBytes, "node spans 3 cachelines");
-static_assert(offsetof(PetersonNode_t, fairness) == 2 * CacheLineBytes, "fairness on its own line");
+// Node, tree shape and climb path: successor_peterson_layout.hpp. Here, the protocol over them.
+using peterson_tree::buildClimbPath;
+using peterson_tree::ClimbStep_t;
+using peterson_tree::getTournamentTreeBytes;
+using peterson_tree::initTournamentTree;
+using peterson_tree::PetersonNode_t;
+using peterson_tree::roundUpPow2;
 
 // ── per-node 2-thread Peterson ──────────────────────────────────────
 
@@ -138,82 +99,6 @@ static_assert(offsetof(PetersonNode_t, fairness) == 2 * CacheLineBytes, "fairnes
 void unlockNode(PetersonNode_t& node, PetersonNode_t::Role role, CoherencyMode mode) noexcept
 {
     coherency::set(&node.getPeerLine(role), PetersonNode_t::PeerLine_t{}, mode);  // clear my interest
-}
-
-// ── helpers ─────────────────────────────────────────────────────────
-
-// Smallest power of two >= n (min 1). The tournament needs a 2^k leaf count;
-// peers above the live count map to spare leaves that never contend.
-[[nodiscard]] std::uint32_t roundUpPow2(std::uint32_t count) noexcept
-{
-    std::uint32_t rounded = 1;
-    while (rounded < count)
-    {
-        rounded <<= 1;
-    }
-    return rounded;
-}
-
-// Reverse the low @bits of @value -- the leaf permutation described in the file header.
-[[nodiscard]] std::uint32_t reverseBits(std::uint32_t value, std::uint32_t bits) noexcept
-{
-    std::uint32_t reversed = 0;
-    for (std::uint32_t bit = 0; bit < bits; ++bit)
-    {
-        reversed = (reversed << 1) | (value & 1u);
-        value >>= 1;
-    }
-    return reversed;
-}
-
-// ── tournament tree sizing / init ───────────────────────────────────
-// The tree has roundUpPow2(maxNumPeers) leaves; `domains` independent trees are
-// laid out contiguously: tree d owns nodes [d*(leaves-1), (d+1)*(leaves-1)).
-
-[[nodiscard]] std::uint64_t getTournamentTreeBytes(std::uint32_t maxNumPeers,
-                                                   std::uint32_t domains) noexcept
-{
-    const std::uint32_t leaves = roundUpPow2(maxNumPeers);
-    return static_cast<std::uint64_t>(sizeof(PetersonNode_t)) * (leaves - 1) * domains;
-}
-
-void initTournamentTree(std::uint8_t* base, std::uint32_t maxNumPeers, std::uint32_t domains,
-                        CoherencyMode mode) noexcept
-{
-    auto* nodes = reinterpret_cast<PetersonNode_t*>(base);
-    const std::uint32_t total = (roundUpPow2(maxNumPeers) - 1) * domains;
-    for (std::uint32_t i = 0; i < total; ++i)
-    {
-        coherency::set(&nodes[i].peer[0], PetersonNode_t::PeerLine_t{}, mode);
-        coherency::set(&nodes[i].peer[1], PetersonNode_t::PeerLine_t{}, mode);
-        coherency::set(&nodes[i].fairness, PetersonNode_t::FairnessLine_t{}, mode);
-    }
-}
-
-// One level on a peer's climb: (0-based node index within a tree, contender slot).
-struct ClimbStep_t
-{
-    std::uint32_t node;
-    PetersonNode_t::Role role;
-};
-
-// A peer's fixed leaf -> root path, as (0-based node, role) per level; the tree shape is
-// domain-independent. Deterministic from tid, so recovery can rebuild a dead peer's path.
-[[nodiscard]] std::vector<ClimbStep_t> buildClimbPath(std::uint32_t maxNumPeers, PeerId tid)
-{
-    const std::uint32_t numLeaves = roundUpPow2(maxNumPeers);
-    const auto depth = static_cast<std::uint32_t>(__builtin_ctz(numLeaves));
-    std::uint32_t cur = numLeaves + reverseBits(tid, depth);
-    std::vector<ClimbStep_t> path;
-    while (cur > 1)
-    {
-        const std::uint32_t parent = cur / 2;  // heap index, 1-based
-        // left child (even) -> Peer0, right child (odd) -> Peer1.
-        const auto role = static_cast<PetersonNode_t::Role>(cur & 1u);
-        path.push_back({parent - 1, role});  // store 0-based node index
-        cur = parent;
-    }
-    return path;
 }
 
 }  // namespace
@@ -318,9 +203,12 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
         return OwnershipResult::NotArrived;
     }
 
-    // Fast path: already holder (single-peer or cached residency) -> no tournament.
+    // Reentrant only: the tournament is the lock and the record only shadows it, so record
+    // residency must not admit anyone. > 1, not > 0, since the hold above already counts one.
     OBSERVE_LATENCY_BEGIN(Resident);
-    if (ownership_transfer::holdAndCheckResident(peerState, domainId))
+    auto& domain = peerState.getDomain(domainId);
+    ownership_transfer::holdDomain(peerState, domainId);
+    if (domain.getOwnershipPinCount() > 1)
     {
         OBSERVE_LATENCY_END(Resident, peerState, domainId);
         return OwnershipResult::Arrived;
@@ -330,6 +218,7 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
     // on timeout it rolls back any partial climb, so no residency leaks.
     if (!state_->acquire(peerState, domainId, time::getMonoTime() + timeout))
     {
+        ownership_transfer::unholdDomain(peerState, domainId);
         return OwnershipResult::NotArrived;
     }
 

@@ -32,8 +32,10 @@ jobs:
       # No config.yaml: it is per-machine and gitignored, and a missing one is not an error.
       # cme_site_config_load returns early, so the dax device and the uncacheable mount both
       # read as absent -- which on this runner is the truth.
+      # CME_FAILPOINT=ON: without it the failpoint cases register as skipped, and a skip on the
+      # gate proves nothing about a crash boundary.
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCME_FAILPOINT=ON
 
       - name: Build
         run: cmake --build build -j"$(nproc)"

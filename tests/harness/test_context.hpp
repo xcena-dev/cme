@@ -284,6 +284,13 @@ public:
         ++failures_;
     }
 
+    // End the run as skipped. Asked before any check, since a case that reaches its assertions on
+    // a build that compiled its subject out is asserting about nothing.
+    [[noreturn]] static void skip(const char* reason)
+    {
+        throw SkipRequested_t{reason};
+    }
+
     // Read by runCase alone. A run can add to the tally and cannot take anything off it.
     [[nodiscard]] std::int32_t failures() const noexcept
     {
@@ -391,6 +398,11 @@ int runCase(int argc, char** argv, T_Body&& body)
     catch (const CleanupRequested_t&)
     {
         return 0;  // the file is gone; there was no run to make
+    }
+    catch (const SkipRequested_t& skipped)
+    {
+        std::printf("SKIP: %s\n", skipped.reason);
+        return SkipExitCode;
     }
     catch (const MediumUnavailable& e)
     {

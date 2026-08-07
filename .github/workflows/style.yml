@@ -63,6 +63,10 @@ jobs:
       - name: Generate the compile database
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
+      # A header is nobody's translation unit, so compile_commands.json has no entry for one and
+      # clang-tidy parses it with bare flags: every project include then reads as file-not-found.
+      # These three roots are what the database carries, passed absolute because clang-tidy runs
+      # from `build` for any file that does have an entry.
       - name: Check the diff
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
@@ -73,6 +77,10 @@ jobs:
           git diff -U0 "$base"...HEAD -- 'src/*' 'tests/*' 'tools/*' 'examples/*' \
             | python3 /usr/lib/llvm-18/share/clang/clang-tidy-diff.py \
                 -p1 -path build -clang-tidy-binary clang-tidy-18 -use-color \
+                -extra-arg=-std=c++17 \
+                -extra-arg=-I"$PWD/include" \
+                -extra-arg=-I"$PWD/src" \
+                -extra-arg=-I"$PWD/tests/harness" \
             | tee tidy.log
           if grep -q 'warning:' tidy.log; then
             echo

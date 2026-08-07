@@ -41,6 +41,18 @@ struct TelemetrySnapshot_t
         std::uint64_t cycles[LatCount];
         std::uint64_t count[LatCount];
     } handoffLat;
+
+    // What this peer did as a recovery authority. completed is the executor's terminal act, so its
+    // sum across live peers is how many of them ran a given recovery.
+    struct
+    {
+        std::uint64_t takeover;
+        std::uint64_t completed;
+        std::uint64_t rejoined;
+    } recovery;
+
+    // Whether the build bumps any of the above. False = every count is zero for want of counting.
+    bool countersLive;
 };
 
 namespace stats

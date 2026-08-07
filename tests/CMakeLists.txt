@@ -218,6 +218,27 @@ cme_test_exe(cme-file-presized-test test_file_presized.cpp)
 cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
 cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
 cme_test_exe(cme-demand-scrub-test test_demand_scrub.cpp)
+cme_test_exe(cme-peterson-scrub-test test_peterson_scrub.cpp)
+cme_test_exe(cme-recovery-sole-executor-test test_recovery_sole_executor.cpp)
+cme_test_exe(cme-timeout-late-grant-test test_timeout_late_grant.cpp)
+cme_test_exe(cme-format-interrupted-test test_format_interrupted.cpp)
+cme_test_exe(cme-pid-reuse-test test_pid_reuse.cpp)
+cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
+cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
+cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
+cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
+cme_test_exe(cme-failpoint-registry-test test_failpoint_registry.cpp)
+cme_test_exe(cme-format-race-test test_format_race.cpp)
+cme_test_exe(cme-timeout-recovery-race-test test_timeout_recovery_race.cpp)
+cme_test_exe(cme-resource-lifecycle-test test_resource_lifecycle.cpp)
+
+# Not a case: a binary that exists to be disassembled. check_slot_codegen.sh reads its two symbols
+# and reports how wide the compiler kept a 64 B slot transfer.
+add_executable(cme-slot-codegen-probe tools/slot_codegen_probe.cpp)
+target_link_libraries(cme-slot-codegen-probe PRIVATE cme)
+add_test(NAME slot_codegen
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_slot_codegen.sh ${CMAKE_BINARY_DIR})
+set_tests_properties(slot_codegen PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # ── CASES ───────────────────────────────────────────────────────────────
 
@@ -349,6 +370,70 @@ cme_case(ceiling_region TARGET cme-ceiling-region-test STRATEGY request SHM_TIME
 # agg_recovery checks for the aggregator record. request only -- Order and Peterson have no demand
 # region, so the case would assert nothing there.
 cme_case(demand_scrub TARGET cme-demand-scrub-test STRATEGY request)
+
+# R3 for the remaining policy: recovery clears a dead climber's tournament announce. peterson only
+# -- the other three lay out no tree, so the successor area holds something else and the case's
+# injection would land on it.
+cme_case(peterson_scrub TARGET cme-peterson-scrub-test STRATEGY peterson)
+
+# R2: one dead peer, one executor. shm only -- the count comes from per-peer telemetry rather than
+# from region state, so no other medium reads differently. Asserted only in a CME_STATS build.
+cme_case(recovery_sole_executor TARGET cme-recovery-sole-executor-test STRATEGY request
+    BACKENDS shm SHM_TIMEOUT 120)
+
+# A timed-out lock leaves no domain on the peer that gave up. All four policies: the withdraw
+# settle is Request's, but the property it protects is every policy's.
+cme_case(timeout_late_grant TARGET cme-timeout-late-grant-test STRATEGIES SHM_TIMEOUT 120)
+
+# A format that stopped before stamping the RA claim area. One policy: the claim slot's magic sits
+# below the successor policy, and every policy reaches the same recovery.
+cme_case(format_interrupted TARGET cme-format-interrupted-test STRATEGY request SHM_TIMEOUT 60)
+
+# The dead-peer route to what slot_inherit checks for a clean leave. One policy: membership sits
+# above the successor policy.
+cme_case(pid_reuse TARGET cme-pid-reuse-test STRATEGY request SHM_TIMEOUT 60)
+
+# Crash injection at the two admission boundaries. Skips itself without CME_FAILPOINT, since the
+# arm is then a no-op and the child it is waiting on would never die. shm only: the lease is one
+# line and the case reads no other medium state.
+cme_case(failpoint_admission TARGET cme-failpoint-admission-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 120)
+
+# A holder killed while handing over, on either side of the record write. All four, because which
+# of them even reaches transferOwnership differs: Peterson vacates on release where the others hand
+# to a successor, and a round that never reached its boundary says so rather than passing.
+cme_case(failpoint_handoff TARGET cme-failpoint-handoff-test STRATEGIES BACKENDS shm
+    SHM_TIMEOUT 300)
+
+# The authority itself killed, at four points along the recovery it started. All four policies:
+# the scrub it owes is per-policy, so a boundary before it means something different for each.
+cme_case(failpoint_recovery TARGET cme-failpoint-recovery-test STRATEGIES BACKENDS shm
+    SHM_TIMEOUT 900)
+
+# A peer killed partway into joining and partway out of leaving. All four: LeaveBeforeHandoff sits
+# right before SuccessorPolicy::leave, and what that owes differs per policy -- an aggregator duty,
+# a demand line, a tournament interest.
+cme_case(failpoint_membership TARGET cme-failpoint-membership-test STRATEGIES BACKENDS shm
+    SHM_TIMEOUT 600)
+
+# A peer killed partway through creating, deleting or reclaiming a domain. One policy: the
+# registry sits above the successor policy, and the sweep reaches it through deleteDomainLocked
+# whichever one is loaded.
+cme_case(failpoint_registry TARGET cme-failpoint-registry-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 300)
+
+# Nothing serializes format, so N processes formatting one region is the one contention create_race
+# does not reach. All four policies: each lays down a different successor area in the same pass.
+cme_case(format_race TARGET cme-format-race-test STRATEGIES SHM_TIMEOUT 60)
+
+# A holder that dies holding, so the waiter's deadline and the seizure overlap. All four policies:
+# each reaches waitForOwnership by its own route.
+cme_case(timeout_recovery_race TARGET cme-timeout-recovery-race-test STRATEGIES SHM_TIMEOUT 120)
+
+# Handles rather than protocol, so one policy and one medium. The value of this case is in a
+# CME_SANITIZE=address build; the fd and thread counts hold in any build.
+cme_case(resource_lifecycle TARGET cme-resource-lifecycle-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 120)
 
 # The admission lease's failure side: a stalled lease stolen after LeaseTimeout, and a lease that
 # keeps moving until the joiner's deadline runs out. shm only -- both cases assert wall-clock

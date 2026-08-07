@@ -41,6 +41,13 @@ struct CleanupRequested_t
 {
 };
 
+// The build cannot answer this case's question: no CME_STATS to count with, no CME_FAILPOINT to
+// crash at. MediumUnavailable is the same verdict about hardware. Not a std::exception, as above.
+struct SkipRequested_t
+{
+    const char* reason;
+};
+
 // The successor policy and the suffix that tells one registration's region from another's.
 struct StrategyChoice_t
 {

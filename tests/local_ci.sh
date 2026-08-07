@@ -141,7 +141,10 @@ do_build()
 {
 	# Instrumentation on, so the axes compile and cme-top's CPU columns have data. They
 	# change inline bodies and one slot's layout, which is exactly why they need building.
-	cmake -S "$CME" -B "$CME/$BUILD" -DCME_STATS=ON -DCME_PROFILE=ON >/dev/null &&
+	#
+	# CME_FAILPOINT too, because the failpoint cases skip themselves without it and a hosted
+	# runner has no reason to carry an axis that kills its own processes.
+	cmake -S "$CME" -B "$CME/$BUILD" -DCME_STATS=ON -DCME_PROFILE=ON -DCME_FAILPOINT=ON >/dev/null &&
 		cmake --build "$CME/$BUILD" -j
 }
 

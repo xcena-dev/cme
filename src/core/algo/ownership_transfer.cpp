@@ -20,6 +20,7 @@
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/event.hpp"
+#include "observe/failpoint.hpp"
 #include "observe/latency.hpp"
 #include "observe/observe.hpp"
 #include "util/coherency.hpp"
@@ -65,6 +66,7 @@ void publishDomainRecord(LocalPeerState& peerState, DomainId domainId,
                          const Geometry::DomainRecord_t& record)
 {
     coherency::set(peerState.getDomainRecordShadow(domainId, record.getHolder()), record, peerState.getCoherencyMode());
+    CME_FAILPOINT_REACH(failpoint::Boundary::TransferBeforeTruth);
     coherency::set(peerState.getDomainRecord(domainId), record, peerState.getCoherencyMode());
 }
 
@@ -117,6 +119,7 @@ void transferOwnership(LocalPeerState& peerState, DomainId domainId, PeerId newH
     record.holder = newHolder;
     record.epoch = newEpoch;
 
+    CME_FAILPOINT_REACH(failpoint::Boundary::TransferBeforePublish);
     publishDomainRecord(peerState, domainId, record);
     if (selfClaim)
     {

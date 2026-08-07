@@ -152,7 +152,7 @@ struct Baton_t
     std::atomic<int> turn{-1};  // peer id whose turn it is (-1 = idle)
     std::atomic<bool> stopThreads{false};
     std::atomic<bool> turnDone{false};
-    std::atomic<std::uint32_t> resultNs{0};
+    std::atomic<std::uint64_t> resultNs{0};
     std::atomic<bool> resultTimeout{false};
 };
 
@@ -167,9 +167,7 @@ void serveOneTurn(Baton_t& baton, cme::Peer* self, cme::DomainId domain)
         {
             auto guard = self->lock(domain);
             const auto held = std::chrono::steady_clock::now();
-            baton.resultNs.store(static_cast<std::uint32_t>(std::min<std::int64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(held - began).count(),
-                UINT32_MAX)));
+            baton.resultNs.store(harness::nsBetween(began, held));
             baton.resultTimeout.store(false, std::memory_order_relaxed);
         }  // released here -- domain takeable by the next peer
     }
@@ -201,9 +199,9 @@ void runAcquireLane(Baton_t& baton, cme::Peer* self, cme::DomainId domain, cme::
 struct DriveState_t
 {
     std::int64_t holder{-1};  // single domain -> single holder; -1 = unknown/genesis
-    std::vector<std::uint32_t> latAll;
-    std::vector<std::uint32_t> latMigrate;
-    std::vector<std::uint32_t> latResident;
+    std::vector<std::uint64_t> latAll;
+    std::vector<std::uint64_t> latMigrate;
+    std::vector<std::uint64_t> latResident;
     std::uint32_t timeouts{0};
 };
 
@@ -259,13 +257,13 @@ void runLoop(const Opts_t& opt, Baton_t& baton, DriveState_t& state)
     }
 }
 
-void report(const char* tag, std::vector<std::uint32_t>& samples)
+void report(const char* tag, std::vector<std::uint64_t>& samples)
 {
     std::sort(samples.begin(), samples.end());
     double sum = 0.0;
     for (auto sample : samples)
     {
-        sum += sample;
+        sum += static_cast<double>(sample);
     }
     const double mean = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
     std::printf("  %-9s n=%-7zu mean=%8.0f  p50=%8.0f  p90=%8.0f  p99=%8.0f  max=%8.0f  (sampleNs)\n",
@@ -301,7 +299,7 @@ void writeCsvRow(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& sta
     double sum = 0.0;
     for (auto sample : samples)
     {
-        sum += sample;
+        sum += static_cast<double>(sample);
     }
     const double meanUs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size()) / 1000.0;
     if (FILE* out = std::fopen(opt.csvPath, "a"))

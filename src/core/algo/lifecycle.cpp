@@ -14,6 +14,7 @@
 #include "core/layout/geometry.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
+#include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
 #include "util/time.hpp"
 
@@ -160,6 +161,8 @@ JoinResult joinMembership(LocalPeerState& peerState)
     peerState.seedSelfMemberState(selfState);  // store the fully-initialised member, then write through
     peerState.publishSelfMemberState();
 
+    CME_FAILPOINT_REACH(failpoint::Boundary::JoinBeforeBaseline);
+
     // Sync every domain's DRAM view; joiner adopts or defers to existing holder.
     for (const DomainId domainId : peerState.getDomainIdRange())
     {
@@ -215,6 +218,8 @@ void leaveMembership(LocalPeerState& peerState) noexcept
     // stamping Active without touching participation, so bits left here would let a holder grant to
     // the next occupant before it has synced. Sole writer (the dtor stopped the poll thread), so
     // write through with no rmb. The demand line went earlier, in SuccessorPolicy::leave().
+    CME_FAILPOINT_REACH(failpoint::Boundary::LeaveBeforeNone);
+
     auto& selfState = peerState.getSelfMemberState();
     selfState.storeParticipatingDomains({});
     selfState.setStatus(Geometry::Member_t::Status::None);
@@ -310,6 +315,8 @@ CreateResult createDomainLocked(LocalPeerState& peerState, std::string_view name
     // Publish shadow + truth together (creator becomes holder; invariant by construction).
     ownership_transfer::publishDomainRecord(peerState, domainId, record);
 
+    CME_FAILPOINT_REACH(failpoint::Boundary::CreateBeforeActivate);
+
     peerState.setActiveDomain(domainId);  // publish to the domain scan-scope bitmap
 
     // Record names us; adopt local holder belief (magic already checked, can't fail).
@@ -355,12 +362,17 @@ DeleteResult deleteDomainLocked(LocalPeerState& peerState, DomainId domainId)
     // orphan (recovery reclaims), not a stale bit on the reused slot.  Mirrors leaveDomain.
     peerState.clearParticipation(domainId);
 
+    CME_FAILPOINT_REACH(failpoint::Boundary::DeleteBeforeFree);
+
     // One 64B store, so a crash lands on Active (safe) or Free, never between. holder=NoPeer
     // makes a Guard release inert. We hold control and are sole holder, so no writer races it.
     snapshot.holder = NoPeer;
     snapshot.setState(Geometry::DomainRecord_t::State::Free);
     std::memset(snapshot.name, 0, Geometry::DomainRecord_t::MaxNameLen);
     coherency::set(record, snapshot, peerState.getCoherencyMode());
+
+    CME_FAILPOINT_REACH(failpoint::Boundary::DeleteBeforeDeactivate);
+
     peerState.clearActiveDomain(domainId);  // retract from the domain scan-scope bitmap
 
     // Drop local holder belief.
@@ -393,6 +405,7 @@ std::uint32_t reclaimOrphansLocked(LocalPeerState& peerState)
             deleteDomainLocked(peerState, domainId) == DeleteResult::Ok)
         {
             ++freed;
+            CME_FAILPOINT_REACH(failpoint::Boundary::ReclaimMidLoop);
         }
     }
 

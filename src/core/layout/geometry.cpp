@@ -20,6 +20,7 @@
 #include "core/policy/successor.hpp"
 #include "core/types.hpp"
 #include "memory/memory.hpp"
+#include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
 #include "util/util.hpp"
@@ -168,6 +169,8 @@ void Geometry::format(const FormatOpts_t& opts)
     // Publish slots before header magic -- any joiner that sees isFormatted()
     // must already see slot magics. Required on noncoherent CXL FAM.
     coherency::wmb(base, totalSize, FormatCoherency);
+
+    CME_FAILPOINT_REACH(failpoint::Boundary::FormatBeforeHeader);
 
     // Header magic is the commit point. Build the line locally, then one whole-64B
     // set publishes it (format is the sole writer -- no field to preserve from FAM).

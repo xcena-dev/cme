@@ -10,7 +10,9 @@
 // Strategy from --strategy, registered at high peer count for peterson's deep tournament
 // tree. Peers are threads sharing one region, each with its own cme::Peer.
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -36,10 +38,53 @@ constexpr cme::DomainId SharedDomain = 1;  // the one contended data domain
 // increment (two holders at once) shows up as final < NumPeers*ItersPerPeer.
 std::uint64_t g_counter = 0;
 
+// What the prober is willing to wait, and how long the pinned worker gets to take the domain in the
+// first place. The hold itself is unbounded: it lasts until joinPeerWorkers stops it.
+constexpr std::uint32_t ProbeMs = 50;
+constexpr std::uint32_t HoldDeadlineMs = 5000;
+
+// The holder is the domain's creator on purpose: a fast path admitting on the genesis-holder record
+// alone lets that first acquire skip the lock, and a one-increment critical section cannot see it.
+void checkHeldDomainStaysHeld(harness::TestContext& ctx)
+{
+    constexpr cme::DomainId DomainCeiling = 2;
+    constexpr cme::PeerId Peers = 2;
+    auto region = harness::createRegion(DomainCeiling, Peers);
+    harness::seedDataDomains(region, 1);  // its transient peer 0 is the genesis holder
+
+    std::array<harness::PeerSlot_t, 1> holder{};
+    holder[0].pinned.store(true);  // takes the domain and keeps it, rather than churning
+    harness::spawnPeerWorkers(holder, 1, region, 1);
+
+    bool intruded = false;
+    auto prober = harness::makePeer(region, 1);
+    prober.joinDomain(SharedDomain);
+    // Asserted, not assumed: without the hold there is nothing to intrude on, and the check below
+    // would pass on a run that never set the situation up.
+    const bool held = harness::waitUntil(
+        [&holder]
+        {
+            return holder[0].holding.load(std::memory_order_acquire);
+        },
+        HoldDeadlineMs, 1);
+    if (held)
+    {
+        auto guard = prober.tryLock(SharedDomain, std::chrono::milliseconds{ProbeMs});
+        intruded = guard && holder[0].holding.load(std::memory_order_acquire);
+    }
+    harness::joinPeerWorkers(holder, 1);
+
+    ctx.check(held, "the creator took the domain and kept it");
+    ctx.check(!intruded, "a second peer took the domain while the creator still held it");
+}
+
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
 {
+    // First, so its region is gone before the counter run formats its own.
+    checkHeldDomainStaysHeld(ctx);
+
     constexpr cme::DomainId DomainCeiling = 2;  // control(0) + 1 data domain
 
     auto region = harness::createRegion(DomainCeiling, NumPeers);
