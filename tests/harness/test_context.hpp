@@ -19,6 +19,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <memory>
@@ -317,6 +318,50 @@ private:
     mutable std::string uriCache_;
 };
 
+// The run in progress, for the helpers under harness/.
+//
+// One TestContext exists per process: runCase builds it, runs one body against it, and tears it
+// down. Passing it into every helper made each signature carry the run rather than the request, so
+// it is held here and the helpers ask for it.
+//
+// The order test_context.hpp exists to enforce is unaffected: the members still settle in
+// declaration order, and the pointer below only names the finished object. What a global does
+// reintroduce is the question of whether it is set, so reaching for a run that is not there aborts
+// with a line saying so rather than dereferencing null three frames deeper.
+inline TestContext*& currentRunSlot() noexcept
+{
+    static TestContext* slot = nullptr;
+    return slot;
+}
+
+[[nodiscard]] inline TestContext& currentRun()
+{
+    TestContext* slot = currentRunSlot();
+    if (slot == nullptr)
+    {
+        std::fprintf(stderr, "harness: no run in progress (a helper was called outside runCase)\n");
+        std::abort();
+    }
+    return *slot;
+}
+
+// Publishes @ctx as the run for as long as it is in scope. A guard rather than two statements, so
+// a body that throws still leaves nothing behind.
+class RunScope
+{
+public:
+    explicit RunScope(TestContext& ctx) noexcept
+    {
+        currentRunSlot() = &ctx;
+    }
+    RunScope(const RunScope&) = delete;
+    RunScope& operator=(const RunScope&) = delete;
+    ~RunScope()
+    {
+        currentRunSlot() = nullptr;
+    }
+};
+
 // Runs one case and returns the code ctest reads. Deriving it here is the point: a run that
 // prints PASS cannot also return non-zero, because it no longer writes either one. A skip
 // is not a failure and a cleanup is not a run, so each leaves by its own door.
@@ -327,6 +372,7 @@ int runCase(int argc, char** argv, T_Body&& body)
     try
     {
         TestContext ctx{argc, argv};
+        const RunScope scope{ctx};  // the helpers reach for it through currentRun()
 
         // Caught inside ctx's lifetime, so a body that threw still reports the checks it
         // did reach. Counted too: a run that died on the way has not passed, however few

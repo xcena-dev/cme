@@ -69,14 +69,14 @@ void checkFactoryRoundTrip(harness::TestContext& ctx)
 
 void checkSessionMoveAssign(harness::TestContext& ctx)
 {
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
 
-    auto source = harness::openSession(ctx);
+    auto source = harness::openSession();
     source.createDomain(Domain);
 
     // The target is a live session, not a default-constructed one: Session has no default ctor,
     // and overwriting a live object is the case that has to give the old peer slot back.
-    auto target = harness::openSession(ctx);
+    auto target = harness::openSession();
     target = std::move(source);
 
     // The domain was created through the object now moved from, and participation travelled with
@@ -87,9 +87,9 @@ void checkSessionMoveAssign(harness::TestContext& ctx)
 
 void checkGuardMoveAssign(harness::TestContext& ctx)
 {
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
 
-    auto session = harness::openSession(ctx);
+    auto session = harness::openSession();
     session.createDomain(Domain);
     session.createDomain(OtherDomain);
 
@@ -132,12 +132,11 @@ void checkPeerMove(harness::TestContext& ctx)
 {
     constexpr cme::DomainId NumDomains = 2;  // control(0) + the one lane below
     constexpr cme::PeerId MaxPeers = 4;
-    const auto coherency = ctx.coherency();
 
     auto region = cme::Geometry::create(ctx.uri(), NumDomains, MaxPeers,
                                         cme::Geometry::FormatOpts_t{ctx.strategy()});
 
-    cme::Peer origin{region, 0, coherency};
+    auto origin = harness::makePeer(region, 0);
     const cme::DomainId lane = origin.createDomain("lane1");
     origin.joinDomain(lane);
 
@@ -150,7 +149,7 @@ void checkPeerMove(harness::TestContext& ctx)
 
     // The target is a live peer holding its own slot, so the assignment has to leave and destroy
     // that one before it takes the source's.
-    cme::Peer target{region, 1, coherency};
+    auto target = harness::makePeer(region, 1);
     ctx.check(target.getPeerId() == 1, "a second peer holds its own slot");
 
     target = std::move(moved);

@@ -19,7 +19,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -48,26 +47,22 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId Dead = 1;                    // stranded target
     constexpr cme::PeerId LiveRA = 2;                  // peer named by the seeded claim
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
-    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
+    auto region = harness::createRegion(Ceiling, MaxPeers);
+    harness::seedDataDomains(region, NumDomains);
 
     std::printf("recovery stake-gate: %u peers (%s, backend=%s)\n", MaxPeers,
                 ctx.strategySuffix(), ctx.backendName());
 
     std::array<harness::PeerSlot_t, MaxPeers> peers{};
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        harness::spawnPeerWorker(peers[i], i, *region, ctx.coherency(), NumDomains);
-    }
+    harness::spawnPeerWorkers(peers, MaxPeers, region, NumDomains);
     harness::sleepMs(1000);  // memberships go Active; ownership spreads
     ctx.check(harness::allPeersJoined(peers, MaxPeers), "every worker joined its domains");
 
     auto deadStatusIs = [&](Status status)
     {
-        return harness::hasMemberStatus(*region, Dead, status, ctx.coherency());
+        return harness::hasMemberStatus(region, Dead, status);
     };
-    auto* claimSlot = cme::RecoveryAuthorityLayout{*region}.getClaim(Dead);
+    auto* claimSlot = cme::RecoveryAuthorityLayout{region}.getClaim(Dead);
     auto claimRA = [&]() -> cme::PeerId
     {
         return static_cast<cme::PeerId>(cme::coherency::get(claimSlot, ctx.coherency()).recoveryAuthority);
@@ -134,7 +129,6 @@ void runBody(harness::TestContext& ctx)
     peers[Dead].abandon.store(true);
     peers[LiveRA].abandon.store(true);
     harness::joinPeerWorkers(peers, MaxPeers);
-    region.reset();
 }
 
 }  // namespace test

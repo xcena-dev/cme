@@ -15,13 +15,11 @@
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 // --strategy selects the strategy.
 
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <memory>
-#include <optional>
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
@@ -49,24 +47,19 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId MaxPeers = 4;   // every slot filled below
     constexpr cme::DomainId Ceiling = 3;  // control + 2 data (unused; just room)
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
+    auto region = harness::createRegion(Ceiling, MaxPeers);
 
     std::printf("readmit gate: %u peers (%s, backend=%s)\n",
                 MaxPeers, ctx.strategySuffix(), ctx.backendName());
 
     // Fill every slot: no None remains anywhere.
-    std::array<std::unique_ptr<cme::Peer>, MaxPeers> peers{};
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        peers[i] = std::make_unique<cme::Peer>(*region, i, ctx.coherency());
-    }
+    auto peers = harness::makePeers(region, MaxPeers);
     harness::sleepMs(500);  // memberships go Active; poll threads running
 
     constexpr cme::PeerId Dead = MaxPeers - 1;
     auto deadStatusIs = [&](Status status)
     {
-        return harness::hasMemberStatus(*region, Dead, status, ctx.coherency());
+        return harness::hasMemberStatus(region, Dead, status);
     };
 
     ctx.check(deadStatusIs(Status::Active), "dead slot Active before freeze");
@@ -81,7 +74,7 @@ void runBody(harness::TestContext& ctx)
     bool rejected = false;
     try
     {
-        (void)cme::admission::claimPeerSlot(*region, ctx.coherency());
+        (void)cme::admission::claimPeerSlot(region, ctx.coherency());
     }
     catch (const cme::NoFreeSlotError&)
     {
@@ -102,7 +95,7 @@ void runBody(harness::TestContext& ctx)
     bool reclaimOk = false;
     try
     {
-        reclaimed = cme::admission::claimPeerSlot(*region, ctx.coherency());
+        reclaimed = cme::admission::claimPeerSlot(region, ctx.coherency());
         reclaimOk = true;
     }
     catch (const std::exception& e)
@@ -119,7 +112,6 @@ void runBody(harness::TestContext& ctx)
     {
         peers[i].reset();
     }
-    region.reset();
 }
 
 }  // namespace test

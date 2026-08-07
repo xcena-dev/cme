@@ -63,18 +63,18 @@ void runBody(harness::TestContext& ctx)
 {
     // 4 domains = control(0) + the two data domains below, one spare.
     // 4 peers = shared, the verifier, and the move-assign target.
-    harness::formatSession(ctx, 4, 4);
+    harness::formatSession(4, 4);
 
     // Through the OpenOpts_t overload, since coherency has to match how this run reaches the
     // medium and the harness already resolved that from --backend.
-    auto shared = harness::openSharedSession(ctx);
+    auto shared = harness::openSharedSession();
 
     shared.createDomain(LeaveDomain);
     shared.createDomain(DeleteDomain);
 
     // A plain Session, for the two questions SharedSession deliberately cannot answer: it owns
     // its Session and hands out no reference, so the domain list has to come from elsewhere.
-    auto verifier = harness::openSession(ctx);
+    auto verifier = harness::openSession();
     verifier.joinDomain(LeaveDomain);
 
     // ── leaveDomain ────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ void runBody(harness::TestContext& ctx)
     // ── SharedSession move assignment ──────────────────────────────────
     // The target is opened first so the assignment overwrites a live object, which is the case
     // that has to release the old Impl rather than leak its peer slot.
-    auto sink = harness::openSharedSession(ctx);
+    auto sink = harness::openSharedSession();
     sink = std::move(shared);
     {
         const auto guard = sink.lock(LeaveDomain);

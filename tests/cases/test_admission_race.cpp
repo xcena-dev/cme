@@ -37,7 +37,7 @@ void runBody(harness::TestContext& ctx)
 {
     // Parent formats the region and lets the mapping go; the children each open it for
     // themselves and claim.
-    static_cast<void>(harness::createRegion(ctx, Domains, Claimers));
+    static_cast<void>(harness::createRegion(Domains, Claimers));
 
     const auto results = ctx.scratch<std::int32_t>("results", Claimers);
     if (!results)
@@ -54,7 +54,7 @@ void runBody(harness::TestContext& ctx)
             std::int32_t claimed = Failed;
             try
             {
-                auto region = harness::openBoundRegion(ctx, std::chrono::milliseconds{5000});
+                auto region = harness::openBoundRegion(std::chrono::milliseconds{5000});
                 claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, ctx.coherency()));
             }
             catch (...)

@@ -5,9 +5,12 @@
 // opening it, asking what domains it holds, and dumping the latency trace it collected.
 //
 // Each of these exists because the API's own default is wrong for a test, or because the call takes
-// values the run already knows. Every function has two forms where that helps: one taking values,
-// and one taking the TestContext, since the uri, the strategy and the medium's coherency mode all
-// come from the run and only the dimensions are the case's own choice.
+// values the run already knows: the uri, the strategy and the medium's coherency mode all come from
+// the run, and only the dimensions are the case's own choice.
+//
+// So the form a case writes says none of them and reaches for currentRun() instead. Where a caller
+// has no run -- a bench probe drives the medium without one -- an explicit form taking the values
+// sits beside it.
 //
 // This is the half of the harness that knows what cme is. helper_util.hpp is the half that does not.
 
@@ -17,8 +20,10 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "cme/shared.hpp"
 #include "cme/shared_session.hpp"
@@ -57,11 +62,15 @@ formatSession(const std::string& uri, std::uint32_t maxDomains, std::uint32_t ma
     return opts;
 }
 
-// The form a case actually writes: the uri and the strategy come from the run, and only the dims
-// are the case's own choice.
+// The form a case actually writes. The uri and the strategy come from the run, so only the dims
+// are said here.
+//
+// Every implicit form below reaches for currentRun(). A bench has no run, and calls the explicit
+// form above instead.
 inline cme::Session::FormatOpts_t
-formatSession(const TestContext& ctx, std::uint32_t maxDomains, std::uint32_t maxPeers)
+formatSession(std::uint32_t maxDomains, std::uint32_t maxPeers)
 {
+    const TestContext& ctx = currentRun();
     return formatSession(ctx.uri(), maxDomains, maxPeers, ctx.strategy());
 }
 
@@ -85,18 +94,18 @@ openSession(const std::string& uri, cme::CoherencyMode coherency,
 // Same, with both the uri and the medium's mode taken from the run. This is the one a case wants:
 // getting the mode from anywhere else is how a devdax run ends up asserting CacheCoherent.
 [[nodiscard]] inline cme::Session
-openSession(const TestContext& ctx,
-            std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+openSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
+    const TestContext& ctx = currentRun();
     return openSession(ctx.uri(), ctx.coherency(), formatTimeout);
 }
 
 // The intra-node tier, same reasoning: SharedSession::open takes the same OpenOpts_t and its bare
 // overload carries the same CacheCoherent default.
 [[nodiscard]] inline cme::SharedSession
-openSharedSession(const TestContext& ctx,
-                  std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+openSharedSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
+    const TestContext& ctx = currentRun();
     cme::Session::OpenOpts_t opts;
     opts.coherency = ctx.coherency();
     opts.formatTimeout = formatTimeout;
@@ -107,23 +116,22 @@ openSharedSession(const TestContext& ctx,
 // bytes, and bindBlocking is what reads the header and computes the section bases. A case wanting
 // the unbound state asks ctx.memory().openRegion() for it directly, since that state is then the
 // subject rather than a step.
-[[nodiscard]] inline cme::Geometry openBoundRegion(const TestContext& ctx,
-                                                   std::chrono::milliseconds formatTimeout =
-                                                       cme::Session::OpenOpts_t{}.formatTimeout)
+[[nodiscard]] inline cme::Geometry
+openBoundRegion(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
+    const TestContext& ctx = currentRun();
     auto region = ctx.memory().openRegion();
     region.bindBlocking(formatTimeout, ctx.coherency());
     return region;
 }
 
-// The Geometry counterpart of formatSession(ctx, ...), for a case that reaches past Session and
-// formats its own region: the strategy comes from the run either way, and only the dims are the
-// case's own choice. aggregatorGroups stays a parameter because RequestAgg cases pick it, and 0 is
-// the auto the header records for everything else.
-[[nodiscard]] inline cme::Geometry createRegion(const TestContext& ctx, std::uint32_t domainCount,
-                                                std::uint32_t peerCount,
-                                                std::uint32_t aggregatorGroups = 0)
+// The Geometry counterpart of formatSession, for a case that reaches past Session and formats its
+// own region. aggregatorGroups stays a parameter because RequestAgg cases pick it, and 0 is the
+// auto the header records for everything else.
+[[nodiscard]] inline cme::Geometry
+createRegion(std::uint32_t domainCount, std::uint32_t peerCount, std::uint32_t aggregatorGroups = 0)
 {
+    const TestContext& ctx = currentRun();
     return ctx.memory().createRegion(domainCount, peerCount,
                                      cme::Geometry::FormatOpts_t{ctx.strategy(), aggregatorGroups});
 }
@@ -132,30 +140,83 @@ openSharedSession(const TestContext& ctx,
 // A case that checks what the library wrote reads a slot itself, since no public accessor hands
 // out a record. Through coherency::get rather than the field: a slot is one 64 B line, and reading
 // a field in place skips the barrier the medium needs, which passes on a coherent host and on no
-// other. The mode is a parameter because taking it from anywhere but the run is how a devdax case
-// ends up asserting CacheCoherent.
+// other.
+
+// Writing a slot is deliberately absent. A case that writes one is injecting a fault, and the
+// injection is that case's subject rather than a way to reach the region.
 
 [[nodiscard]] inline cme::Geometry::Member_t
-readMemberSlot(const cme::Geometry& region, cme::PeerId peerId, cme::CoherencyMode coherency)
+readMemberSlot(const cme::Geometry& region, cme::PeerId peerId)
 {
-    return cme::coherency::get(region.getMemberSlot(peerId), coherency);
+    return cme::coherency::get(region.getMemberSlot(peerId), currentRun().coherency());
 }
 
 // The predicate four recovery cases had each written out for themselves: is this peer's slot in
 // that state yet. Named separately because it is what waitUntil and holdsFor take.
-[[nodiscard]] inline bool hasMemberStatus(const cme::Geometry& region, cme::PeerId peerId,
-                                          cme::Geometry::Member_t::Status status,
-                                          cme::CoherencyMode coherency)
+[[nodiscard]] inline bool
+hasMemberStatus(const cme::Geometry& region, cme::PeerId peerId,
+                cme::Geometry::Member_t::Status status)
 {
-    return readMemberSlot(region, peerId, coherency).hasStatus(status);
+    return readMemberSlot(region, peerId).hasStatus(status);
 }
 
-// The authoritative copy. A case wanting a group shadow asks getDomainRecordShadow directly, since
-// the shadow is then the subject rather than a way to read the domain.
-[[nodiscard]] inline cme::Geometry::DomainRecord_t
-readDomainRecord(const cme::Geometry& region, cme::DomainId domainId, cme::CoherencyMode coherency)
+[[nodiscard]] inline bool
+participatesIn(const cme::Geometry& region, cme::PeerId peerId, cme::DomainId domainId)
 {
-    return cme::coherency::get(region.getDomainRecord(domainId), coherency);
+    return readMemberSlot(region, peerId).loadParticipatingDomains().has(domainId);
+}
+
+// The authoritative copy.
+[[nodiscard]] inline cme::Geometry::DomainRecord_t
+readDomainRecord(const cme::Geometry& region, cme::DomainId domainId)
+{
+    return cme::coherency::get(region.getDomainRecord(domainId), currentRun().coherency());
+}
+
+// The copy @peerId's group polls, for a case checking whether a publish reached both.
+[[nodiscard]] inline cme::Geometry::DomainRecord_t
+readDomainRecordShadow(const cme::Geometry& region, cme::DomainId domainId, cme::PeerId peerId)
+{
+    return cme::coherency::get(region.getDomainRecordShadow(domainId, peerId),
+                               currentRun().coherency());
+}
+
+// A peer on @region under the run's mode. The mode is the argument a case must not get wrong, and
+// a Peer built with the wrong one runs a barrier discipline its medium does not have.
+[[nodiscard]] inline cme::Peer makePeer(cme::Geometry& region, cme::PeerId peerId)
+{
+    return cme::Peer{region, peerId, currentRun().coherency()};
+}
+
+// The same, owned, for a case that drops a peer without running its destructor: a crash model
+// leaks the Peer so no dtor touches a slot recovery has already finished.
+[[nodiscard]] inline std::unique_ptr<cme::Peer> makePeerPtr(cme::Geometry& region,
+                                                            cme::PeerId peerId)
+{
+    return std::make_unique<cme::Peer>(region, peerId, currentRun().coherency());
+}
+
+// Peers 0..count-1, each joining data domains 1..domainCount. domainCount = 0 leaves them in the
+// control domain alone, which is what a case wants when the region is there to be filled rather
+// than worked: admission has no free slot left, and that is the subject.
+//
+// Owned rather than by value because these outlive the loop that made them and a case reaches back
+// into one by index, and because the crash model needs a peer it can drop without a destructor.
+[[nodiscard]] inline std::vector<std::unique_ptr<cme::Peer>>
+makePeers(cme::Geometry& region, cme::PeerId count, cme::DomainId domainCount = 0)
+{
+    std::vector<std::unique_ptr<cme::Peer>> peers;
+    peers.reserve(count);
+    for (cme::PeerId peerId = 0; peerId < count; ++peerId)
+    {
+        auto peer = makePeerPtr(region, peerId);
+        for (cme::DomainId domainId = 1; domainId <= domainCount; ++domainId)
+        {
+            peer->joinDomain(domainId);
+        }
+        peers.push_back(std::move(peer));
+    }
+    return peers;
 }
 
 // Whether the region lists @name as an Active data domain. The name is what a caller has, and
@@ -195,10 +256,9 @@ inline void dumpLatencyTrace(const char* path)
 
 // Seed @count data domains into slots 1..count via a transient peer 0; genesis ownership
 // stays on slot 0 and the real peer 0 re-adopts it. Call once after format.
-inline void seedDataDomains(cme::Geometry& region, std::uint32_t count,
-                            cme::CoherencyMode coherency)
+inline void seedDataDomains(cme::Geometry& region, std::uint32_t count)
 {
-    cme::Peer creator{region, 0, coherency};
+    cme::Peer creator{region, 0, currentRun().coherency()};
     for (std::uint32_t i = 0; i < count; ++i)
     {
         (void)creator.createDomain("lane" + std::to_string(i));

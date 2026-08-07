@@ -21,10 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
-#include <string>
 
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/policy/recovery_authority_layout.hpp"
@@ -47,20 +44,10 @@ constexpr std::uint32_t FineStepMs = 1;  // fast poll: catch the stake inside th
 // worker idles far shorter than the default.
 constexpr std::uint32_t ThawSleepMs = 2;
 
-// Spawn peers [0, count); leave [count, maxPeers) unadmitted (their slots stay None).
-void spawnPeers(std::array<harness::PeerSlot_t, 5>& peers, cme::PeerId count, cme::Geometry& region,
-                cme::CoherencyMode coherency, cme::DomainId domainCount)
-{
-    for (cme::PeerId i = 0; i < count; ++i)
-    {
-        peers[i].idleMs = ThawSleepMs;
-        harness::spawnPeerWorker(peers[i], i, region, coherency, domainCount);
-    }
-}
+}  // namespace
 
-// ── Scenario 1: dead-RA hook sweeps a recovered peer's ghost claim words ─────
-void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
-                   cme::CoherencyMode coherency, const std::string& stratSuffix)
+// ── the dead-RA hook sweeps a recovered peer's ghost claim words ─────
+void runBody(harness::TestContext& ctx)
 {
     constexpr cme::PeerId MaxPeers = 5;
     constexpr cme::DomainId NumDomains = 2;
@@ -69,22 +56,28 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
     constexpr cme::PeerId DeadRa = 1;   // the RA that "died mid-recovery" and is recovered here
     constexpr cme::PeerId Ghost = 4;    // never-admitted slot hosting DeadRa's ghost claim word
 
-    std::optional<cme::Geometry> region{harness::createRegion(ctx, Ceiling, MaxPeers)};
-    harness::seedDataDomains(*region, NumDomains, coherency);
-    std::printf("zombie/dead-RA hook: %u peers (%s)\n", MaxPeers, stratSuffix.c_str());
+    auto region = harness::createRegion(Ceiling, MaxPeers);
+    harness::seedDataDomains(region, NumDomains);
+    std::printf("zombie/dead-RA hook: %u peers (%s)\n", MaxPeers, ctx.strategySuffix());
 
-    std::array<harness::PeerSlot_t, 5> peers{};
-    spawnPeers(peers, Workers, *region, coherency, NumDomains);
+    // Workers of the MaxPeers slots; the rest stay unadmitted, which is what the ghost claim below
+    // needs a slot for.
+    std::array<harness::PeerSlot_t, MaxPeers> peers{};
+    for (harness::PeerSlot_t& slot : peers)
+    {
+        slot.idleMs = ThawSleepMs;
+    }
+    harness::spawnPeerWorkers(peers, Workers, region, NumDomains);
     harness::sleepMs(1000);  // memberships go Active; ownership spreads
 
     auto raStatusIs = [&](Status status)
     {
-        return harness::hasMemberStatus(*region, DeadRa, status, coherency);
+        return harness::hasMemberStatus(region, DeadRa, status);
     };
-    auto* ghostSlot = cme::RecoveryAuthorityLayout{*region}.getClaim(Ghost);
+    auto* ghostSlot = cme::RecoveryAuthorityLayout{region}.getClaim(Ghost);
     auto ghostRa = [&]() -> cme::PeerId
     {
-        return static_cast<cme::PeerId>(cme::coherency::get(ghostSlot, coherency).recoveryAuthority);
+        return static_cast<cme::PeerId>(cme::coherency::get(ghostSlot, ctx.coherency()).recoveryAuthority);
     };
 
     ctx.check(raStatusIs(Status::Active), "dead-RA slot Active before crash");
@@ -93,7 +86,7 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
     // residue of an RA that staked a claim while recovering some other peer, then died.
     peers[DeadRa].frozen.store(true);
     harness::sleepMs(150);
-    cme::coherency::rmwIfTrue(ghostSlot, coherency,
+    cme::coherency::rmwIfTrue(ghostSlot, ctx.coherency(),
                               [](auto* claim)
                               {
                                   if (!claim->isValidMagic())
@@ -117,16 +110,6 @@ void runDeadRaHook(harness::TestContext& ctx, const std::string& uri,
 
     peers[DeadRa].abandon.store(true);  // frozen peer never rejoins
     harness::joinPeerWorkers(peers, Workers);
-    region.reset();
-}
-
-}  // namespace
-
-void runBody(harness::TestContext& ctx)
-{
-    const char* const stratSuffix = ctx.strategySuffix();
-
-    runDeadRaHook(ctx, ctx.uri(), ctx.coherency(), stratSuffix);
 }
 
 }  // namespace test

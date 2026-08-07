@@ -653,7 +653,7 @@ void runBody(harness::TestContext& ctx)
 
     // Slot 0 is control; create the rest so workers find every slot Active. Control doubles
     // as a contended domain here, since no create/delete runs during the measured section.
-    harness::seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
+    harness::seedDataDomains(region, opt.numDomains - 1);
 
     std::vector<PeerResult_t> results(opt.numPeers);
     runPeers(opt, region, results, ctx.coherency());

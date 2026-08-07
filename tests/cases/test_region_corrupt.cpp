@@ -47,11 +47,6 @@ constexpr const char* Domain = "lane0";
 // four real values are contiguous from zero, so a corrupt or newer-build region shows up here.
 constexpr std::uint32_t UnknownStrategy = 99;
 
-cme::Geometry makeRegion(harness::TestContext& ctx)
-{
-    return harness::createRegion(ctx, FormatDomains, FormatPeers);
-}
-
 // Publish @slot with its magic zeroed. The whole 64 B line goes through coherency::set, which is
 // how format commits it -- writing the one field in place would leave the rest unfenced on a
 // noncoherent medium, and the failure would then say more about the write than about the check.
@@ -70,12 +65,12 @@ void clearMagic(T_Slot* slot, cme::CoherencyMode coherency)
 void checkMemberSlotCleared(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = makeRegion(ctx);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
     clearMagic(region.getMemberSlot(0), coherency);
 
     const auto joinRegion = [&region, coherency]
     {
-        const cme::Peer joiner{region, 0, coherency};
+        const auto joiner = harness::makePeer(region, 0);
     };
     ctx.check(harness::threw<cme::JoinError>(joinRegion),
               "cleared member magic: the join fails");
@@ -89,12 +84,12 @@ void checkMemberSlotCleared(harness::TestContext& ctx)
 void checkControlRecordCleared(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = makeRegion(ctx);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
     clearMagic(region.getDomainRecord(cme::ControlDomainId), coherency);
 
     const auto joinRegion = [&region, coherency]
     {
-        const cme::Peer joiner{region, 0, coherency};
+        const auto joiner = harness::makePeer(region, 0);
     };
     ctx.check(harness::threw<cme::JoinError>(joinRegion),
               "cleared control record magic: the join fails");
@@ -108,13 +103,13 @@ void checkControlRecordCleared(harness::TestContext& ctx)
 void checkJoinRecordCleared(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = makeRegion(ctx);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
     // Both peers join while the region is intact, so the failure below belongs to joinDomain rather
     // than to either join. The holder stays live: it owns control, and the bystander's joinDomain
     // has to take that lock from it.
-    cme::Peer holder{region, 0, coherency};
-    cme::Peer bystander{region, 1, coherency};
+    auto holder = harness::makePeer(region, 0);
+    auto bystander = harness::makePeer(region, 1);
     const cme::DomainId lane = holder.createDomain(Domain);
 
     clearMagic(region.getDomainRecord(lane), coherency);
@@ -138,9 +133,9 @@ void checkJoinRecordCleared(harness::TestContext& ctx)
 void checkHeldRecordCleared(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = makeRegion(ctx);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    cme::Peer holder{region, 0, coherency};
+    auto holder = harness::makePeer(region, 0);
     const cme::DomainId lane = holder.createDomain(Domain);
     {
         // The creator is holder, so this one comes off the resident fast path. Without it the
@@ -166,7 +161,7 @@ void checkHeldRecordCleared(harness::TestContext& ctx)
 void checkUnknownStrategy(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = makeRegion(ctx);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
     auto* header = region.getHeader();
     auto line = cme::coherency::get(header, coherency);
@@ -175,7 +170,7 @@ void checkUnknownStrategy(harness::TestContext& ctx)
 
     const auto joinRegion = [&region, coherency]
     {
-        const cme::Peer joiner{region, 0, coherency};
+        const auto joiner = harness::makePeer(region, 0);
     };
     ctx.check(harness::threw<cme::JoinError>(joinRegion),
               "unknown strategy in the header: the join fails");

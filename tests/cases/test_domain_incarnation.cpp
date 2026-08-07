@@ -52,11 +52,10 @@ constexpr std::chrono::milliseconds GrantWindow{3'000};
 
 void runBody(harness::TestContext& ctx)
 {
-    const auto coherency = ctx.coherency();
-    auto region = harness::createRegion(ctx, FormatDomains, FormatPeers);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    cme::Peer holder{region, HolderId, coherency};
-    cme::Peer tenant{region, TenantId, coherency};
+    auto holder = harness::makePeer(region, HolderId);
+    auto tenant = harness::makePeer(region, TenantId);
 
     const cme::DomainId lane = holder.createDomain(FirstName);
     tenant.joinDomain(lane);
@@ -66,14 +65,13 @@ void runBody(harness::TestContext& ctx)
         return;
     }
 
-    const auto before = harness::readDomainRecord(region, lane, coherency);
+    const auto before = harness::readDomainRecord(region, lane);
 
     // The tenant has to be out before the delete: deleteDomainLocked refuses while another peer
     // participates, and the holder has to take the record back to run it at all.
     tenant.leaveDomain(lane);
     holder.deleteDomain(lane);
-    ctx.check(!harness::readDomainRecord(region, lane, coherency)
-                   .hasState(cme::Geometry::DomainRecord_t::State::Active),
+    ctx.check(!harness::readDomainRecord(region, lane).hasState(cme::Geometry::DomainRecord_t::State::Active),
               "the deleted slot is no longer Active");
 
     const cme::DomainId reused = holder.createDomain(SecondName);
@@ -82,7 +80,7 @@ void runBody(harness::TestContext& ctx)
         return;
     }
 
-    const auto after = harness::readDomainRecord(region, lane, coherency);
+    const auto after = harness::readDomainRecord(region, lane);
     const auto beforeGeneration = static_cast<std::uint64_t>(before.generation);
     const auto afterGeneration = static_cast<std::uint64_t>(after.generation);
     const auto beforeEpoch = static_cast<std::uint64_t>(before.epoch);

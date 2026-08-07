@@ -50,12 +50,12 @@ void runBody(harness::TestContext& ctx)
 
     const int iters = static_cast<int>(harness::argU64("--iters", DefaultIters));
 
-    cme::Geometry region = harness::createRegion(ctx, Ceiling, MaxPeers);
+    cme::Geometry region = harness::createRegion(Ceiling, MaxPeers);
 
     std::printf("departure strand: %d forced grants at departure (%s, backend=%s)\n", iters,
                 ctx.strategySuffix(), ctx.backendName());
 
-    auto keeper = std::make_unique<cme::Peer>(region, Keeper, ctx.coherency());
+    auto keeper = harness::makePeerPtr(region, Keeper);
     const cme::DomainId domainId = keeper->createDomain("churn");
     keeper->joinDomain(domainId);
 
@@ -66,7 +66,7 @@ void runBody(harness::TestContext& ctx)
     int landedLate = 0;
     for (int iter = 0; iter < iters; ++iter)
     {
-        auto leaver = std::make_unique<cme::Peer>(region, Leaver, ctx.coherency());
+        auto leaver = harness::makePeerPtr(region, Leaver);
         leaver->joinDomain(domainId);
         std::this_thread::sleep_for(std::chrono::milliseconds{1});
 

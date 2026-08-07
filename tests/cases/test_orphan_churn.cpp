@@ -29,7 +29,6 @@
 #include <cstring>
 #include <exception>
 #include <memory>
-#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -37,7 +36,6 @@
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
 #include "core/algo/peer.hpp"
-#include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -167,8 +165,7 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
+    auto region = harness::createRegion(Ceiling, MaxPeers);
 
     harness::log("orphan churn: %u workers, %u data slots (%s, backend=%s)", Workers, DataSlots,
                  ctx.strategySuffix(), ctx.backendName());
@@ -177,7 +174,7 @@ void runBody(harness::TestContext& ctx)
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
         peers[i].peerId = i;
-        peers[i].region = &*region;
+        peers[i].region = &region;
         peers[i].coherency = ctx.coherency();
         peers[i].runner = std::thread{worker, &peers[i]};
     }
@@ -227,7 +224,7 @@ void runBody(harness::TestContext& ctx)
     // ── leak audit: a fresh peer must still create >= (slots - workers) domains. ──
     std::uint32_t auditCreated = 0;
     {
-        cme::Peer audit{*region, cme::admission::claimPeerSlot(*region, ctx.coherency()), ctx.coherency()};
+        cme::Peer audit{region, cme::admission::claimPeerSlot(region, ctx.coherency()), ctx.coherency()};
         for (cme::DomainId k = 0; k < DataSlots; ++k)
         {
             try
@@ -262,8 +259,6 @@ void runBody(harness::TestContext& ctx)
     }
     ctx.check(auditCreated >= DataSlots - Workers,
               "slots not leaked: fresh peer created >= (slots - workers) domains");
-
-    region.reset();
 }
 
 }  // namespace test

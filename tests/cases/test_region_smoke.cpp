@@ -16,6 +16,7 @@
 #include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
+#include "helper.hpp"
 #include "observe/inspector.hpp"
 #include "test_context.hpp"
 
@@ -112,7 +113,7 @@ void checkInspectorMatchesHeader(const std::string& shmUri, const cme::Geometry:
 void checkPeerAcquireReleaseCycles(cme::Geometry& region, cme::DomainId numDomains,
                                    harness::TestContext& ctx)
 {
-    cme::Peer peer{region, 0, ctx.coherency()};
+    auto peer = harness::makePeer(region, 0);
     ctx.check(peer.getPeerId() == 0, "Peer::getPeerId() matches ctor arg");
 
     // Create + join the data domains (slots 1..numDomains-1); slot 0 is
@@ -162,7 +163,7 @@ void checkRequestStrategyRoundTrip(cme::DomainId numDomains, cme::PeerId maxPeer
     const std::string reqUri = std::string{"shm:"} + ReqName;
     auto region = cme::Geometry::create(reqUri, numDomains, maxPeers,
                                         cme::Geometry::FormatOpts_t{cme::Strategy::Request});
-    cme::Peer peer{region, 0, ctx.coherency()};
+    auto peer = harness::makePeer(region, 0);
     for (cme::DomainId domainId = 1; domainId < numDomains; ++domainId)
     {
         peer.joinDomain(peer.createDomain("lane" + std::to_string(domainId)));

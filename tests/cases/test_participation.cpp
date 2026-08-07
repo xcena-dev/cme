@@ -30,13 +30,13 @@ namespace
 void runBody(harness::TestContext& ctx)
 {
     // 3 = control(0) + "inv" + "orders".
-    harness::formatSession(ctx, 3, 4);
+    harness::formatSession(3, 4);
 
-    auto owner = harness::openSession(ctx);
+    auto owner = harness::openSession();
     // The owner (peer 0, control genesis holder) creates the data domains.
     owner.createDomain("inv");
     owner.createDomain("orders");
-    auto joiner = harness::openSession(ctx);
+    auto joiner = harness::openSession();
 
     // ── opt-in: a domain is not joined by default ─────────────────
     // The joiner has not joined "inv" -> locking it is refused.

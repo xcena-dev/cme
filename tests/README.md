@@ -41,6 +41,8 @@ A case registered with all four strategies appears four times per backend.
 | Primitives | `test_region_smoke.cpp` | `region_smoke` (shm) | Memory + formatRegion + `Memory::header()`; no Peer, no policy |
 | Primitives | `test_region_reject.cpp` | `region_reject` (shm) | The rejection side: cleared magic, unsupported version, out-of-range dims, area past the mapping. `Session::open` throws, `Inspector::readHeader` returns nullopt, and an intact region is still accepted |
 | Primitives | `test_memory_reject.cpp` | `memory_reject` (shm) | The backends' refusals: malformed URIs, an unknown scheme, a dax offset off its PMD boundary, shm names that are empty, too long, absent or unsized, an empty file, and sizes beyond the machine. Asserted by message, since all of them are `FormatError` |
+| Primitives | `test_degenerate_region.cpp` | `degenerate_region` x4 strategies | The region with one peer in it: `getGroupCount(1)`, a peer ring with nobody else, a successor scan that must find no candidate, and RequestAgg's group count against a single peer |
+| Primitives | `test_ceiling_region.cpp` | `ceiling_region` (request) | A region formatted at `MaxDomains` x `MaxPeers`, and a handoff to the last member slot so the shadow index lands on the final copy of the block |
 | Primitives | `test_file_presized.cpp` | `file_presized` (shm) | `FileMemory`'s creator sizing rule: a fresh file is grown to the mapping, a pre-sized one is mapped untouched. The pre-sized file is a memfd sealed against shrinking, which is how a WORM mount refuses the second truncate |
 | Public API | `test_shared_smoke.cpp` | `shared_smoke` | `Session::format/open`, lock + Guard RAII, tryLock, withLock, getDomainNames, re-format idempotency |
 | Public API | `test_shared_session.cpp` | `shared_session` x4 strategies | One session shared by N threads of one process still excludes, which a per-peer token does not cover alone |
@@ -67,6 +69,7 @@ A case registered with all four strategies appears four times per backend.
 | Recovery | `test_recovery_zombie_claim.cpp` | `recovery_zombie_claim` x4 strategies | A ghost claim authored by a peer that has since re-admitted is retracted at FINISH |
 | Recovery | `test_orphan_churn.cpp` | `orphan_churn` x4 strategies | Recovery while the registry mutates, which the scripted tests never do |
 | Recovery | `test_departure_strand.cpp` | `departure_strand` (order) | C4: a grant landing on a departing peer must not strand the domain |
+| Recovery | `test_demand_scrub.cpp` | `demand_scrub` (request) | R3: recovery clears a dead requester's demand line, so the grant scan stops naming a corpse as a candidate. The Request-family analogue of what `agg_recovery` checks for the aggregator record |
 | Policy | `test_agg_recovery.cpp` | `agg_recovery` | RequestAgg only: a crashed aggregator is re-elected to a live group member, and reaches NoPeer once the group is gone |
 | Reference | `test_mutex_baseline.cpp` | `mutex_baseline` (shm) | Process-shared pthread_mutex latency floor, the coherent-DRAM reference CME's own numbers are read against |
 | Reference | `test_seq_latency.cpp` | `seq_latency_*` | Uncontended acquire latency, one lock at a time, dominated by the handoff |

@@ -23,7 +23,6 @@
 #include <cstdint>
 
 #include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -47,48 +46,40 @@ constexpr const char* SecondDomain = "lane1";
 
 constexpr std::chrono::milliseconds GrantWindow{3'000};
 
-[[nodiscard]] bool participatesIn(const cme::Geometry& region, cme::PeerId peerId,
-                                  cme::DomainId domainId, cme::CoherencyMode coherency)
-{
-    return harness::readMemberSlot(region, peerId, coherency).loadParticipatingDomains().has(domainId);
-}
-
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
 {
-    const auto coherency = ctx.coherency();
-    auto region = harness::createRegion(ctx, FormatDomains, FormatPeers);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    cme::Peer holder{region, HolderId, coherency};
+    auto holder = harness::makePeer(region, HolderId);
     const cme::DomainId firstLane = holder.createDomain(FirstDomain);
     const cme::DomainId secondLane = holder.createDomain(SecondDomain);
 
     {
-        cme::Peer tenant{region, TenantId, coherency};
+        auto tenant = harness::makePeer(region, TenantId);
         tenant.joinDomain(firstLane);
         tenant.joinDomain(secondLane);
-        ctx.check(participatesIn(region, TenantId, firstLane, coherency) &&
-                      participatesIn(region, TenantId, secondLane, coherency),
+        ctx.check(harness::participatesIn(region, TenantId, firstLane) &&
+                      harness::participatesIn(region, TenantId, secondLane),
                   "the tenant's slot carries both domains while it is joined");
     }
 
     // The destructor is the clean-leave path: Leaving, drain, then None with participation
     // cleared in the same write.
-    ctx.check(harness::hasMemberStatus(region, TenantId,
-                                       cme::Geometry::Member_t::Status::None, coherency),
+    ctx.check(harness::hasMemberStatus(region, TenantId, cme::Geometry::Member_t::Status::None),
               "the departed slot is None");
-    ctx.check(!participatesIn(region, TenantId, firstLane, coherency) &&
-                  !participatesIn(region, TenantId, secondLane, coherency),
+    ctx.check(!harness::participatesIn(region, TenantId, firstLane) &&
+                  !harness::participatesIn(region, TenantId, secondLane),
               "the departed slot carries no data domain");
-    ctx.check(!participatesIn(region, TenantId, cme::ControlDomainId, coherency),
+    ctx.check(!harness::participatesIn(region, TenantId, cme::ControlDomainId),
               "the departed slot carries no control domain either");
 
-    cme::Peer newcomer{region, TenantId, coherency};
-    ctx.check(participatesIn(region, TenantId, cme::ControlDomainId, coherency),
+    auto newcomer = harness::makePeer(region, TenantId);
+    ctx.check(harness::participatesIn(region, TenantId, cme::ControlDomainId),
               "the new occupant is seeded with the control domain");
-    ctx.check(!participatesIn(region, TenantId, firstLane, coherency) &&
-                  !participatesIn(region, TenantId, secondLane, coherency),
+    ctx.check(!harness::participatesIn(region, TenantId, firstLane) &&
+                  !harness::participatesIn(region, TenantId, secondLane),
               "the new occupant inherits no data domain");
 
     const auto lockUnjoined = [&newcomer, firstLane]

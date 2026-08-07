@@ -11,21 +11,28 @@ The library reads no configuration and takes no flags; the harness is where both
 | [`test_options.hpp`](test_options.hpp) | The flags one run was given: which medium, which slot on it, which successor policy, where the config file is, and whether this invocation is the cleanup pass rather than the run. ctest passes them one registration at a time. |
 | [`config_reader.hpp`](config_reader.hpp) | `config.yaml`, read once and checked against the machine: which devdax node this host has, where the uncacheable mount is. |
 | [`test_memory.hpp`](test_memory.hpp) | One named area on the medium, owned by one run. Names it, starts it clean, hands out a URI or a mapped region, removes it afterwards. |
-| [`test_context.hpp`](test_context.hpp) | The three above in the one order that works, plus the verdict a case records against and the entry point that runs one. Also a named shm segment for a forked child to report through. |
+| [`test_context.hpp`](test_context.hpp) | The three above in the one order that works, plus the verdict a case records against and the entry point that runs one. It also publishes the run for the duration, which is where the helpers below get it. Also a named shm segment for a forked child to report through. |
 | [`helper.hpp`](helper.hpp) | The three below together, so a case includes one name and gets all of `harness`. |
 | [`helper_util.hpp`](helper_util.hpp) | What a case needs that has nothing to do with cme: randomness, a timestamped log line, waiting for a predicate to hold and holding one across a window, running a fixed set of threads to completion, catching a single exception type, and one summary statistic. No cme header, no `TestContext`. |
 | [`helper_process.hpp`](helper_process.hpp) | Forking a case into several processes over one region, and collecting them afterwards. POSIX only. |
-| [`helper_cme.hpp`](helper_cme.hpp) | The library calls every case makes the same way: formatting a region, opening one at each tier, seeding it with domains, asking it what it holds, and reading a member slot or a domain record past the public API. |
+| [`helper_cme.hpp`](helper_cme.hpp) | The library calls every case makes the same way: formatting a region, opening one at each tier, seeding it with domains, asking it what it holds, and reading a member slot or a domain record past the public API. Each takes only what the case chooses, since the uri, the strategy and the coherency mode come from the run. |
 | [`args.hpp`](args.hpp) | `--flag value` lookup over `argv`, with no dependency on libcme. |
 
 The order in `TestContext` is the point of it.
 Flags come before config, config before medium, medium before region, and the verdict after everything.
 Member declaration order is what enforces that, so a run cannot read a fact that is not settled yet.
 
-The helper split follows the same rule, and `args.hpp` is why the rule exists.
-The standalone probes in `bench/` need argument parsing and must not link libcme, because they measure the medium with `mmap` and intrinsics and pulling in `cme/shared.hpp` would defeat what they exist to measure.
-So each of these headers is separated by what it drags in rather than by what it is about: `args.hpp` and `helper_util.hpp` need nothing, `helper_process.hpp` needs POSIX, and `helper_cme.hpp` needs the library.
-A file that includes `helper.hpp` takes all three, which is what a case wants and what a probe must not do.
+A case never passes that context down.
+`runCase` publishes it for as long as the body runs, and the helpers ask for it, so a call says which domain or which peer and not which medium or which mode.
+The mode is the one a case must not get wrong: a region opened under the wrong one runs a barrier discipline its medium does not have, and passes anyway on a coherent host.
+Taking it from the run is what makes that impossible to write.
+
+Reaching for a run that is not there aborts and says so, which is the cost of holding it aside rather than passing it.
+That is the case a `bench/` probe is in.
+A probe drives the medium without a run, so it takes the halves that need none and calls the explicit forms, the ones that name the uri and the mode outright.
+
+So each of these headers is separated by what it drags in rather than by what it is about: `args.hpp` and `helper_util.hpp` need nothing, `helper_process.hpp` needs POSIX, and `helper_cme.hpp` needs the library and the run.
+A file that includes `helper.hpp` takes all of them, which is what a case wants.
 
 ## What the scripts source
 

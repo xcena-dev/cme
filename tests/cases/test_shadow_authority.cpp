@@ -62,10 +62,10 @@ constexpr std::chrono::milliseconds GrantWindow{3'000};
 void runBody(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    auto region = harness::createRegion(ctx, FormatDomains, FormatPeers);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    cme::Peer holder{region, HolderId, coherency};
-    cme::Peer waiter{region, WaiterId, coherency};
+    auto holder = harness::makePeer(region, HolderId);
+    auto waiter = harness::makePeer(region, WaiterId);
     const cme::DomainId lane = holder.createDomain(Domain);
     waiter.joinDomain(lane);
 
@@ -75,7 +75,7 @@ void runBody(harness::TestContext& ctx)
         return;
     }
 
-    const auto truth = harness::readDomainRecord(region, lane, coherency);
+    const auto truth = harness::readDomainRecord(region, lane);
     if (!ctx.checkf(truth.getHolder() == HolderId, "the truth names peer %u", HolderId))
     {
         return;
@@ -88,7 +88,7 @@ void runBody(harness::TestContext& ctx)
 
     ctx.check(!waiter.tryLock(lane, ForgedWindow).has_value(),
               "a shadow naming the waiter does not hand it the domain");
-    ctx.check(harness::readDomainRecord(region, lane, coherency).getHolder() == HolderId,
+    ctx.check(harness::readDomainRecord(region, lane).getHolder() == HolderId,
               "the truth still names the holder after the refused acquire");
 
     // The same acquire has to succeed once the truth agrees, or the refusal above would also be

@@ -70,10 +70,10 @@ void runBody(harness::TestContext& ctx)
     const char* const stratSuffix = ctx.strategySuffix();
 
     // 2 = control(0) + one data domain.
-    harness::formatSession(ctx, 2, 4);
+    harness::formatSession(2, 4);
 
     // One session for the whole process; every thread below goes through it.
-    auto shared = harness::openSharedSession(ctx);
+    auto shared = harness::openSharedSession();
     shared.createDomain(Domain);  // creator participates, so lock() is legal straight away
 
     const std::uint64_t expected = static_cast<std::uint64_t>(Threads) * ItersPerThread;

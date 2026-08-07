@@ -119,7 +119,7 @@ void checkGeometryDims(harness::TestContext& ctx)
     // format() is public and takes its own opts, so the group check runs there too. An unbound
     // geometry reaches it first: open() maps the region without reading the header, and every
     // section base is still null until bindBlocking computes the layout.
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
     auto region = ctx.memory().openRegion();  // mapped, not bound: that is what format has to refuse
 
     const auto formatUnbound = [&region, &opts]
@@ -142,9 +142,9 @@ void checkGeometryDims(harness::TestContext& ctx)
 // ── a Session whose Impl was moved out ─────────────────────────────
 void checkMovedFromSession(harness::TestContext& ctx)
 {
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
 
-    auto session = harness::openSession(ctx);
+    auto session = harness::openSession();
     session.createDomain(Domain);
     const auto live = std::move(session);  // every call below goes to the husk, not to `live`
 
@@ -195,17 +195,16 @@ void checkMovedFromSession(harness::TestContext& ctx)
 // ── Peer: range, name length, and the mandatory control domain ─────
 void checkPeerArguments(harness::TestContext& ctx)
 {
-    const auto coherency = ctx.coherency();
-    auto region = harness::createRegion(ctx, FormatDomains, FormatPeers);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    const auto joinAsCeilingPeer = [&region, coherency]
+    const auto joinAsCeilingPeer = [&region]
     {
-        const cme::Peer rejected{region, cme::MaxPeers, coherency};
+        const auto rejected = harness::makePeer(region, cme::MaxPeers);
     };
     ctx.check(harness::threw<cme::JoinError>(joinAsCeilingPeer),
               "Peer construction rejects a peer id at the ceiling");
 
-    cme::Peer peer{region, 0, coherency};
+    auto peer = harness::makePeer(region, 0);
     const cme::DomainId lane = peer.createDomain(Domain);
     peer.joinDomain(lane);
 
@@ -285,7 +284,7 @@ void checkPeerArguments(harness::TestContext& ctx)
     ctx.check(!harness::threw<cme::Error>(joinAgain),
               "joinDomain of a domain already joined returns quietly");
 
-    cme::Peer bystander{region, 1, coherency};
+    auto bystander = harness::makePeer(region, 1);
     const auto leaveUnjoined = [&bystander, lane]
     {
         bystander.leaveDomain(lane);
@@ -299,10 +298,9 @@ void checkPeerArguments(harness::TestContext& ctx)
 // construction has an Impl before it has a policy. A moved-from Peer has neither.
 void checkMovedFromPeer(harness::TestContext& ctx)
 {
-    const auto coherency = ctx.coherency();
-    auto region = harness::createRegion(ctx, FormatDomains, FormatPeers);
+    auto region = harness::createRegion(FormatDomains, FormatPeers);
 
-    cme::Peer peer{region, 0, coherency};
+    auto peer = harness::makePeer(region, 0);
     const cme::DomainId lane = peer.createDomain(Domain);
     const cme::Peer live{std::move(peer)};
 

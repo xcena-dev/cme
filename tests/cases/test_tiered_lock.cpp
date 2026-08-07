@@ -105,7 +105,7 @@ Tiers_t buildTiers(const Config_t& cfg, const harness::TestContext& ctx)
     tiers.shared.reserve(cfg.numPeers);
     for (std::uint32_t pid = 0; pid < cfg.numPeers; ++pid)
     {
-        tiers.shared.emplace_back(harness::openSharedSession(ctx));
+        tiers.shared.emplace_back(harness::openSharedSession());
         tiers.shared[pid].setCohortCap(cfg.cohortCap);
         for (std::uint32_t domainId = 1; domainId <= cfg.numDomains; ++domainId)
         {
@@ -253,7 +253,7 @@ void runBody(harness::TestContext& ctx)
     g_counter.assign(cfg.numDomains + 1, 0);  // index 1..D used
 
     // domainCeiling = control(0) + D data domains.
-    harness::formatSession(ctx, cfg.domainCeiling, cfg.numPeers);
+    harness::formatSession(cfg.domainCeiling, cfg.numPeers);
 
     Tiers_t tiers = buildTiers(cfg, ctx);
 

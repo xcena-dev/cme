@@ -33,6 +33,7 @@
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper_util.hpp"
+#include "test_context.hpp"
 
 namespace harness
 {
@@ -116,13 +117,28 @@ inline void runPeerWorker(PeerSlot_t* slot)
 // idleMs is not a parameter here. A case that wants a different one assigns it before this call,
 // which keeps the argument list at what every caller has to say.
 inline void spawnPeerWorker(PeerSlot_t& slot, cme::PeerId peerId, cme::Geometry& region,
-                            cme::CoherencyMode coherency, cme::DomainId domainCount)
+                            cme::DomainId domainCount)
 {
     slot.region = &region;
     slot.peerId = peerId;
-    slot.coherency = coherency;
+    slot.coherency = currentRun().coherency();
     slot.domainCount = domainCount;
     slot.runner = std::thread{runPeerWorker, &slot};
+}
+
+// The plural, which is what every multi-peer case actually writes: peer i takes slot i, and the
+// group is what joinPeerWorkers and allPeersJoined already take.
+//
+// idleMs is not a parameter here either. A case wanting a different one assigns it across the
+// slots before this call, so the argument list stays at what every caller has to say.
+template <typename T_Slots>
+void spawnPeerWorkers(T_Slots& slots, std::uint32_t count, cme::Geometry& region,
+                      cme::DomainId domainCount)
+{
+    for (std::uint32_t index = 0; index < count; ++index)
+    {
+        spawnPeerWorker(slots[index], static_cast<cme::PeerId>(index), region, domainCount);
+    }
 }
 
 // Stop every worker, then join. Two passes on purpose: raising stop on all of them first lets them

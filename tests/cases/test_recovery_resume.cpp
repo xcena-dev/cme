@@ -20,7 +20,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -48,24 +47,20 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::DomainId Ceiling = NumDomains + 1;  // control + data
     constexpr cme::PeerId Dead = 1;                    // stranded target (has survivors either side)
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, Ceiling, MaxPeers));
-    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
+    auto region = harness::createRegion(Ceiling, MaxPeers);
+    harness::seedDataDomains(region, NumDomains);
 
     std::printf("recovery resume: %u peers (%s, backend=%s)\n",
                 MaxPeers, ctx.strategySuffix(), ctx.backendName());
 
     std::array<harness::PeerSlot_t, MaxPeers> peers{};
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
-    {
-        harness::spawnPeerWorker(peers[i], i, *region, ctx.coherency(), NumDomains);
-    }
+    harness::spawnPeerWorkers(peers, MaxPeers, region, NumDomains);
     harness::sleepMs(1000);  // memberships go Active; ownership spreads
     ctx.check(harness::allPeersJoined(peers, MaxPeers), "every worker joined its domains");
 
     auto deadStatusIs = [&](Status status)
     {
-        return harness::hasMemberStatus(*region, Dead, status, ctx.coherency());
+        return harness::hasMemberStatus(region, Dead, status);
     };
     ctx.check(deadStatusIs(Status::Active), "dead slot Active before crash");
 
@@ -74,7 +69,7 @@ void runBody(harness::TestContext& ctx)
     // has entered the normal path yet.
     peers[Dead].frozen.store(true);
     harness::sleepMs(150);  // worker applies setFreeze; poll thread stops stamping
-    cme::coherency::rmwIfTrue(region->getMemberSlot(Dead), ctx.coherency(),
+    cme::coherency::rmwIfTrue(region.getMemberSlot(Dead), ctx.coherency(),
                               [](auto* member)
                               {
                                   if (!member->isValidMagic())
@@ -115,7 +110,6 @@ void runBody(harness::TestContext& ctx)
     // the dtor never touches the now-recovered slot; the rest leave cleanly.
     peers[Dead].abandon.store(true);
     harness::joinPeerWorkers(peers, MaxPeers);
-    region.reset();
 }
 
 }  // namespace test

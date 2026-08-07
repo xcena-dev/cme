@@ -134,7 +134,7 @@ void runBody(harness::TestContext& ctx)
         ctx.memory().remove();
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
-        static_cast<void>(harness::createRegion(ctx, Domains, Slots));
+        static_cast<void>(harness::createRegion(Domains, Slots));
         runRound(uri, Slots, results.data(), barrier.data(), ctx.coherency());
 
         bool valid = true;
@@ -159,7 +159,7 @@ void runBody(harness::TestContext& ctx)
         ctx.memory().remove();
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
-        static_cast<void>(harness::createRegion(ctx, Domains, Slots));
+        static_cast<void>(harness::createRegion(Domains, Slots));
         runRound(uri, Oversub, results.data(), barrier.data(), ctx.coherency());
 
         bool valid = true;

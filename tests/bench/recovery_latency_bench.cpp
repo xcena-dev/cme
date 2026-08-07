@@ -27,7 +27,6 @@
 #include <cstdlib>
 #include <exception>
 #include <memory>
-#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -173,16 +172,15 @@ struct Phases_t
     // grantor -- no other peer is up yet. Survivors are 1..peers-1.
     const PeerId deadPeer = 0;
 
-    std::optional<cme::Geometry> region;
-    region.emplace(cme::Geometry::create(uri, domains + 1, peers,
-                                         cme::Geometry::FormatOpts_t{strategy}));
-    harness::seedDataDomains(*region, domains, coherency);  // create data domains 1..n
+    auto region =
+        cme::Geometry::create(uri, domains + 1, peers, cme::Geometry::FormatOpts_t{strategy});
+    harness::seedDataDomains(region, domains);  // create data domains 1..n
 
     std::vector<std::unique_ptr<BenchSlot_t>> slots;
     for (PeerId peerId = 0; peerId < peers; ++peerId)
     {
         auto slot = std::make_unique<BenchSlot_t>();
-        slot->region = &*region;
+        slot->region = &region;
         slot->peerId = peerId;
         slot->domainCount = domains;
         slot->coherency = coherency;
@@ -229,17 +227,17 @@ struct Phases_t
     Phases_t phases;
     // Busy-spin every wait: the DeadWindow (detect) is ~O(100ms) but claim/takeover/
     // finish are microseconds apart, so a sleeping poll would collapse them to 0.
-    while (!isRecovering(*region, deadPeer, coherency) && !isNone(*region, deadPeer, coherency) &&
+    while (!isRecovering(region, deadPeer, coherency) && !isNone(region, deadPeer, coherency) &&
            harness::msSince(frozenAt) < TimeoutMs)
     {
     }
     phases.detectClaimMs = harness::msSince(frozenAt);
-    while (!allSeized(*region, deadPeer, domains, coherency) && harness::msSince(frozenAt) < TimeoutMs)
+    while (!allSeized(region, deadPeer, domains, coherency) && harness::msSince(frozenAt) < TimeoutMs)
     {
     }
     const double seizedAtMs = harness::msSince(frozenAt);
     phases.takeoverMs = seizedAtMs - phases.detectClaimMs;
-    while (!isNone(*region, deadPeer, coherency) && harness::msSince(frozenAt) < TimeoutMs)
+    while (!isNone(region, deadPeer, coherency) && harness::msSince(frozenAt) < TimeoutMs)
     {
     }
     phases.totalMs = harness::msSince(frozenAt);

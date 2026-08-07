@@ -215,6 +215,9 @@ cme_test_exe(cme-coherency-modes-test test_coherency_modes.cpp)
 cme_test_exe(cme-slot-inherit-test test_slot_inherit.cpp)
 cme_test_exe(cme-domain-incarnation-test test_domain_incarnation.cpp)
 cme_test_exe(cme-file-presized-test test_file_presized.cpp)
+cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
+cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
+cme_test_exe(cme-demand-scrub-test test_demand_scrub.cpp)
 
 # ── CASES ───────────────────────────────────────────────────────────────
 
@@ -335,6 +338,17 @@ cme_case(slot_inherit TARGET cme-slot-inherit-test STRATEGY request SHM_TIMEOUT 
 # holding the old view is refused until it re-joins. One policy, for the same reason as
 # domain_lifecycle -- the registry sits above the successor policy.
 cme_case(domain_incarnation TARGET cme-domain-incarnation-test STRATEGY request SHM_TIMEOUT 60)
+
+# The two dimension corners. All four policies at one peer, because what degenerates there is the
+# successor policy itself: the ring walk, the grant scan and the tournament tree each reduce to a
+# case of their own. The ceiling needs one policy, since layout arithmetic does not consult it.
+cme_case(degenerate_region TARGET cme-degenerate-region-test STRATEGIES SHM_TIMEOUT 60)
+cme_case(ceiling_region TARGET cme-ceiling-region-test STRATEGY request SHM_TIMEOUT 60)
+
+# R3: recovery clears a dead requester's demand line, the Request-family analogue of what
+# agg_recovery checks for the aggregator record. request only -- Order and Peterson have no demand
+# region, so the case would assert nothing there.
+cme_case(demand_scrub TARGET cme-demand-scrub-test STRATEGY request)
 
 # The admission lease's failure side: a stalled lease stolen after LeaseTimeout, and a lease that
 # keeps moving until the joiner's deadline runs out. shm only -- both cases assert wall-clock

@@ -70,14 +70,14 @@ void storeNonce(cme::Geometry::AdmissionControl_t* control, std::uint64_t nonce,
 void checkStalledLeaseIsStolen(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
 
-    auto view = harness::openBoundRegion(ctx, std::chrono::milliseconds{1000});
+    auto view = harness::openBoundRegion(std::chrono::milliseconds{1000});
     storeNonce(view.getAdmissionControl(), StaleNonce, coherency);
 
     const auto began = std::chrono::steady_clock::now();
     {
-        auto session = harness::openSession(ctx);
+        auto session = harness::openSession();
         session.createDomain("lane0");
         const auto guard = session.lock("lane0");
         ctx.check(static_cast<bool>(guard), "stalled lease: the joiner got in and can lock");
@@ -99,9 +99,9 @@ void checkStalledLeaseIsStolen(harness::TestContext& ctx)
 void checkContendedLeaseGivesUp(harness::TestContext& ctx)
 {
     const auto coherency = ctx.coherency();
-    harness::formatSession(ctx, FormatDomains, FormatPeers);
+    harness::formatSession(FormatDomains, FormatPeers);
 
-    auto view = harness::openBoundRegion(ctx, std::chrono::milliseconds{1000});
+    auto view = harness::openBoundRegion(std::chrono::milliseconds{1000});
     auto* control = view.getAdmissionControl();
 
     std::atomic<bool> churning{true};
@@ -122,7 +122,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     // spends its whole deadline recontending.
     const auto joinRegion = [&ctx]
     {
-        static_cast<void>(harness::openSession(ctx));
+        static_cast<void>(harness::openSession());
     };
     ctx.check(harness::threw<cme::NoFreeSlotError>(joinRegion),
               "contended lease: the joiner gives up at the deadline");

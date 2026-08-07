@@ -27,13 +27,11 @@
 #include <exception>
 #include <initializer_list>
 #include <memory>
-#include <optional>
 #include <random>
 #include <thread>
 #include <vector>
 
 #include "cme/errors.hpp"
-#include "cme/shared.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -120,18 +118,29 @@ void worker(TimelineSlot_t* slot)
     slot->state.store(PState::Dead);
 }
 
-void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry* region,
-               cme::DomainId domainCount, cme::CoherencyMode coherency)
+void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry& region,
+               cme::DomainId domainCount)
 {
     peerSlot.peerId = peerId;
-    peerSlot.region = region;
-    peerSlot.coherency = coherency;
+    peerSlot.region = &region;
+    peerSlot.coherency = harness::currentRun().coherency();
     peerSlot.domainCount = domainCount;
     peerSlot.state.store(PState::Running);
     peerSlot.frozen.store(false);
     peerSlot.acquires.store(0);
     peerSlot.failed.store(false);
     peerSlot.runner = std::thread{worker, &peerSlot};
+}
+
+// The plural, as harness::spawnPeerWorkers is for the shared worker. This case keeps its own
+// worker -- the timeline adds a Paused state and logs each timeout -- so it keeps its own spawn.
+void spawnPeers(std::vector<TimelineSlot_t>& peers, cme::PeerId count, cme::Geometry& region,
+                cme::DomainId domainCount)
+{
+    for (cme::PeerId peerId = 0; peerId < count; ++peerId)
+    {
+        spawnPeer(peers[peerId], peerId, region, domainCount);
+    }
 }
 
 // Per-peer acquire counters at a phase boundary.
@@ -261,19 +270,15 @@ void runBody(harness::TestContext& ctx)
 
     // Slot ceiling = control(0) + NumDomains data domains.
     constexpr cme::DomainId DomainCeiling = NumDomains + 1;
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, DomainCeiling, MaxPeers));
+    auto region = harness::createRegion(DomainCeiling, MaxPeers);
 
     // Create the NumDomains data domains (slots 1..NumDomains) before peers start.
-    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
+    harness::seedDataDomains(region, NumDomains);
 
     std::vector<TimelineSlot_t> peers(MaxPeers + 1);
     harness::log("starting %u peers (%s, domains=%u, max_peers=%u, backend=%s)", InitialPeers,
                  ctx.strategySuffix(), NumDomains, MaxPeers, ctx.backendName());
-    for (cme::PeerId i = 0; i < InitialPeers; ++i)
-    {
-        spawnPeer(peers[i], i, &*region, NumDomains, ctx.coherency());
-    }
+    spawnPeers(peers, InitialPeers, region, NumDomains);
 
     // ── Phase A: steady-state ──────────────────────────────────────
     harness::sleepMs(1000);
@@ -311,7 +316,7 @@ void runBody(harness::TestContext& ctx)
 
     // ── Phase E: rejoin same slot ──────────────────────────────────
     harness::log("rejoin slot %u", LeaveTarget);
-    spawnPeer(peers[LeaveTarget], LeaveTarget, &*region, NumDomains, ctx.coherency());
+    spawnPeer(peers[LeaveTarget], LeaveTarget, region, NumDomains);
     harness::sleepMs(2000);
     ctx.checkf(peers[LeaveTarget].acquires.load() > 0, "rejoined peer %u acquired",
                LeaveTarget);

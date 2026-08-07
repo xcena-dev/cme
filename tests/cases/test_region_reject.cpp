@@ -91,7 +91,7 @@ void runBody(harness::TestContext& ctx)
 
     const auto openRegion = [&ctx]()
     {
-        auto session = harness::openSession(ctx, JoinTimeout);
+        auto session = harness::openSession(JoinTimeout);
         (void)session.getDomainNames();
     };
 

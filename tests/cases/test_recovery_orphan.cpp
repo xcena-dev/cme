@@ -15,7 +15,6 @@
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 // --strategy selects the successor policy (order|request|request-agg|peterson).
 
-#include <array>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
@@ -24,11 +23,9 @@
 #include <cstring>
 #include <exception>
 #include <memory>
-#include <optional>
 
 #include "cme/errors.hpp"
 #include "core/algo/peer.hpp"
-#include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -53,17 +50,14 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId MaxPeers = 5;
     constexpr cme::PeerId ActivePeers = 4;
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, DomainCeiling, MaxPeers));
+    auto region = harness::createRegion(DomainCeiling, MaxPeers);
 
     harness::log("starting %u peers (%s, ceiling=%u, max_peers=%u, backend=%s)", ActivePeers,
                  ctx.strategySuffix(), DomainCeiling, MaxPeers, ctx.backendName());
 
-    std::array<std::unique_ptr<cme::Peer>, MaxPeers> peers{};
-    for (cme::PeerId i = 0; i < ActivePeers; ++i)
-    {
-        peers[i] = std::make_unique<cme::Peer>(*region, i, ctx.coherency());
-    }
+    // ActivePeers of the MaxPeers slots. The spare is what a re-admission has to land on, so
+    // nothing fills it here.
+    auto peers = harness::makePeers(region, ActivePeers);
     harness::sleepMs(500);  // memberships go Active; poll threads running
 
     // ── Scenario A: orphan-free ────────────────────────────────────────
@@ -148,7 +142,6 @@ void runBody(harness::TestContext& ctx)
     {
         peers[i].reset();  // dtor stops poll thread + leaves membership
     }
-    region.reset();
 }
 
 }  // namespace test

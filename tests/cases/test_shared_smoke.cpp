@@ -35,10 +35,10 @@ void runBody(harness::TestContext& ctx)
 
     // ── format ─────────────────────────────────────────────────────
     // 4 = control(0) + 3 data slots.
-    harness::formatSession(ctx, 4, 4);
+    harness::formatSession(4, 4);
 
     // ── open ──────────────────────────────────────────────────────
-    auto first = harness::openSession(ctx);
+    auto first = harness::openSession();
     // Data domains are created at runtime (slots fill in ascending order).
     // Opt-in: create does not participate, so join each before locking.
     for (const char* name : {"inv", "orders", "cache"})
@@ -143,7 +143,7 @@ void runBody(harness::TestContext& ctx)
     // medium the variant exists to cover.
     auto second = (ctx.coherency() == cme::CoherencyMode::CacheCoherent)
                       ? cme::Session::open(uri)
-                      : harness::openSession(ctx);
+                      : harness::openSession();
     second.joinDomain("orders");  // opt-in: join before locking
 
     // ── two sessions, distinct domains, no contention ─────────────

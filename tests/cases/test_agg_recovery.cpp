@@ -15,7 +15,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 #include <vector>
 
 #include "cme/shared.hpp"
@@ -95,23 +94,22 @@ void runBody(harness::TestContext& ctx)
     cme::Geometry::FormatOpts_t fmtOpts{cme::Strategy::RequestAgg};
     fmtOpts.aggregatorGroups = Groups;
 
-    std::optional<cme::Geometry> region;
-    region.emplace(ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts));
-    harness::seedDataDomains(*region, NumDomains, ctx.coherency());
+    auto region = ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts);
+    harness::seedDataDomains(region, NumDomains);
 
     // seedDataDomains' transient creator leaves group0's aggregator at NoPeer, and the crash below
     // needs a named holder. Which member ends up holding it is settled by the peers, not here.
-    writeAggregatorPeerId(*region, 0, 0, ctx.coherency());
-    writeAggregatorPeerId(*region, 1, 1, ctx.coherency());
+    writeAggregatorPeerId(region, 0, 0, ctx.coherency());
+    writeAggregatorPeerId(region, 1, 1, ctx.coherency());
 
     std::vector<harness::PeerSlot_t> peers(MaxPeers);
     harness::log("starting %u peers (request-agg, groups=%u, domains=%u, backend=%s)", MaxPeers, Groups,
                  NumDomains, ctx.backendName());
-    for (cme::PeerId i = 0; i < MaxPeers; ++i)
+    for (harness::PeerSlot_t& slot : peers)
     {
-        peers[i].idleMs = FrozenSleepMs;
-        harness::spawnPeerWorker(peers[i], i, *region, ctx.coherency(), NumDomains);
+        slot.idleMs = FrozenSleepMs;
     }
+    harness::spawnPeerWorkers(peers, MaxPeers, region, NumDomains);
 
     harness::sleepMs(1000);  // steady state
     ctx.check(harness::allPeersJoined(peers, MaxPeers), "every worker joined its domains");
@@ -119,8 +117,8 @@ void runBody(harness::TestContext& ctx)
     // The duty goes to whichever member first finds it named on a peer that is not Active, and
     // these records are seeded before any peer exists, so both members of a group race for it.
     // Read the winner rather than name one; everything below works from it.
-    const cme::PeerId group0Start = readAggregatorPeerId(*region, 0, ctx.coherency());
-    const cme::PeerId group1Start = readAggregatorPeerId(*region, 1, ctx.coherency());
+    const cme::PeerId group0Start = readAggregatorPeerId(region, 0, ctx.coherency());
+    const cme::PeerId group1Start = readAggregatorPeerId(region, 1, ctx.coherency());
     ctx.checkf(group0Start == 0 || group0Start == 2,
                "group0 aggregator starts on one of its members (peer %u)", group0Start);
     ctx.checkf(group1Start == 1 || group1Start == 3,
@@ -133,7 +131,7 @@ void runBody(harness::TestContext& ctx)
     peers[group0Start].frozen.store(true);
     // Poll until recovery re-elects: the record no longer names the frozen peer.
     const cme::PeerId reelected = pollAggregatorUntil(
-        *region, 0, ctx.coherency(), RecoveryWaitMs, [group0Start](cme::PeerId aggregator)
+        region, 0, ctx.coherency(), RecoveryWaitMs, [group0Start](cme::PeerId aggregator)
         {
             return aggregator != group0Start;
         });
@@ -143,7 +141,7 @@ void runBody(harness::TestContext& ctx)
 
     // A crash in group0 must not disturb group1's record. Against the observed value, not a
     // literal, since the winner above is not fixed.
-    const cme::PeerId group1After = readAggregatorPeerId(*region, 1, ctx.coherency());
+    const cme::PeerId group1After = readAggregatorPeerId(region, 1, ctx.coherency());
     ctx.checkf(group1After == group1Start, "group1 aggregator unchanged (peer %u)", group1Start);
 
     // Survivors resume progress once recovery settles. Poll for it -- a peer can stall
@@ -161,7 +159,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("freeze peer %u (group0's last member crashes)", group0Survivor);
     peers[group0Survivor].frozen.store(true);
     const cme::PeerId finalAgg = pollAggregatorUntil(
-        *region, 0, ctx.coherency(), RecoveryWaitMs, [](cme::PeerId aggregator)
+        region, 0, ctx.coherency(), RecoveryWaitMs, [](cme::PeerId aggregator)
         {
             return aggregator == cme::NoPeer;
         });

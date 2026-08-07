@@ -32,8 +32,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <utility>
 #include <vector>
 
 #include "cme/errors.hpp"
@@ -144,25 +142,6 @@ int parseOpts(int argc, char** argv, Opts_t& opt)
     opt.maxPeers = opt.numPeers;
     opt.maxDomains = opt.numDomains;
     return 0;
-}
-
-// Every peer is a live instance with its own poll thread (needed to forward/grant
-// handoffs). The driver below is the sole locker, so nothing here contends.
-std::vector<std::unique_ptr<cme::Peer>> buildPeers(const Opts_t& opt, cme::Geometry& region,
-                                                   cme::CoherencyMode coherency)
-{
-    std::vector<std::unique_ptr<cme::Peer>> peers;
-    peers.reserve(opt.numPeers);
-    for (cme::PeerId pid = 0; pid < opt.numPeers; ++pid)
-    {
-        auto peer = std::make_unique<cme::Peer>(region, pid, coherency);
-        for (cme::DomainId domainId = 1; domainId < opt.numDomains; ++domainId)
-        {
-            peer->joinDomain(domainId);
-        }
-        peers.push_back(std::move(peer));
-    }
-    return peers;
 }
 
 // Hands exactly one lock request at a time to a dedicated acquire thread per peer, so the
@@ -347,8 +326,11 @@ void runBody(harness::TestContext& ctx)
 
     const cme::Geometry::FormatOpts_t fmtOpts{opt.strategy};
     cme::Geometry region = ctx.memory().createRegion(opt.maxDomains, opt.maxPeers, fmtOpts);
-    harness::seedDataDomains(region, opt.numDomains - 1, ctx.coherency());
-    std::vector<std::unique_ptr<cme::Peer>> peers = buildPeers(opt, region, ctx.coherency());
+    harness::seedDataDomains(region, opt.numDomains - 1);
+    // Every peer is a live instance with its own poll thread, which is what forwards and grants a
+    // handoff. The driver below is the sole locker, so nothing here contends.
+    // numDomains counts the control slot, so the data domains they join are 1..numDomains-1.
+    auto peers = harness::makePeers(region, opt.numPeers, opt.numDomains - 1);
 
     const cme::DomainId domainId = 1;  // single fixed domain -- only peer order varies
     const std::uint32_t dataDomains = 1;

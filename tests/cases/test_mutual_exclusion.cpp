@@ -16,11 +16,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <optional>
 #include <vector>
 
 #include "core/algo/peer.hpp"
-#include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -44,9 +42,8 @@ void runBody(harness::TestContext& ctx)
 {
     constexpr cme::DomainId DomainCeiling = 2;  // control(0) + 1 data domain
 
-    std::optional<cme::Geometry> region;
-    region.emplace(harness::createRegion(ctx, DomainCeiling, NumPeers));
-    harness::seedDataDomains(*region, 1, ctx.coherency());  // creates data domain id 1
+    auto region = harness::createRegion(DomainCeiling, NumPeers);
+    harness::seedDataDomains(region, 1);  // creates data domain id 1
 
     std::vector<std::uint32_t> done(NumPeers, 0);
     std::atomic<int> ctorFailures{0};
@@ -57,7 +54,7 @@ void runBody(harness::TestContext& ctx)
         {
             try
             {
-                cme::Peer peer{*region, pid, ctx.coherency()};
+                auto peer = harness::makePeer(region, pid);
                 peer.joinDomain(SharedDomain);
                 for (std::uint32_t i = 0; i < ItersPerPeer; ++i)
                 {

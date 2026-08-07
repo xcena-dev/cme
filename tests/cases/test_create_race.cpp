@@ -36,7 +36,7 @@ constexpr std::int32_t Failed = -1;
 
 void runBody(harness::TestContext& ctx)
 {
-    harness::formatSession(ctx, MaxDomains, Creators);
+    harness::formatSession(MaxDomains, Creators);
 
     // 0 = created ok, else failure
     const auto results = ctx.scratch<std::int32_t>("results", Creators);
@@ -54,7 +54,7 @@ void runBody(harness::TestContext& ctx)
             std::int32_t exitCode = Failed;
             try
             {
-                auto session = harness::openSession(ctx);
+                auto session = harness::openSession();
                 session.createDomain("dom" + std::to_string(index));
                 exitCode = 0;
             }
@@ -83,7 +83,7 @@ void runBody(harness::TestContext& ctx)
     ctx.check(allOk, "every concurrent createDomain succeeded (control serialized, no loss)");
 
     // The region now lists all N distinct names in distinct slots.
-    auto session = harness::openSession(ctx);
+    auto session = harness::openSession();
     const auto domainNames = session.getDomainNames();
     ctx.check(domainNames.size() == Creators, "all N data domains present (distinct slots)");
     bool allNamesFound = true;

@@ -30,9 +30,9 @@ namespace
 void runBody(harness::TestContext& ctx)
 {
     // Ceiling = control(0) + 3 data slots.
-    harness::formatSession(ctx, 4, 4);
+    harness::formatSession(4, 4);
 
-    auto owner = harness::openSession(ctx);  // peer 0, control genesis holder
+    auto owner = harness::openSession();  // peer 0, control genesis holder
 
     // ── create makes a name lockable (opt-in: join before lock) ───
     owner.createDomain("inv");
@@ -120,8 +120,8 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── delete refused while another peer participates ────────────
-    auto joiner = harness::openSession(ctx);  // peer 1
-    joiner.joinDomain("inv");                 // opt-in: joiner now a participant of inv
+    auto joiner = harness::openSession();  // peer 1
+    joiner.joinDomain("inv");              // opt-in: joiner now a participant of inv
     const bool deleteWithParticipantRefused = harness::threw<cme::NotParticipatingError>(
         [&]
         {
