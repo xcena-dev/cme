@@ -80,6 +80,7 @@ void checkCreate(harness::TestContext& ctx)
     {
         return;
     }
+    std::printf("  %s\n", cme::failpoint::nameOf(BeforeActivate));
     auto watcher = harness::openSession();
     ctx.check(stillUsable(watcher, "after_create"),
               "a domain published but never activated leaves the registry usable");

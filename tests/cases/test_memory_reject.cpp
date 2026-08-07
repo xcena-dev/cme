@@ -169,7 +169,20 @@ void checkDaxOffset(harness::TestContext& ctx)
     // A path that cannot exist, so this reaches dax.cpp's open() rather than its offset check.
     // Nothing creates it, so it needs no run-scoped name -- only to be absent.
     checkCode(ctx, "dax device that does not exist reports ENOENT",
-              std::errc::no_such_file_or_directory, openRefusal("dax:/dev/cme_no_such_dax@0"));
+              std::errc::no_such_file_or_directory,
+              openRefusal("dax:/dev/cme_no_such_dax@0"));
+
+    // The suffix is optional and means offset 0. The refusal being a BackendError rather than an
+    // InvalidArgumentError is the assertion: the URI was well formed and the device was absent.
+    checkCode(ctx, "dax URI with no offset suffix is well formed and means offset 0",
+              std::errc::no_such_file_or_directory,
+              openRefusal("dax:/dev/cme_no_such_dax"));
+
+    // A '@' with nothing after it is the same case, and the '@' stays part of the device path
+    // rather than being split off, so the name that reaches open() is the one written here.
+    checkCode(ctx, "dax URI whose '@' carries no offset is well formed too",
+              std::errc::no_such_file_or_directory,
+              openRefusal("dax:/dev/cme_no_such_dax@"));
 }
 
 // ── the shm backend (shm.cpp) ───────────────────────────────────────

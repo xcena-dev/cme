@@ -18,6 +18,7 @@
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
+#include "util/coherency.hpp"
 
 namespace test
 {

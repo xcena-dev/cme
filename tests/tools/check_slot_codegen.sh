@@ -27,6 +27,19 @@ if ! command -v objdump >/dev/null 2>&1; then
     exit 77  # ctest reads 77 as skipped, the way every media-gated case here does
 fi
 
+# The question is what an optimizing compiler emits. At -O0 it spills every value to the stack and
+# reloads it 8 B at a time, and --coverage adds a counter between the halves, so a wide transfer is
+# not available to find and a FAIL here would name the build rather than the code.
+cache="$buildDir/CMakeCache.txt"
+if [ -f "$cache" ]; then
+    buildType=$(sed -n 's/^CMAKE_BUILD_TYPE:STRING=//p' "$cache")
+    coverage=$(sed -n 's/^CME_COVERAGE:BOOL=//p' "$cache")
+    if [ "$buildType" = Debug ] || [ -z "$buildType" ] || [ "$coverage" = ON ]; then
+        echo "SKIP: unoptimized build (CMAKE_BUILD_TYPE=${buildType:-<none>}, CME_COVERAGE=${coverage:-OFF})"
+        exit 77  # ctest reads 77 as skipped, the way every media-gated case here does
+    fi
+fi
+
 failures=0
 
 for symbol in cmeProbeSlotSet cmeProbeSlotGet; do

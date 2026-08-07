@@ -97,6 +97,8 @@ void checkKilledHoldingSlot(harness::TestContext& ctx)
     {
         return;
     }
+    std::printf("%s: the slot is committed and the lease is still on it\n",
+                cme::failpoint::nameOf(AfterCommit));
 
     auto region = harness::openBoundRegion();
     ctx.check(harness::hasMemberStatus(region, 0, Status::Active),

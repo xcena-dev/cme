@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#include "core/types.hpp"
+#include "cme/shared.hpp"
 #include "util/coherency.hpp"
 
 namespace

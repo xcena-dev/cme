@@ -71,6 +71,7 @@ void checkCrashedFormatter(harness::TestContext& ctx)
     {
         return;
     }
+    std::printf("  %s: every slot stamped, no header magic\n", cme::failpoint::nameOf(BeforeHeader));
 
     // A second format finishes what the corpse left, which is the route back a caller has.
     harness::formatSession(Ceiling, MaxPeers);

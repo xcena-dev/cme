@@ -5,8 +5,8 @@
 //
 // A graceful leave hands the aggregator duty off; a crash cannot, so scrubRecoveredPeer
 // must re-elect a live group member or the group is stuck in holder-fallback forever. This
-// crashes an aggregator and checks the record re-points at a live member, then reaches
-// NoPeer once the whole group is gone.
+// checks the leave handoff first, then crashes an aggregator and checks the record re-points
+// at a live member, then reaches NoPeer once the whole group is gone.
 //
 // Strategy is fixed to RequestAgg, so --strategy is ignored. The aggregator record is reached
 // through RequestAggLayout, the same class the policy uses to write it.
@@ -68,10 +68,67 @@ cme::PeerId pollAggregatorUntil(cme::Geometry& region, std::uint32_t groupId,
     return aggregator;
 }
 
+// Fixed dims for both checks: 2 groups over 4 peers -> group0 = {0,2}, group1 = {1,3}.
+constexpr cme::DomainId NumDomains = 2;
+constexpr cme::PeerId MaxPeers = 4;
+constexpr std::uint32_t Groups = 2;
+constexpr cme::DomainId DomainCeiling = NumDomains + 1;  // + control(0)
+
 // The other member of @peerId's group, with two groups over four peers: group g = {g, g + 2}.
 [[nodiscard]] cme::PeerId groupPartner(cme::PeerId peerId) noexcept
 {
     return static_cast<cme::PeerId>(peerId < 2 ? peerId + 2 : peerId - 2);
+}
+
+[[nodiscard]] cme::Geometry makeAggRegion(harness::TestContext& ctx)
+{
+    cme::Geometry::FormatOpts_t fmtOpts{cme::Strategy::RequestAgg};
+    fmtOpts.aggregatorGroups = Groups;
+    return ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts);
+}
+
+// ── a departing aggregator leaves its group on a live member ────────
+// Which of the two writers gets there is a race this cannot pin: leave() hands the duty on, and
+// every group member's poll tick volunteers itself for a duty it reads as vacant. The property
+// below holds either way, and is the one a holder depends on.
+void checkGracefulHandoff(harness::TestContext& ctx)
+{
+    constexpr std::uint32_t ActiveWaitMs = 5000;
+    constexpr std::uint32_t HandoffWaitMs = 5000;
+
+    auto region = makeAggRegion(ctx);
+    harness::seedDataDomains(region, NumDomains);
+
+    // format seeds group g's record with peer g, so group1 opens naming peer 1. The seeding
+    // creator above took slot 0 and left, which is why group0's is the one that starts at NoPeer.
+    auto peers = harness::makePeers(region, MaxPeers, NumDomains);
+    const bool ready = harness::waitUntil(
+        [&region]
+        {
+            return harness::hasMemberStatus(region, 3, cme::Geometry::Member_t::Status::Active);
+        },
+        ActiveWaitMs);
+    if (!ctx.check(ready, "peer 3 is Active before its group's aggregator leaves"))
+    {
+        return;
+    }
+    if (!ctx.check(readAggregatorPeerId(region, 1, ctx.coherency()) == 1,
+                   "group1 opens with its format-seeded aggregator, peer 1"))
+    {
+        return;
+    }
+
+    peers[1].reset();  // the destructor is the graceful leave
+
+    // Polled, not read once: a handoff that lands on NoPeer is corrected by peer 3's next tick,
+    // and settling on the live member is the property, not which write got there first.
+    const cme::PeerId handedTo = pollAggregatorUntil(
+        region, 1, ctx.coherency(), HandoffWaitMs, [](cme::PeerId aggregator)
+        {
+            return aggregator == 3;
+        });
+    ctx.checkf(handedTo == 3, "group1 settles on live member peer 3 once peer 1 leaves (got %u)",
+               handedTo);
 }
 
 // A group's aggregator is re-elected only while its members keep asking, so the frozen worker here
@@ -84,17 +141,12 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    // Fixed dims: 2 groups over 4 peers -> group0 = {0,2}, group1 = {1,3}.
-    constexpr cme::DomainId NumDomains = 2;
-    constexpr cme::PeerId MaxPeers = 4;
-    constexpr std::uint32_t Groups = 2;
-    constexpr cme::DomainId DomainCeiling = NumDomains + 1;  // + control(0)
+    checkGracefulHandoff(ctx);
+
     constexpr std::uint32_t RecoveryWaitMs = 6000;
 
-    cme::Geometry::FormatOpts_t fmtOpts{cme::Strategy::RequestAgg};
-    fmtOpts.aggregatorGroups = Groups;
-
-    auto region = ctx.memory().createRegion(DomainCeiling, MaxPeers, fmtOpts);
+    // A region of its own, since the check above left four departed slots on the first one.
+    auto region = makeAggRegion(ctx);
     harness::seedDataDomains(region, NumDomains);
 
     // seedDataDomains' transient creator leaves group0's aggregator at NoPeer, and the crash below

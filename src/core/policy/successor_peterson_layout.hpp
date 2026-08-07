@@ -158,7 +158,8 @@ struct ClimbStep_t
     {
         return nullptr;
     }
-    return reinterpret_cast<PetersonNode_t*>(areaBase) + domainId * getNodesPerDomain(maxNumPeers);
+    return reinterpret_cast<PetersonNode_t*>(areaBase) +
+           static_cast<std::size_t>(domainId) * getNodesPerDomain(maxNumPeers);
 }
 
 }  // namespace cme::peterson_tree
