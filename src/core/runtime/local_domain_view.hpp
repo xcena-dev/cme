@@ -10,7 +10,7 @@
 #include <atomic>
 #include <cstdint>
 
-#include "util/time.hpp"
+#include "common/timing.hpp"
 
 namespace cme
 {
@@ -28,7 +28,7 @@ public:
     void resetOwnershipPins() noexcept;
     [[nodiscard]] bool canTransferOwnership() const noexcept;
     [[nodiscard]] std::uint32_t getOwnershipPinCount() const noexcept;
-    [[nodiscard]] time::TimePoint getOwnershipPinStart() const noexcept;
+    [[nodiscard]] timing::TimePoint getOwnershipPinStart() const noexcept;
 
     // ── Transfer latch (closes the grant-vs-resident TOCTOU) ─────
     // CAS pin 0 -> Transferring makes "no worker pinned" and "block new pins" one atomic
@@ -55,7 +55,7 @@ private:
     struct
     {
         std::atomic<std::uint32_t> count{0};
-        time::TimePoint startTimestamp{};
+        timing::TimePoint startTimestamp{};
     } pin_;
 
     struct

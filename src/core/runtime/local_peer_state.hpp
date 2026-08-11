@@ -17,6 +17,7 @@
 #include <thread>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
@@ -96,18 +97,18 @@ public:
     };
     // Cached view if refreshed within @maxAge, else one FAM read and a re-stamp; maxAge==0
     // forces the read. Fields are relaxed atomic words, so a concurrent refresh cannot tear.
-    [[nodiscard]] MemberView_t getMemberView(PeerId peerId, std::chrono::nanoseconds maxAge) const noexcept;
+    [[nodiscard]] MemberView_t getMemberView(PeerId peerId, timing::Nanos maxAge) const noexcept;
     // Fill the cache from a slot the caller already read, so a scan that reads for its own
     // reasons (the RA ring walk) pays the FAM read once and every later getMemberView hits.
     void cacheMemberSnapshot(PeerId peerId, const Geometry::Member_t& member) const noexcept;
 
     // ── config (immutable after attach) ──────────────────────────
     void setConfig(std::uint32_t numDomains, std::uint32_t maxPeers,
-                   std::chrono::microseconds pollInterval, Strategy kind,
+                   timing::Nanos pollInterval, Strategy kind,
                    std::uint32_t aggregatorGroups) noexcept;
     [[nodiscard]] std::uint32_t getNumDomains() const noexcept;
     [[nodiscard]] std::uint32_t getMaxPeers() const noexcept;
-    [[nodiscard]] std::chrono::microseconds getPollInterval() const noexcept;
+    [[nodiscard]] timing::Nanos getPollInterval() const noexcept;
     [[nodiscard]] Strategy getSuccessorPolicyKind() const noexcept;
     [[nodiscard]] std::uint32_t getAggregatorGroups() const noexcept;
 
@@ -314,7 +315,7 @@ private:
     {
         std::uint32_t numDomains{0};
         std::uint32_t maxPeers{0};
-        std::chrono::microseconds pollInterval{DefaultPollInterval};
+        timing::Nanos pollInterval{DefaultPollInterval};
         Strategy successorPolicyKind{Strategy::Order};
         std::uint32_t aggregatorGroups{0};  // RequestAgg group count (0 = auto)
     } config_;

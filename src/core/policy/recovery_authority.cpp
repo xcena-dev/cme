@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/policy/liveness.hpp"
 #include "core/policy/recovery_authority_layout.hpp"
@@ -19,7 +20,6 @@
 #include "core/types.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -123,11 +123,11 @@ bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadP
             return false;  // yielded to a live claim or invalid slot; retry next tick
         }
         settleTarget_ = deadPeerId;
-        settleDeadline_ = time::getMonoTime() + ClaimSettle;
+        settleWindow_ = timing::Deadline{ClaimSettle};
         return false;  // settling, not confirmed yet
     }
 
-    if (time::getMonoTime() < settleDeadline_)
+    if (!settleWindow_.expired())
     {
         return false;  // still settling
     }

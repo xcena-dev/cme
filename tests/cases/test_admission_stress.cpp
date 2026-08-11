@@ -20,6 +20,7 @@
 
 #include "admission/claim.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/layout/geometry.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -57,7 +58,7 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
             try
             {
                 auto region = cme::Geometry::open(uri);
-                region.bindBlocking(std::chrono::milliseconds{5000}, coherency);
+                region.bindBlocking(timing::Secs{5}, coherency);
                 while (__atomic_load_n(barrier, __ATOMIC_ACQUIRE) == 0)
                 {
                     // spin to the barrier

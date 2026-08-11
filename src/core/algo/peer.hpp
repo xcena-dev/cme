@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/types.hpp"
 #include "observe/stats.hpp"
 
@@ -53,7 +54,7 @@ public:
     // Non-throwing variant: nullopt on timeout.
     [[nodiscard]] std::optional<PeerGuard>
     tryLock(DomainId domainId,
-            std::chrono::nanoseconds timeout = std::chrono::seconds{5});
+            timing::Nanos timeout = timing::Secs{5});
 
     // ── participation (opt-in) ─────────────────────────────────────
     // lock() on non-joined domain throws NotParticipatingError.

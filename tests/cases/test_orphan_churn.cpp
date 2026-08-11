@@ -35,6 +35,7 @@
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
@@ -124,7 +125,7 @@ void worker(ChurnSlot_t* peerSlot)
             }
             else if (rng() % 10u < 7u)
             {
-                auto guard = peerSlot->peer->tryLock(privateId, std::chrono::milliseconds{2});
+                auto guard = peerSlot->peer->tryLock(privateId, timing::Millis{2});
             }
             else
             {
@@ -193,8 +194,8 @@ void runBody(harness::TestContext& ctx)
     cme::PeerId frozenCount = 0;
     std::mt19937 rng{0xC0FFEEu};
     std::uniform_int_distribution<cme::PeerId> pick{0, Workers - 1};
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-    while (std::chrono::steady_clock::now() < end)
+    const timing::Deadline end{timing::Secs{10}};
+    while (!end.expired())
     {
         const auto target = pick(rng);
         if (frozen[target])

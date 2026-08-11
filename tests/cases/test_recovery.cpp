@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "cme/errors.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -215,12 +216,12 @@ void expectFlat(harness::TestContext& ctx, const TimelineSlot_t& slot, std::uint
 // Freeze a random live peer every 800 ms until @duration elapses, never dropping below two
 // survivors. Permanent-crash model: a churn freeze sticks, so @frozen only grows.
 void runChurn(std::vector<TimelineSlot_t>& peers, cme::PeerId count, std::vector<bool>& frozen,
-              std::chrono::seconds duration)
+              timing::Secs duration)
 {
     std::mt19937 rng{std::random_device{}()};
     std::uniform_int_distribution<cme::PeerId> pick{0, count - 1};
-    const auto end = std::chrono::steady_clock::now() + duration;
-    while (std::chrono::steady_clock::now() < end)
+    const timing::Deadline end{duration};
+    while (!end.expired())
     {
         const cme::PeerId target = pick(rng);
         const bool gone = peers[target].state.load() == PState::Dead || frozen[target];
@@ -338,7 +339,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("random churn for 10 s (events every 800 ms)");
     auto frozen = skipSet(InitialPeers, {FreezeTarget, MultiA, MultiB});
     const auto gPre = snapshotAcq(peers, InitialPeers);
-    runChurn(peers, InitialPeers, frozen, std::chrono::seconds{10});
+    runChurn(peers, InitialPeers, frozen, timing::Secs{10});
     harness::sleepMs(4000);
     expectSurvivorsAdvanced(ctx, {peers, gPre, frozen, InitialPeers}, "churn");
 

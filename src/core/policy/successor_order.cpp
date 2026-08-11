@@ -11,6 +11,7 @@
 
 #include <cerrno>
 
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/algo/peer.hpp"
@@ -77,12 +78,12 @@ void transferHeldDomains(LocalPeerState& peerState, DomainBitmap heldDomains)
 
 }  // namespace
 
-OwnershipResult OrderPolicy::lock(LocalPeerState& peerState, DomainId domainId, std::chrono::nanoseconds timeout)
+OwnershipResult OrderPolicy::lock(LocalPeerState& peerState, DomainId domainId, const timing::Deadline& deadline)
 {
     OBSERVE_LATENCY_BEGIN(Hold);
     ownership_transfer::holdDomain(peerState, domainId);
     OBSERVE_LATENCY_END(Hold, peerState, domainId);
-    const OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, timeout);
+    const OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     if (result == OwnershipResult::Arrived)
     {
         return result;

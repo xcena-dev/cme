@@ -21,8 +21,8 @@
 #include <string>
 #include <vector>
 
-#include "args.hpp"
 #include "cme/shared.hpp"
+#include "common/args.hpp"
 #include "config_reader.hpp"
 #include "test_memory.hpp"
 
@@ -114,7 +114,7 @@ struct Options_t
         }
         argv[kept.size()] = nullptr;
 
-        extraArgs().assign(kept.begin() + 1, kept.end());
+        cliargs::extraArgs().assign(kept.begin() + 1, kept.end());
         return static_cast<int>(kept.size());
     }
 

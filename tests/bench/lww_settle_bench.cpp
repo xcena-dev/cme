@@ -46,7 +46,8 @@
 #include <thread>
 #include <vector>
 
-#include "args.hpp"
+#include "common/args.hpp"
+#include "common/timing.hpp"
 #include "helper_util.hpp"
 #include "test_memory.hpp"
 
@@ -76,14 +77,6 @@ void pinTo(std::uint32_t cpu)
     CPU_ZERO(&set);
     CPU_SET(static_cast<int>(cpu), &set);
     static_cast<void>(::sched_setaffinity(0, sizeof(set), &set));
-}
-
-// Monotonic nanoseconds; steady_clock is vDSO here (no syscall on the hot path).
-[[nodiscard]] std::uint64_t nowNs()
-{
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
-                                          .count());
 }
 
 // UC-faithful access to the nonce word: a store fence after write (mirrors
@@ -217,7 +210,7 @@ struct RoundStamps_t
             {
                 _mm_pause();
             }  // all contenders parked on the gate
-            originNs.store(nowNs(), std::memory_order_release);
+            originNs.store(timing::monotonic<timing::Nanos>(), std::memory_order_release);
             gate.store(1, std::memory_order_release);  // OPEN via DRAM gate; nonce is already 0
         });
 
@@ -234,11 +227,11 @@ struct RoundStamps_t
             }  // DRAM spin, no FAM poll
             const std::uint64_t origin = originNs.load(std::memory_order_acquire);
             const std::uint64_t seen = readNonce(nonce);  // one UC read: free(0)? then stake
-            readNs[index] = nowNs() - origin;
+            readNs[index] = timing::monotonic<timing::Nanos>() - origin;
             if (seen == 0)  // saw it free -> stake (claim.cpp case 1)
             {
                 writeNonce(nonce, myNonce);
-                writeNs[index] = nowNs() - origin;
+                writeNs[index] = timing::monotonic<timing::Nanos>() - origin;
                 staked[index] = true;
             }
             // else: door already closed; wait for next round (no re-contend).
@@ -300,10 +293,10 @@ struct RoundStamps_t
 
 int main(int argc, char** argv)
 {
-    static_cast<void>(harness::takeArgs(argc, argv));
+    static_cast<void>(cliargs::takeArgs(argc, argv));
 
     // No backend is the heap WB baseline, so an absent one is not an error.
-    const std::string backend = harness::argStr("--backend", std::string{});
+    const std::string backend = cliargs::argStr("--backend", std::string{});
     if (!backend.empty() && backend != "uc")
     {
         std::fprintf(stderr, "%s: unknown backend '%s' (only uc; omit for the heap baseline)\n%s",
@@ -311,14 +304,14 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const std::vector<std::uint32_t> contenders = parseCounts(harness::argStr("--contenders", "1 2 3 4"));
+    const std::vector<std::uint32_t> contenders = parseCounts(cliargs::argStr("--contenders", "1 2 3 4"));
     if (contenders.empty())
     {
         std::fprintf(stderr, "%s: --contenders parsed to nothing\n%s", argv[0], Usage);
         return 2;
     }
-    const auto repeats = static_cast<std::uint32_t>(harness::argU64("--repeats", DefaultRepeats));
-    const std::uint64_t slot = harness::argU64("--slot", 0);
+    const auto repeats = static_cast<std::uint32_t>(cliargs::argU64("--repeats", DefaultRepeats));
+    const std::uint64_t slot = cliargs::argU64("--slot", 0);
 
     // Map one cacheline: the uncacheable file when a backend was selected, else a heap line
     // as the write-back baseline.
@@ -331,7 +324,7 @@ int main(int argc, char** argv)
         {
             memory = harness::TestMemory::open(harness::ConfigReader{},
                                                harness::backendFromName(backend), "lww_probe",
-                                               slot, harness::argStr("--target", ""));
+                                               slot, cliargs::argStr("--target", ""));
         }
         catch (const harness::MediumUnavailable& why)
         {

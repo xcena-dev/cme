@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -93,7 +94,7 @@ void runBody(harness::TestContext& ctx)
     std::uint32_t failures = 0;
     for (std::uint32_t attempt = 0; attempt < Attempts && !acquired; ++attempt)
     {
-        auto guard = waiter.tryLock(Contested, std::chrono::milliseconds{AttemptMs});
+        auto guard = waiter.tryLock(Contested, timing::Millis{AttemptMs});
         if (guard)
         {
             acquired = true;

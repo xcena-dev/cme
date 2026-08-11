@@ -22,14 +22,15 @@
 #include <memory>
 #include <thread>
 
-#include "args.hpp"
+#include "common/args.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
+#include "util/cpu.hpp"
 
 namespace test
 {
@@ -48,7 +49,7 @@ void runBody(harness::TestContext& ctx)
 {
     using Status = cme::Geometry::Member_t::Status;
 
-    const int iters = static_cast<int>(harness::argU64("--iters", DefaultIters));
+    const int iters = static_cast<int>(cliargs::argU64("--iters", DefaultIters));
 
     cme::Geometry region = harness::createRegion(Ceiling, MaxPeers);
 
@@ -68,7 +69,7 @@ void runBody(harness::TestContext& ctx)
     {
         auto leaver = harness::makePeerPtr(region, Leaver);
         leaver->joinDomain(domainId);
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        std::this_thread::sleep_for(timing::Millis{1});
 
         // Publish the grant from another thread, sweeping how deep into the departure it lands.
         std::atomic<bool> barrier{false};
@@ -81,7 +82,7 @@ void runBody(harness::TestContext& ctx)
                 }
                 for (std::uint32_t i = 0; i < spins; ++i)
                 {
-                    cme::time::relaxCpu(1);
+                    cme::cpu::relaxCpu(1);
                 }
                 auto record = cme::coherency::get(recordSlot, ctx.coherency());
                 record.holder = Leaver;

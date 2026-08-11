@@ -69,7 +69,7 @@ static_assert(sizeof(LatencyNames) / sizeof(LatencyNames[0]) == static_cast<std:
 
 #if defined(CME_LATENCY)
 
-#include "util/time.hpp"
+#include "util/cpu.hpp"
 
 namespace cme::trace
 {
@@ -103,7 +103,7 @@ void writeJsonl(const char* path, double clockGhz) noexcept;
 
 // Internal: stamp the paste-built TSC local. maybe_unused: END's two consumers
 // (counter add + trace span) don't both reference it in every inlining.
-#define OBSERVE_LATENCY_TSC(tscLocal) [[maybe_unused]] const std::uint64_t tscLocal = cme::time::readTimestampCounter()
+#define OBSERVE_LATENCY_TSC(tscLocal) [[maybe_unused]] const std::uint64_t tscLocal = cme::cpu::readTimestampCounter()
 // Open a segment named after a LatencyStage value (paste-built begin local).
 #define OBSERVE_LATENCY_BEGIN(stage) OBSERVE_LATENCY_TSC(_latencyTsc_##stage##_begin)
 

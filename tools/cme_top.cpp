@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "config_reader.hpp"
 #include "core/domain_bitmap.hpp"
@@ -62,7 +63,6 @@ constexpr std::uint32_t StopCheckMs = 50;
 
 constexpr std::size_t TimeTextBytes = 32;
 
-constexpr double NsPerMs = 1e6;
 constexpr double PercentScale = 100.0;
 
 // A percentage past this is a broken counter rather than a load, so clamp and keep the
@@ -108,30 +108,8 @@ public:
     }
 };
 
-// Frame-to-frame deltas need a clock that cannot step; peer ages need the one the
-// heartbeat is stamped with. They are different clocks, so both are here.
-[[nodiscard]] std::uint64_t nowSteadyNs() noexcept
-{
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
-                                          .count());
-}
-
-[[nodiscard]] std::uint64_t nowSteadyMs() noexcept
-{
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          std::chrono::steady_clock::now().time_since_epoch())
-                                          .count());
-}
-
-// Geometry::Member_t::lastSeenNanos is CLOCK_REALTIME ns since the epoch (src/util/time.hpp),
-// which is what makes an age comparable to a stamp another host wrote.
-[[nodiscard]] std::uint64_t nowRealtimeNs() noexcept
-{
-    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                          std::chrono::system_clock::now().time_since_epoch())
-                                          .count());
-}
+// Frame-to-frame deltas need a clock that cannot step, which is timing::monotonic. Peer ages need
+// the one the heartbeat is stamped with, which is below. They are different clocks.
 
 [[nodiscard]] const char* getStrategyName(cme::Strategy strategy)
 {
@@ -242,40 +220,43 @@ enum class Role
 // A stamp older than this is stale. It is the region's own failure-detector window, skew
 // bound and cache staleness included, so STALE here means "the other peers would call this
 // one dead" rather than "it did not tick during whatever refresh the operator picked".
-constexpr std::uint64_t StaleAfterNs = static_cast<std::uint64_t>(
-    std::chrono::duration_cast<std::chrono::nanoseconds>(cme::DeadWindowEffective).count());
-
 // A peer that has never stamped, or whose stamp sits ahead of this host's clock, has no age
 // to judge. Neither is evidence of death, so neither reads as stale.
-[[nodiscard]] bool isHeartbeatStale(std::uint64_t lastSeenNs, std::uint64_t nowNs)
+[[nodiscard]] bool isHeartbeatStale(timing::WallStamp lastSeen, std::uint64_t nowNs)
 {
-    if (lastSeenNs == 0 || lastSeenNs > nowNs)
+    if (lastSeen.isUnset())
     {
         return false;
     }
-    return (nowNs - lastSeenNs) > StaleAfterNs;
+    const std::optional<timing::Nanos> age = lastSeen.ageAt(nowNs);
+    return age.has_value() && *age > cme::DeadWindowEffective;
 }
 
 // How far ahead of this host's clock a stamp may sit before it is worth naming. The frame
 // reads its clock once and then walks the peer records, so a peer stamping during that walk
 // lands microseconds in the future through sampling order alone. Past the bound the protocol
 // declares for pairwise skew, it is the clocks that disagree.
-constexpr std::uint64_t SkewToleranceNs = static_cast<std::uint64_t>(
-    std::chrono::duration_cast<std::chrono::nanoseconds>(cme::ClockSkewBound).count());
-
 // Time since the peer last stamped its liveness witness.
-[[nodiscard]] std::string formatHeartbeatAge(std::uint64_t lastSeenNs, std::uint64_t nowNs)
+[[nodiscard]] std::string formatHeartbeatAge(timing::WallStamp lastSeen, std::uint64_t nowNs)
 {
-    if (lastSeenNs == 0)
+    if (lastSeen.isUnset())
     {
         return "-";
     }
-    if (lastSeenNs > nowNs)
+    if (const std::optional<timing::Nanos> ahead = lastSeen.aheadAt(nowNs))
     {
-        return (lastSeenNs - nowNs > SkewToleranceNs) ? "skew" : "0ms";
+        return (*ahead > cme::ClockSkewBound) ? "skew" : "0ms";
     }
+
+    // Neither ahead nor behind: the stamp landed on this frame's own instant.
+    const std::optional<timing::Nanos> age = lastSeen.ageAt(nowNs);
+    if (!age)
+    {
+        return "0ms";
+    }
+
     char text[16]{};
-    std::snprintf(text, sizeof text, "%.0fms", static_cast<double>(nowNs - lastSeenNs) / NsPerMs);
+    std::snprintf(text, sizeof text, "%.0fms", timing::MillisF{*age}.count());
     return text;
 }
 
@@ -401,7 +382,7 @@ void renderPeers(cme::Inspector& inspector, std::uint32_t peerCount,
                  const std::vector<bool>& holdsAnyDomain, FrameState_t& state,
                  std::uint64_t frameNs)
 {
-    const std::uint64_t realtimeNs = nowRealtimeNs();
+    const std::uint64_t realtimeNs = timing::wall<timing::Nanos>();
 
     std::printf("PEERS%s", ClearToLineEnd);
     std::printf("  %3s  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %s%s", "id", "status", "role",
@@ -416,7 +397,7 @@ void renderPeers(cme::Inspector& inspector, std::uint32_t peerCount,
             continue;
         }
 
-        const bool isStale = isHeartbeatStale(peer->lastSeenNanos, realtimeNs);
+        const bool isStale = isHeartbeatStale(timing::WallStamp{peer->lastSeenNanos}, realtimeNs);
         const Role role = classifyPeer(*peer, isStale, holdsAnyDomain[peerId]);
 
         const std::uint64_t width = state.isFirstFrame ? 0 : frameNs;
@@ -437,7 +418,7 @@ void renderPeers(cme::Inspector& inspector, std::uint32_t peerCount,
         std::printf("  %3u  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %s%s", peerId,
                     peer->active ? "ACTIVE" : "NONE", getRoleName(role), pollText.c_str(),
                     workerText.c_str(), waitText.c_str(), spinText.c_str(),
-                    formatHeartbeatAge(peer->lastSeenNanos, realtimeNs).c_str(),
+                    formatHeartbeatAge(timing::WallStamp{peer->lastSeenNanos}, realtimeNs).c_str(),
                     formatMask(peer->pendingDomains).c_str(), ClearToLineEnd);
     }
     std::printf("%s", ClearToLineEnd);
@@ -482,7 +463,7 @@ void render(cme::Inspector& inspector, const Opts_t& options, FrameState_t& stat
         return;
     }
 
-    const std::uint64_t steadyNs = nowSteadyNs();
+    const std::uint64_t steadyNs = timing::monotonic<timing::Nanos>();
     const std::uint64_t frameNs = state.isFirstFrame ? 0 : (steadyNs - state.steadyNs);
     const std::uint32_t domainCount = std::min<std::uint32_t>(info->numDomains, MaxDomains);
     const std::uint32_t peerCount = std::min<std::uint32_t>(info->maxPeers, MaxPeers);
@@ -625,10 +606,11 @@ int main(int argc, char** argv)
     while (g_stopRequested == 0)
     {
         render(*inspector, options, state);
-        const std::uint64_t deadlineMs = nowSteadyMs() + options.intervalMs;
-        while (g_stopRequested == 0 && nowSteadyMs() < deadlineMs)
+        // The gap between frames, rechecked often enough that Ctrl-C lands well inside one.
+        const timing::Deadline nextFrame{timing::Millis{options.intervalMs}};
+        while (g_stopRequested == 0 && !nextFrame.expired())
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds{StopCheckMs});
+            std::this_thread::sleep_for(timing::Millis{StopCheckMs});
         }
     }
 

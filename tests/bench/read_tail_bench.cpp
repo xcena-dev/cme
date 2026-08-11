@@ -43,7 +43,7 @@
 #include <thread>
 #include <vector>
 
-#include "args.hpp"
+#include "common/args.hpp"
 #include "helper_util.hpp"
 #include "test_memory.hpp"
 
@@ -229,10 +229,10 @@ void reportResults(const RunOptions_t& options, const Mapping_t& mapping, double
 
 int main(int argc, char** argv)
 {
-    static_cast<void>(harness::takeArgs(argc, argv));
+    static_cast<void>(cliargs::takeArgs(argc, argv));
 
     RunOptions_t options;
-    const std::string modeName = harness::argStr("--mode", "read-only");
+    const std::string modeName = cliargs::argStr("--mode", "read-only");
     options.mode = parseMode(modeName);
     if (options.mode == Mode::Invalid)
     {
@@ -240,10 +240,10 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    options.iterations = harness::argU64("--iters", DefaultIterations);
-    options.pollers = static_cast<std::uint32_t>(harness::argU64("--pollers", 0));
-    options.stride = harness::argU64("--stride", 0);
-    options.slot = harness::argU64("--slot", 0);
+    options.iterations = cliargs::argU64("--iters", DefaultIterations);
+    options.pollers = static_cast<std::uint32_t>(cliargs::argU64("--pollers", 0));
+    options.stride = cliargs::argU64("--stride", 0);
+    options.slot = cliargs::argU64("--slot", 0);
 
     // Naming, placement and removal come from here. The devdax window sits in the
     // reserved tail rather than at offset 0, where a filesystem sharing the node would be.
@@ -252,7 +252,7 @@ int main(int argc, char** argv)
     {
         memory = harness::TestMemory::open(harness::ConfigReader{}, harness::Backend::Dax,
                                            "read_tail", options.slot,
-                                           harness::argStr("--target", ""));
+                                           cliargs::argStr("--target", ""));
     }
     catch (const harness::MediumUnavailable& why)
     {

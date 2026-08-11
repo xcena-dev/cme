@@ -17,6 +17,7 @@
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -147,7 +148,7 @@ Guard Session::lock(std::string_view name)
 }
 
 std::optional<Guard> Session::tryLock(std::string_view name,
-                                      std::chrono::nanoseconds timeout)
+                                      timing::Nanos timeout)
 {
     if (!impl_)
     {

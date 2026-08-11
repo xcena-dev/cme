@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry_profile.hpp"
 #include "core/policy/recovery_authority.hpp"
@@ -309,7 +310,7 @@ public:
 
     // Poll header up to `timeout`, then bind. Throws on timeout / invalid header.
     // @mode is this peer's regime; bindBlocking polls the header for the creator's format.
-    void bindBlocking(std::chrono::milliseconds timeout, CoherencyMode mode);
+    void bindBlocking(timing::Millis timeout, CoherencyMode mode);
 
     // Inspector path: best-effort re-validate; picks up reformats.
     // Returns false on invalid header. Passkey-protected.

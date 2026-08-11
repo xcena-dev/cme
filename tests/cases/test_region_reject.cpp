@@ -33,6 +33,9 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+// timing::Millis is an alias, and include-cleaner credits its use to whatever <chrono> declares
+// underneath, so it reads the header that names it as unused.
+#include "common/timing.hpp"  // NOLINT(misc-include-cleaner)
 #include "core/layout/geometry.hpp"
 #include "helper.hpp"
 #include "observe/inspector.hpp"
@@ -54,7 +57,7 @@ constexpr std::uint32_t CountCeiling = 64;
 
 // A short format timeout, so the unformatted case does not spend the default five seconds
 // waiting for a formatter that will never come.
-constexpr auto JoinTimeout = std::chrono::milliseconds{100};
+constexpr auto JoinTimeout = timing::Millis{100};
 
 // Re-format, then overwrite the header line with @mutate applied to it. Returns nothing: what
 // the injection did is asserted through the two readers, not through this.

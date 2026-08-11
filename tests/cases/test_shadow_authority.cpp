@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -51,11 +52,11 @@ constexpr std::uint64_t EpochLead = 16;
 
 // The window the waiter is given while the shadow lies. A shadow-trusting build adopts on its
 // first poll, so this only has to outlast the poll interval.
-constexpr std::chrono::milliseconds ForgedWindow{400};
+constexpr timing::Millis ForgedWindow{400};
 
 // The window for the real handoff once the holder unpins. Wide enough for one poll cycle to
 // carry the grant across.
-constexpr std::chrono::milliseconds GrantWindow{3'000};
+constexpr timing::Millis GrantWindow{3'000};
 
 }  // namespace
 
@@ -86,7 +87,7 @@ void runBody(harness::TestContext& ctx)
     forged.epoch = truth.epoch + EpochLead;
     cme::coherency::set(region.getDomainRecordShadow(lane, WaiterId), forged, coherency);
 
-    ctx.check(!waiter.tryLock(lane, ForgedWindow).has_value(),
+    ctx.check(!harness::canLock(waiter, lane, ForgedWindow),
               "a shadow naming the waiter does not hand it the domain");
     ctx.check(harness::readDomainRecord(region, lane).getHolder() == HolderId,
               "the truth still names the holder after the refused acquire");

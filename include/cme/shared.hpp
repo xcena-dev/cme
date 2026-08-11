@@ -142,7 +142,7 @@ public:
     [[nodiscard]] static Session open(std::string_view uri, const OpenOpts_t& opts);
 
     // ── ops ────────────────────────────────────────────────────────
-    // Blocking acquire (≤5 s). Throws LockTimeoutError / UnknownDomainError.
+    // Blocking acquire, bounded by AcquireTimeout. Throws LockTimeoutError / UnknownDomainError.
     // Excludes other peers, not other threads of this one -- see THREADING above.
     [[nodiscard]] Guard lock(std::string_view name);
 

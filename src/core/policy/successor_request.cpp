@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/domain_bitmap.hpp"
@@ -73,7 +74,7 @@ void transferHeldDomains(LocalPeerState& peerState, DomainBitmap heldDomains)
 
 }  // namespace
 
-OwnershipResult RequestPolicy::lock(LocalPeerState& peerState, DomainId domainId, std::chrono::nanoseconds timeout)
+OwnershipResult RequestPolicy::lock(LocalPeerState& peerState, DomainId domainId, const timing::Deadline& deadline)
 {
     // Fast path: already holder (single-peer or cached residency).
     OBSERVE_LATENCY_BEGIN(Resident);
@@ -86,7 +87,7 @@ OwnershipResult RequestPolicy::lock(LocalPeerState& peerState, DomainId domainId
     OBSERVE_LATENCY_BEGIN(Raise);
     request_demand::raise(peerState, domainId);  // the request signal
     OBSERVE_LATENCY_END(Raise, peerState, domainId);
-    OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, timeout);
+    OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     request_demand::drop(peerState, domainId);
     if (result == OwnershipResult::Arrived)
     {
@@ -95,7 +96,10 @@ OwnershipResult RequestPolicy::lock(LocalPeerState& peerState, DomainId domainId
 
     // Timeout, demand already dropped so no new grant is decided. Settle-wait catches a
     // grant still in flight, which the belief-local poll cycle would not rescue.
-    result = ownership_transfer::waitForOwnership(peerState, domainId, RequestWithdrawSettle);
+    // A new budget on purpose: the caller's is already spent, and this is the extra window the
+    // withdraw opens rather than time it was promised.
+    result = ownership_transfer::waitForOwnership(peerState, domainId,
+                                                  timing::Deadline{RequestWithdrawSettle});
     if (result == OwnershipResult::Arrived)
     {
         return result;

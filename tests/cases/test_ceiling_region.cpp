@@ -20,6 +20,7 @@
 
 #include <chrono>
 
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -37,7 +38,7 @@ constexpr cme::PeerId WaiterId = cme::MaxPeers - 1;
 
 constexpr const char* Domain = "lane0";
 
-constexpr std::chrono::milliseconds GrantWindow{3'000};
+constexpr timing::Millis GrantWindow{3'000};
 
 }  // namespace
 

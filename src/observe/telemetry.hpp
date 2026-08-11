@@ -13,7 +13,6 @@
 
 #include "core/types.hpp"
 #include "observe/latency.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -42,9 +41,9 @@ struct PeerTelemetry_t
         } count;
         struct
         {
-            std::atomic<time::nanoseconds> wait{0};          // wait wall
-            std::atomic<time::nanoseconds> spin{0};          // wait CPU (busy-spin proxy)
-            std::atomic<time::nanoseconds> transferable{0};  // lock-hold duration
+            std::atomic<NanosCount> wait{0};          // wait wall
+            std::atomic<NanosCount> spin{0};          // wait CPU (busy-spin proxy)
+            std::atomic<NanosCount> transferable{0};  // lock-hold duration
         } time;
     } ownership;
 

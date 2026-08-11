@@ -23,7 +23,7 @@
 #include <memory>
 #include <string>
 
-#include "args.hpp"
+#include "common/args.hpp"
 #include "test_memory.hpp"
 
 namespace
@@ -240,9 +240,9 @@ void runStores(std::uint8_t* line, std::uint64_t iterations)
 
 int main(int argc, char** argv)
 {
-    static_cast<void>(harness::takeArgs(argc, argv));
+    static_cast<void>(cliargs::takeArgs(argc, argv));
 
-    const std::string backend = harness::argStr("--backend", "dax");
+    const std::string backend = cliargs::argStr("--backend", "dax");
     if (backend != "dax" && backend != "uc")
     {
         std::fprintf(stderr, "%s: unknown backend '%s' (want dax or uc)\n%s", argv[0],
@@ -250,8 +250,8 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const std::uint64_t iterations = harness::argU64("--iters", DefaultIterations);
-    const std::uint64_t slot = harness::argU64("--slot", 0);
+    const std::uint64_t iterations = cliargs::argU64("--iters", DefaultIterations);
+    const std::uint64_t slot = cliargs::argU64("--slot", 0);
 
     // Naming, placement and removal all come from here. On dax that placement matters: the
     // node may carry a filesystem at its front, so the window sits in the reserved tail
@@ -260,7 +260,7 @@ int main(int argc, char** argv)
     try
     {
         memory = harness::TestMemory::open(harness::ConfigReader{}, harness::backendFromName(backend),
-                                           "cl_bench", slot, harness::argStr("--target", ""));
+                                           "cl_bench", slot, cliargs::argStr("--target", ""));
     }
     catch (const harness::MediumUnavailable& why)
     {

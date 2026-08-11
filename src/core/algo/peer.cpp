@@ -20,6 +20,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/lifecycle.hpp"
 #include "core/algo/ownership_transfer.hpp"
@@ -196,7 +197,8 @@ PeerGuard Peer::lock(DomainId domainId)
     {
         throw NotParticipatingError{"cme::Peer::lock: domain not joined"};
     }
-    if (state.getSuccessorPolicy()->lock(state, domainId, AcquireTimeout) != OwnershipResult::Arrived)
+    const timing::Deadline budget{AcquireTimeout};
+    if (state.getSuccessorPolicy()->lock(state, domainId, budget) != OwnershipResult::Arrived)
     {
         throw LockTimeoutError{};
     }
@@ -204,14 +206,17 @@ PeerGuard Peer::lock(DomainId domainId)
     return PeerGuard{this, domainId};
 }
 
-std::optional<PeerGuard> Peer::tryLock(DomainId domainId, std::chrono::nanoseconds timeout)
+std::optional<PeerGuard> Peer::tryLock(DomainId domainId, timing::Nanos timeout)
 {
     auto& state = validatedState(impl_.get(), domainId, "tryLock");
     if (!state.isParticipating(domainId))
     {
         return std::nullopt;
     }
-    if (impl_->getSuccessorPolicy()->lock(state, domainId, timeout) != OwnershipResult::Arrived)
+    // The budget starts here, at the boundary the caller asked in, so everything below spends the
+    // same one. Deriving it lower would restart it and hand back more time than was asked for.
+    const timing::Deadline budget{timeout};
+    if (impl_->getSuccessorPolicy()->lock(state, domainId, budget) != OwnershipResult::Arrived)
     {
         return std::nullopt;
     }

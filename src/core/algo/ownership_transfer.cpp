@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
@@ -24,8 +25,8 @@
 #include "observe/latency.hpp"
 #include "observe/observe.hpp"
 #include "util/coherency.hpp"
+#include "util/cpu.hpp"
 #include "util/endian.hpp"
-#include "util/time.hpp"
 
 namespace cme::ownership_transfer
 {
@@ -172,7 +173,7 @@ void bumpHeartbeat(LocalPeerState& peerState)
 }
 
 OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
-                                 std::chrono::nanoseconds timeout)
+                                 const timing::Deadline& deadline)
 {
     const PeerId selfPeerId = peerState.getPeerId();
     auto& domain = peerState.getDomain(domainId);
@@ -190,22 +191,23 @@ OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
         domain.loseHolder();
     }
 
-    const auto wallStart = time::getMonoTime();
-    const auto cpuStart = OBSERVE_CPU_TIME();  // syscall only under stats/profile; else zero
-    const auto deadline = wallStart + timeout;
-    const auto spinUntil = wallStart + SpinWindow;  // hot phase boundary (time-based)
+    const timing::Stopwatch waited;
+    const auto cpuStart = OBSERVE_CPU_TIME();       // syscall only under stats/profile; else zero
+    const timing::Deadline spinWindow{SpinWindow};  // hot phase boundary (time-based)
 
     // Adaptive spin backoff: start tight (catch a near token fast), widen the
     // inter-poll gap as the wait drags (cuts cacheline/FAM traffic).
-    time::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
+    cpu::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
 
     // Poll our group's shadow rather than the shared truth: spreading the wait across
     // shadows avoids a read storm on one line. epoch>last also rejects a stale read.
     auto* selfShadow = peerState.getDomainRecordShadow(domainId, selfPeerId);
     OBSERVE_LATENCY_BEGIN(Spin);
-    for (auto now = wallStart; now < deadline; now = time::getMonoTime())
+    // One clock read per turn, asked of both budgets. Letting each read its own would double the
+    // reads in the hottest loop in the library.
+    for (auto now = timing::now(); !deadline.expiredAt(now); now = timing::now())
     {
-        const bool spinning = now < spinUntil;
+        const bool spinning = !spinWindow.expiredAt(now);
 
         // Confirm against the truth only on a fresh edge, since the truth is the sole
         // holder authority and the shadow read is the cheap distributed filter.
@@ -228,22 +230,22 @@ OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
                 OBSERVE_LATENCY_BEGIN(AdoptLocal);
                 adoptOwnership(domain, truth.epoch);
                 OBSERVE_LATENCY_END(AdoptLocal, peerState, domainId);
-                OBSERVE_EVENT(Event::OwnershipArrived, peerState, wallStart, cpuStart, true);
+                OBSERVE_EVENT(Event::OwnershipArrived, peerState, waited, cpuStart, true);
                 return OwnershipResult::Arrived;
             }
         }
 
         if (spinning)
         {
-            time::relaxCpu(backoff.next());
+            cpu::relaxCpu(backoff.next());
         }
         else
         {
-            time::sleepFor(peerState.getPollInterval() / 2 + std::chrono::microseconds{1});
+            cpu::sleepFor(peerState.getPollInterval() / 2 + timing::Micros{1});
         }
     }
 
-    OBSERVE_EVENT(Event::OwnershipNotArrived, peerState, wallStart, cpuStart);
+    OBSERVE_EVENT(Event::OwnershipNotArrived, peerState, waited, cpuStart);
     return OwnershipResult::NotArrived;
 }
 

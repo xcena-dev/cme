@@ -35,12 +35,12 @@ jobs:
 
       - name: Check formatting
         run: |
-          mapfile -t files < <(find src tests tools examples -name '*.cpp' -o -name '*.hpp')
+          mapfile -t files < <(find include common src tests tools examples -name '*.cpp' -o -name '*.hpp')
           echo "checking ${#files[@]} files"
           if ! clang-format-18 --dry-run -Werror "${files[@]}"; then
             echo
             echo "Run this, then commit the result:"
-            echo "  find src tests tools examples -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 -i"
+            echo "  find include common src tests tools examples -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 -i"
             exit 1
           fi
 
@@ -74,11 +74,12 @@ jobs:
             echo "no base commit to diff against; nothing to check"
             exit 0
           fi
-          git diff -U0 "$base"...HEAD -- 'src/*' 'tests/*' 'tools/*' 'examples/*' \
+          git diff -U0 "$base"...HEAD -- 'include/*' 'common/*' 'src/*' 'tests/*' 'tools/*' 'examples/*' \
             | python3 /usr/lib/llvm-18/share/clang/clang-tidy-diff.py \
                 -p1 -path build -clang-tidy-binary clang-tidy-18 -use-color \
                 -extra-arg=-std=c++17 \
                 -extra-arg=-I"$PWD/include" \
+                -extra-arg=-I"$PWD/common" \
                 -extra-arg=-I"$PWD/src" \
                 -extra-arg=-I"$PWD/tests/harness" \
             | tee tidy.log

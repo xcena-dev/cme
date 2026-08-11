@@ -26,8 +26,9 @@
 #include <thread>
 #include <vector>
 
-#include "args.hpp"
 #include "cme/shared_session.hpp"
+#include "common/args.hpp"
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -40,7 +41,7 @@ namespace
 // performance: --peers, --threads, --iters, --domains, --cohort-cap, --shuffle.
 std::uint32_t readOptU32(const char* flag, std::uint32_t fallback)
 {
-    return static_cast<std::uint32_t>(harness::argU64(flag, fallback));
+    return static_cast<std::uint32_t>(cliargs::argU64(flag, fallback));
 }
 
 // Per data domain [1..D] counter; non-atomic on purpose (the two-tier lock must
@@ -48,14 +49,13 @@ std::uint32_t readOptU32(const char* flag, std::uint32_t fallback)
 // different elements, so a lost update only appears if a domain has two holders at once.
 std::vector<std::uint64_t> g_counter;
 
-// The critical section itself, plus the acquire-latency sample. Called with both tiers held,
-// so @began is the instant the acquire started.
-void recordCriticalSection(std::uint32_t domainId, std::chrono::steady_clock::time_point began,
+// The critical section itself, plus the acquire-latency sample. Called with both tiers held, so
+// @acquiring was started the instant the acquire began and is read before the section runs.
+void recordCriticalSection(std::uint32_t domainId, const timing::Stopwatch& acquiring,
                            std::vector<std::uint64_t>& localLat)
 {
-    const auto held = std::chrono::steady_clock::now();
+    localLat.push_back(static_cast<std::uint64_t>(acquiring.elapsed().count()));
     ++g_counter[domainId];  // non-atomic on purpose: a lost update means ME broke
-    localLat.push_back(harness::nsBetween(began, held));
 }
 
 struct Config_t
@@ -144,11 +144,11 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
         }
         for (const std::uint32_t domainId : visit)
         {
-            const auto began = std::chrono::steady_clock::now();
+            const timing::Stopwatch acquiring;
             {
                 // local mutex -> CXL
                 auto guard = tiers.shared[worker.pid].lock(domainName(domainId));
-                recordCriticalSection(domainId, began, localLat);
+                recordCriticalSection(domainId, acquiring, localLat);
             }
         }
         ++done[worker.slot];
@@ -220,7 +220,7 @@ void reportLatency(const Config_t& cfg, std::vector<std::uint64_t>& acqLatNs)
                 harness::percentile(acqLatNs, 0.99), harness::percentile(acqLatNs, 1.0));
 
     // --csv <path>: append one sweep row (us). Columns: peers,threads,domains + latency.
-    const std::string csv = harness::argStr("--csv", std::string{});
+    const std::string csv = cliargs::argStr("--csv", std::string{});
     if (csv.empty())
     {
         return;
@@ -258,7 +258,7 @@ void runBody(harness::TestContext& ctx)
 
     // Let membership settle before the threads race. Without this, early acquires can
     // misroute to a not-yet-Active peer and strand the token into starvation timeouts.
-    std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    std::this_thread::sleep_for(timing::Millis{100});
 
     std::vector<std::uint32_t> done(static_cast<std::size_t>(cfg.numPeers) * cfg.threadsPerPeer, 0);
     std::vector<std::uint64_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)

@@ -25,6 +25,7 @@
 #include <cstdint>
 
 #include "cme/errors.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -46,7 +47,7 @@ constexpr cme::PeerId TenantId = 1;
 constexpr const char* FirstName = "alpha";
 constexpr const char* SecondName = "beta";
 
-constexpr std::chrono::milliseconds GrantWindow{3'000};
+constexpr timing::Millis GrantWindow{3'000};
 
 }  // namespace
 
@@ -59,7 +60,7 @@ void runBody(harness::TestContext& ctx)
 
     const cme::DomainId lane = holder.createDomain(FirstName);
     tenant.joinDomain(lane);
-    if (!ctx.check(tenant.tryLock(lane, GrantWindow).has_value(),
+    if (!ctx.check(harness::canLock(tenant, lane, GrantWindow),
                    "the tenant acquires the first incarnation"))
     {
         return;
@@ -106,7 +107,7 @@ void runBody(harness::TestContext& ctx)
               "the tenant cannot act on the new incarnation with its old view");
 
     tenant.joinDomain(lane);
-    ctx.check(tenant.tryLock(lane, GrantWindow).has_value(),
+    ctx.check(harness::canLock(tenant, lane, GrantWindow),
               "the tenant acquires the new incarnation after re-syncing");
 }
 

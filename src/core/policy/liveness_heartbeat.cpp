@@ -10,13 +10,14 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/policy/liveness.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -46,15 +47,13 @@ bool HeartbeatLivenessPolicy::hasFailed(const LocalPeerState& peerState, PeerId 
     {
         return false;
     }
-    const std::uint64_t lastSeen = peerState.getMemberView(peerId, MemberCacheTTL).lastSeenNanos;
-    const std::uint64_t now = time::clockNowNanos();
-    if (now <= lastSeen)
-    {
-        return false;  // stamped at/after our clock (target skewed ahead) -> fresh
-    }
-    constexpr auto Window = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(DeadWindowEffective).count());
-    return now - lastSeen > Window;
+    const timing::WallStamp lastSeen{peerState.getMemberView(peerId, MemberCacheTTL).lastSeenNanos};
+
+    // No age means the stamp sits at or ahead of our clock: the target's own clock runs ahead, so
+    // its witness is fresh rather than stale. A slot that never stamped reads as an enormous age
+    // and so as dead, which is what an unstamped slot on a peer we consider valid is.
+    const std::optional<timing::Nanos> age = lastSeen.age();
+    return age.has_value() && *age > DeadWindowEffective;
 }
 
 std::unique_ptr<LivenessPolicy> makeLivenessPolicy()

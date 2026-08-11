@@ -19,6 +19,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -74,7 +75,7 @@ void runBody(harness::TestContext& ctx)
     {
         return;
     }
-    if (!ctx.check(!owner.tryLock("orders", std::chrono::milliseconds{50}).has_value(),
+    if (!ctx.check(!harness::canLock(owner, "orders", timing::Millis{50}),
                    "tryLock(orders) after leave must return nullopt"))
     {
         return;

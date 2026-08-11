@@ -133,9 +133,12 @@ set(CME_SOURCES
 
 add_library(cme STATIC ${CME_SOURCES})
 
+# common/ is BUILD_INTERFACE only, like src/. What reaches for it lives under src/ and is not
+# installed, so a consumer of the installed library never sees either.
 target_include_directories(cme
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<INSTALL_INTERFACE:include>
 )
@@ -196,10 +199,14 @@ target_compile_options(cme_app_warnings INTERFACE
 # --config overrides it at run time.
 add_library(cme_harness INTERFACE)
 target_include_directories(cme_harness INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tests/harness)
+# config_reader.hpp reads the file through the shared parser; cmed reads its own file with the same
+# one, so the subset cannot drift between them.
+target_link_libraries(cme_harness INTERFACE cme_common)
 target_compile_definitions(cme_harness INTERFACE
     CME_SITE_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config.yaml")
 
 enable_testing()
+add_subdirectory(common)  # the YAML subset the harness and cmed both read
 add_subdirectory(tools)
 add_subdirectory(tests)   # cases, and the bench/baseline subtrees it owns
 add_subdirectory(examples)

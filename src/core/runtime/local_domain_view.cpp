@@ -8,8 +8,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "config.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -35,7 +35,7 @@ void LocalDomainView::pinOwnership() noexcept
     // First pin records the start timestamp; nested pins inherit it.
     if (cur == 0)
     {
-        pin_.startTimestamp = time::getMonoTime();
+        pin_.startTimestamp = timing::now();
     }
 }
 
@@ -81,7 +81,7 @@ std::uint32_t LocalDomainView::getOwnershipPinCount() const noexcept
     return pin_.count.load(std::memory_order_acquire);
 }
 
-time::TimePoint LocalDomainView::getOwnershipPinStart() const noexcept
+timing::TimePoint LocalDomainView::getOwnershipPinStart() const noexcept
 {
     return pin_.startTimestamp;
 }

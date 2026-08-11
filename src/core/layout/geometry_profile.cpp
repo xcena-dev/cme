@@ -9,14 +9,15 @@
 #include <cstdint>
 
 #include "cme/shared.hpp"
+#include "core/types.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
+#include "util/cpu.hpp"
 
 namespace cme
 {
 
-void publishProfile(CoherencyMode mode, MemberProfile_t* slot, time::nanoseconds spinTime,
-                    time::nanoseconds waitTime) noexcept
+void publishProfile(CoherencyMode mode, MemberProfile_t* slot, NanosCount spinTime,
+                    NanosCount waitTime) noexcept
 {
     if constexpr (!ProfileEnabled)
     {
@@ -38,7 +39,7 @@ void publishProfile(CoherencyMode mode, MemberProfile_t* slot, time::nanoseconds
         }
         // Self is the sole writer of its own profile slot, so a whole-64B set is safe
         // (get-modify-set preserves magic): one wide store beats four field wmb's.
-        profile.time.poll = static_cast<std::uint64_t>(time::getThreadCpuTime().count());
+        profile.time.poll = static_cast<std::uint64_t>(cpu::getThreadCpuTime().count());
         profile.time.worker = spinTime;  // worker on-disk publishes spin (no DRAM accumulator)
         profile.time.wait = waitTime;
         profile.time.spin = spinTime;

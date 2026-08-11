@@ -47,6 +47,7 @@
 
 // This baseline opens no cme region, but it still runs through the case harness: that is
 // what takes the registration flags out of argv before getopt_long sees them.
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -263,9 +264,9 @@ void runPeer(const Opts_t& opt, Region_t& region, std::uint32_t peerIndex)
         harness::shuffleVisitOrder(visitOrder, rng);
         for (const std::uint32_t domainIndex : visitOrder)
         {
-            const auto acquireStart = std::chrono::steady_clock::now();
+            const timing::Stopwatch acquire;
             lockOrDie(region.mutexAt(domainIndex), peerIndex);
-            const auto acquireEnd = std::chrono::steady_clock::now();
+            const auto acquireNs = static_cast<std::uint64_t>(acquire.elapsed().count());
             csWork();
             if (opt.verify)
             {
@@ -274,8 +275,7 @@ void runPeer(const Opts_t& opt, Region_t& region, std::uint32_t peerIndex)
             pthread_mutex_unlock(region.mutexAt(domainIndex));
             if (!opt.verify)
             {
-                region.results[sampleBase + sampleIndex++] =
-                    harness::nsBetween(acquireStart, acquireEnd);
+                region.results[sampleBase + sampleIndex++] = acquireNs;
             }
         }
     }
@@ -341,11 +341,10 @@ int runPeers(const Opts_t& opt, Region_t& region)
 
 int runLatencySweep(const Opts_t& opt, Region_t& region)
 {
-    const auto sweepStart = std::chrono::steady_clock::now();
+    const timing::Stopwatch sweep;
     const int failures = runPeers(opt, region);
-    const auto sweepEnd = std::chrono::steady_clock::now();
     const double wallSec =
-        std::chrono::duration_cast<std::chrono::duration<double>>(sweepEnd - sweepStart).count();
+        std::chrono::duration_cast<timing::SecsF>(sweep.elapsed()).count();
 
     const std::size_t sampleCount = static_cast<std::size_t>(opt.peers) * opt.iters * opt.domains;
     std::vector<std::uint64_t> samples(region.results.data(),

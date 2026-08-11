@@ -11,8 +11,8 @@
 #include <cstdint>
 
 #include "cme/shared.hpp"
+#include "core/types.hpp"
 #include "util/endian.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -34,10 +34,10 @@ struct MemberProfile_t
     std::uint32_t pad;                     //  4
     struct
     {
-        endian::Field_t<time::nanoseconds> poll;    //  8: poll-thread CPU
-        endian::Field_t<time::nanoseconds> worker;  // 16: worker CPU during wait
-        endian::Field_t<time::nanoseconds> wait;    // 24: ownership-wait wall
-        endian::Field_t<time::nanoseconds> spin;    // 32: ownership-wait CPU (busy-spin proxy)
+        endian::Field_t<NanosCount> poll;    //  8: poll-thread CPU
+        endian::Field_t<NanosCount> worker;  // 16: worker CPU during wait
+        endian::Field_t<NanosCount> wait;    // 24: ownership-wait wall
+        endian::Field_t<NanosCount> spin;    // 32: ownership-wait CPU (busy-spin proxy)
     } time;
     std::uint8_t reserved[24];  // 40..63: pad to 64B
 
@@ -76,8 +76,8 @@ getProfileAreaSize(std::uint32_t /*domainCount*/, std::uint32_t peerCount) noexc
 
 // Publish this peer's wait/spin/CPU counters to its profile cacheline.
 // No-op when profiling is built out or slot is absent/unformatted.
-void publishProfile(CoherencyMode mode, MemberProfile_t* slot, time::nanoseconds spinTime,
-                    time::nanoseconds waitTime) noexcept;
+void publishProfile(CoherencyMode mode, MemberProfile_t* slot, NanosCount spinTime,
+                    NanosCount waitTime) noexcept;
 
 // Snapshot this peer's counters. Returns all-zero when profiling is off or slot invalid.
 [[nodiscard]] ProfileTimes_t readProfile(MemberProfile_t* slot, CoherencyMode mode) noexcept;

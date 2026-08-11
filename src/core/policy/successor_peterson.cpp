@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/policy/successor_peterson_layout.hpp"
@@ -28,7 +29,7 @@
 #include "core/types.hpp"
 #include "observe/latency.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
+#include "util/cpu.hpp"
 
 namespace cme
 {
@@ -47,9 +48,9 @@ using peterson_tree::roundUpPow2;
 // ── per-node 2-thread Peterson ──────────────────────────────────────
 
 // One tournament level. Returns false, clearing its own interest, if @deadline passes
-// before the level is won; a 0ns deadline degenerates to a single probe (trylock).
+// before the level is won; a 0ns budget degenerates to a single probe (trylock).
 [[nodiscard]] bool lockNode(PetersonNode_t& node, PetersonNode_t::Role role,
-                            time::TimePoint deadline,
+                            const timing::Deadline& deadline,
                             LocalPeerState& peerState, DomainId domainId) noexcept
 {
     using Role = PetersonNode_t::Role;
@@ -68,7 +69,7 @@ using peterson_tree::roundUpPow2;
     OBSERVE_LATENCY_END(ClimbAnnounce, peerState, domainId);
 
     OBSERVE_LATENCY_BEGIN(ClimbSpin);
-    time::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
+    cpu::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
     bool won = false;
     while (true)
     {
@@ -80,11 +81,11 @@ using peterson_tree::roundUpPow2;
             won = true;
             break;
         }
-        if (time::getMonoTime() >= deadline)
+        if (deadline.expired())
         {
             break;  // deadline; back out below
         }
-        time::relaxCpu(backoff.next());
+        cpu::relaxCpu(backoff.next());
     }
     OBSERVE_LATENCY_END(ClimbSpin, peerState, domainId);
 
@@ -123,7 +124,7 @@ struct PetersonState_t
     // levels already won (root-relative reverse order) so no partial residency
     // leaks, and return false. true = root reached (holder).
     [[nodiscard]] bool acquire(LocalPeerState& peerState, DomainId domain,
-                               time::TimePoint deadline) noexcept
+                               const timing::Deadline& deadline) noexcept
     {
         const std::uint32_t base = domain * nodesPerDomain_;
         for (std::size_t won = 0; won < path_.size(); ++won)
@@ -194,7 +195,7 @@ void PetersonPolicy::bind(LocalPeerState& peerState) noexcept
 }
 
 OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainId,
-                                     std::chrono::nanoseconds timeout)
+                                     const timing::Deadline& deadline)
 {
     // bind() builds state_ before the poll thread spawns; a null here means the policy was
     // never bound (format-path helper), so bail instead of faulting.
@@ -214,9 +215,9 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
         return OwnershipResult::Arrived;
     }
 
-    // timeout==0 -> deadline==now, so acquire degenerates to a single probe (trylock);
+    // timeout==0 -> the deadline is expired on arrival, so acquire degenerates to a single
     // on timeout it rolls back any partial climb, so no residency leaks.
-    if (!state_->acquire(peerState, domainId, time::getMonoTime() + timeout))
+    if (!state_->acquire(peerState, domainId, deadline))
     {
         ownership_transfer::unholdDomain(peerState, domainId);
         return OwnershipResult::NotArrived;

@@ -11,13 +11,15 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/event.hpp"
-#include "util/time.hpp"
 
 #if defined(CME_STATS)
 #include <algorithm>
+
+#include "util/cpu.hpp"
 #endif
 
 namespace cme::stats
@@ -67,20 +69,20 @@ inline void bump(std::atomic<std::uint64_t>& counter) noexcept
 }
 
 // Accumulate wall + CPU wait time (shared by OwnershipArrived / NotArrived).
-inline void recordWaitCommon(LocalPeerState& peerState, time::TimePoint wallStart,
-                             std::chrono::nanoseconds cpuStart) noexcept
+inline void recordWaitCommon(LocalPeerState& peerState, const timing::Stopwatch& waited,
+                             timing::Nanos cpuStart) noexcept
 {
     using std::chrono::duration_cast;
-    const auto wallElapsed = duration_cast<std::chrono::nanoseconds>(time::getMonoTime() - wallStart);
-    auto cpuElapsed = time::getThreadCpuTime() - cpuStart;
+    const auto wallElapsed = waited.elapsed();
+    auto cpuElapsed = cpu::getThreadCpuTime() - cpuStart;
     if (cpuElapsed > wallElapsed)
     {
         cpuElapsed = wallElapsed;  // clamp: scheduler tick can inflate CPU proxy
     }
     auto& ownership = peerState.getTelemetry().ownership;
-    ownership.time.wait.fetch_add(static_cast<time::nanoseconds>(wallElapsed.count()),
+    ownership.time.wait.fetch_add(static_cast<NanosCount>(wallElapsed.count()),
                                   std::memory_order_relaxed);
-    ownership.time.spin.fetch_add(static_cast<time::nanoseconds>(cpuElapsed.count()),
+    ownership.time.spin.fetch_add(static_cast<NanosCount>(cpuElapsed.count()),
                                   std::memory_order_relaxed);
 }
 }  // namespace
@@ -99,30 +101,30 @@ void emit(observe::EventTag_t<observe::Event::OwnershipAlreadyHave>,
 }
 
 void emit(observe::EventTag_t<observe::Event::OwnershipArrived>,
-          LocalPeerState& peerState, time::TimePoint wallStart,
-          std::chrono::nanoseconds cpuStart, bool isSpin) noexcept
+          LocalPeerState& peerState, const timing::Stopwatch& waited,
+          timing::Nanos cpuStart, bool isSpin) noexcept
 {
-    recordWaitCommon(peerState, wallStart, cpuStart);
+    recordWaitCommon(peerState, waited, cpuStart);
     auto& ownership = peerState.getTelemetry().ownership;
     bump(isSpin ? ownership.count.arrivedSpin : ownership.count.arrivedSleep);
 }
 
 void emit(observe::EventTag_t<observe::Event::OwnershipNotArrived>,
-          LocalPeerState& peerState, time::TimePoint wallStart,
-          std::chrono::nanoseconds cpuStart) noexcept
+          LocalPeerState& peerState, const timing::Stopwatch& waited,
+          timing::Nanos cpuStart) noexcept
 {
-    recordWaitCommon(peerState, wallStart, cpuStart);
+    recordWaitCommon(peerState, waited, cpuStart);
     bump(peerState.getTelemetry().ownership.count.notArrived);
 }
 
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>,
-          LocalPeerState& peerState, time::TimePoint holdStart) noexcept
+          LocalPeerState& peerState, const timing::Stopwatch& held) noexcept
 {
     using std::chrono::duration_cast;
-    const auto holdNs = duration_cast<std::chrono::nanoseconds>(time::getMonoTime() - holdStart);
+    const auto holdNs = held.elapsed();
     auto& ownership = peerState.getTelemetry().ownership;
     ownership.count.transferable.fetch_add(1, std::memory_order_relaxed);
-    ownership.time.transferable.fetch_add(static_cast<time::nanoseconds>(holdNs.count()),
+    ownership.time.transferable.fetch_add(static_cast<NanosCount>(holdNs.count()),
                                           std::memory_order_relaxed);
 }
 
@@ -159,14 +161,14 @@ void emit(observe::EventTag_t<observe::Event::OwnershipAlreadyHave>, LocalPeerSt
 {
 }
 void emit(observe::EventTag_t<observe::Event::OwnershipArrived>, LocalPeerState&,
-          time::TimePoint, std::chrono::nanoseconds, bool) noexcept
+          const timing::Stopwatch&, timing::Nanos, bool) noexcept
 {
 }
 void emit(observe::EventTag_t<observe::Event::OwnershipNotArrived>, LocalPeerState&,
-          time::TimePoint, std::chrono::nanoseconds) noexcept
+          const timing::Stopwatch&, timing::Nanos) noexcept
 {
 }
-void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>, LocalPeerState&, time::TimePoint) noexcept
+void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>, LocalPeerState&, const timing::Stopwatch&) noexcept
 {
 }
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferOnRelease>, LocalPeerState&) noexcept

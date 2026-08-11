@@ -12,8 +12,8 @@
 #include <cstdint>
 #include <memory>
 
+#include "common/timing.hpp"
 #include "core/types.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -82,8 +82,11 @@ public:
     void formatClaimRegion(std::uint8_t* base, std::uint32_t maxPeers) const override;
 
 private:
-    PeerId settleTarget_{NoPeer};       // dead peer we are settling/won a claim on
-    time::TimePoint settleDeadline_{};  // when the settle window ends
+    PeerId settleTarget_{NoPeer};  // dead peer we are settling/won a claim on
+
+    // A zero budget, so it reads as expired until a claim opens a real one. settleTarget_ is what
+    // says whether a window is open, and a second field for that would be one more to keep in step.
+    timing::Deadline settleWindow_{timing::Nanos::zero()};
 };
 
 // Factory: returns ChainRecoveryAuthorityPolicy; future kinds selected here.

@@ -9,6 +9,8 @@
 #include <chrono>
 #include <thread>
 
+#include "common/timing.hpp"
+
 namespace cme
 {
 
@@ -31,17 +33,17 @@ template <typename T>
 // ── waitUntil ──────────────────────────────────────────────────────
 // Poll pred() every interval; true on success, false on timeout. interval==0: spin.
 template <typename T_Predicate>
-[[nodiscard]] bool waitUntil(T_Predicate pred, std::chrono::milliseconds timeout,
-                             std::chrono::milliseconds interval = std::chrono::milliseconds{10})
+[[nodiscard]] bool waitUntil(T_Predicate pred, timing::Millis timeout,
+                             timing::Millis interval = timing::Millis{10})
 {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    const timing::Deadline deadline{timeout};
     while (!pred())
     {
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (deadline.expired())
         {
             return false;
         }
-        if (interval > std::chrono::milliseconds::zero())
+        if (interval > timing::Millis::zero())
         {
             std::this_thread::sleep_for(interval);
         }

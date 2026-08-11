@@ -17,9 +17,10 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
-#include <ratio>
 #include <thread>
 #include <vector>
+
+#include "common/timing.hpp"
 
 namespace harness
 {
@@ -45,51 +46,25 @@ inline void shuffleVisitOrder(std::vector<T_Id>& visit, std::uint64_t& rng) noex
     }
 }
 
-// Milliseconds since @startedAt, fractional. A measurement wants the fraction and a log line wants
-// it rounded, so the one definition returns the finer of the two and each caller formats it.
-[[nodiscard]] inline double msSince(std::chrono::steady_clock::time_point startedAt)
+// Where the timestamps on log lines are measured from. Started at static init so a case that never
+// calls startLogClock() still prints a sane elapsed time rather than time since the epoch.
+inline timing::Stopwatch& logOrigin()
 {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - startedAt)
-        .count();
-}
-
-// The same span in whatever unit the caller works in, kept as a duration so it compares against a
-// config constant without either side being unwrapped first.
-template <typename T_Duration>
-[[nodiscard]] inline T_Duration since(std::chrono::steady_clock::time_point startedAt)
-{
-    return std::chrono::duration_cast<T_Duration>(std::chrono::steady_clock::now() - startedAt);
-}
-
-// Between two points a caller already took, for a measurement whose end is not now. Reading the
-// clock again to close the span would put this call's own cost inside what it reports.
-[[nodiscard]] inline std::uint64_t nsBetween(std::chrono::steady_clock::time_point startedAt,
-                                             std::chrono::steady_clock::time_point endedAt)
-{
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(endedAt - startedAt).count());
-}
-
-// Where the timestamps on log lines are measured from. Set at static init so a case that
-// never calls startLogClock() still prints a sane elapsed time rather than time since the
-// epoch.
-inline std::chrono::steady_clock::time_point& logOrigin()
-{
-    static std::chrono::steady_clock::time_point origin = std::chrono::steady_clock::now();
+    static timing::Stopwatch origin;
     return origin;
 }
 
 // Re-base the clock on the moment a run actually starts, past the harness setup.
 inline void startLogClock()
 {
-    logOrigin() = std::chrono::steady_clock::now();
+    logOrigin().restart();
 }
 
 // A timestamped line. A recovery case is a timeline, and the interesting question is
 // usually how long after the freeze something happened, so the elapsed seconds lead.
 inline void log(const char* fmt, ...)
 {
-    std::printf("[t=%6.2fs] ", msSince(logOrigin()) / 1000.0);
+    std::printf("[t=%6.2fs] ", logOrigin().elapsed<timing::SecsF>().count());
 
     va_list args;
     va_start(args, fmt);
@@ -104,7 +79,7 @@ inline void log(const char* fmt, ...)
 // sequence reads as noise; the number is the part that matters.
 inline void sleepMs(std::uint32_t milliSeconds)
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds{milliSeconds});
+    std::this_thread::sleep_for(timing::Millis{milliSeconds});
 }
 
 // How often waitUntil re-checks. Long enough that the polling is not itself the load, short
@@ -115,12 +90,14 @@ inline constexpr std::uint32_t PollStepMs = 200;
 //
 // A test waits on state another peer publishes, and a fixed sleep long enough to be safe is
 // also long enough to hide the timing under test. Polling to a deadline keeps the wait as
-// short as the system allows and still bounds it.
+// short as the system allows and still bounds it. A clock and not a count of sleeps, because
+// pred() costs time too and counting only the sleeps overruns the deadline by that much.
 template <typename T_Pred>
 [[nodiscard]] bool waitUntil(T_Pred pred, std::uint32_t deadlineMs,
                              std::uint32_t stepMs = PollStepMs)
 {
-    for (std::uint32_t waited = 0; waited < deadlineMs; waited += stepMs)
+    const timing::Deadline deadline{timing::Millis{deadlineMs}};
+    while (!deadline.expired())
     {
         if (pred())
         {
@@ -135,11 +112,14 @@ template <typename T_Pred>
 //
 // waitUntil's twin, and the one a case needs to assert that nothing happened: that a live claim was
 // left alone, or a slot stayed occupied. Sampling once proves only that the change had not landed
-// yet, so the window is the assertion.
+// yet, so the window is the assertion. The clock matters more here than in waitUntil: over-waiting
+// there only gives a transition more room to land, while here it asserts over a longer window than
+// the one written.
 template <typename T_Pred>
 [[nodiscard]] bool holdsFor(T_Pred pred, std::uint32_t windowMs)
 {
-    for (std::uint32_t waited = 0; waited < windowMs; waited += PollStepMs)
+    const timing::Deadline window{timing::Millis{windowMs}};
+    while (!window.expired())
     {
         if (!pred())
         {

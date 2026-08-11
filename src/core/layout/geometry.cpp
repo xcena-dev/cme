@@ -14,6 +14,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry_profile.hpp"
 #include "core/policy/recovery_authority.hpp"
@@ -39,14 +40,6 @@ namespace
 // ~1.03 MB, so ~16k lines at the measured 94-320 ns marginal flush, i.e. 1.5-5 ms against a
 // 5 s format timeout.
 inline constexpr CoherencyMode FormatCoherency = CoherencyMode::Flush;
-
-// formatGeneration: realtime-ns stamp; back-to-back formats get distinct values.
-[[nodiscard]] std::uint64_t getRealtimeNs() noexcept
-{
-    const auto now = std::chrono::system_clock::now().time_since_epoch();
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-}
 
 [[nodiscard]] bool isHeaderReady(void* base, CoherencyMode mode) noexcept
 {
@@ -180,7 +173,7 @@ void Geometry::format(const FormatOpts_t& opts)
     header.aggregatorGroups = opts.aggregatorGroups;
     header.numDomains = domainCount;
     header.maxPeers = peerCount;
-    header.formatGeneration = getRealtimeNs();
+    header.formatGeneration = timing::wall<timing::Nanos>();
     header.totalSize = totalSize;
     // Control domain (0) is always live; data domains set their bit on create.
     DomainBitmap activeDomains;
@@ -191,7 +184,7 @@ void Geometry::format(const FormatOpts_t& opts)
     coherency::set(geometry.getHeader(), header, FormatCoherency);
 }
 
-void Geometry::bindBlocking(std::chrono::milliseconds timeout, CoherencyMode mode)
+void Geometry::bindBlocking(timing::Millis timeout, CoherencyMode mode)
 {
     if (bound_)
     {

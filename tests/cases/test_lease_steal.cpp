@@ -29,6 +29,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
 #include "helper.hpp"
@@ -50,7 +51,7 @@ constexpr std::uint64_t StaleNonce = 0xDEADBEEFCAFEF00DULL;
 // How often the contending thread restamps the nonce. Shorter than ClaimSettle on purpose: the
 // joiner stakes its own nonce and re-reads it one settle later, so a restamp inside that window is
 // what makes the stake fail and the joiner recontend.
-constexpr auto ChurnPeriod = std::chrono::milliseconds{1};
+constexpr auto ChurnPeriod = timing::Millis{1};
 
 void storeNonce(cme::Geometry::AdmissionControl_t* control, std::uint64_t nonce,
                 cme::CoherencyMode coherency)
@@ -72,10 +73,10 @@ void checkStalledLeaseIsStolen(harness::TestContext& ctx)
     const auto coherency = ctx.coherency();
     harness::formatSession(FormatDomains, FormatPeers);
 
-    auto view = harness::openBoundRegion(std::chrono::milliseconds{1000});
+    auto view = harness::openBoundRegion(timing::Secs{1});
     storeNonce(view.getAdmissionControl(), StaleNonce, coherency);
 
-    const auto began = std::chrono::steady_clock::now();
+    const timing::Stopwatch joining;
     {
         auto session = harness::openSession();
         session.createDomain("lane0");
@@ -84,8 +85,8 @@ void checkStalledLeaseIsStolen(harness::TestContext& ctx)
     }
     // The join had to watch the nonce for a full LeaseTimeout before it was allowed to steal, so
     // anything faster means it took the lease while the holder still looked alive.
-    const double elapsedMs = harness::msSince(began);
-    const double stallMs = std::chrono::duration<double, std::milli>(cme::LeaseTimeout).count();
+    const double elapsedMs = joining.elapsed<timing::MillisF>().count();
+    const double stallMs = timing::MillisF(cme::LeaseTimeout).count();
     ctx.checkf(elapsedMs >= stallMs, "stalled lease: the joiner waited out the stall (%.0f ms)",
                elapsedMs);
 
@@ -101,7 +102,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     const auto coherency = ctx.coherency();
     harness::formatSession(FormatDomains, FormatPeers);
 
-    auto view = harness::openBoundRegion(std::chrono::milliseconds{1000});
+    auto view = harness::openBoundRegion(timing::Secs{1});
     auto* control = view.getAdmissionControl();
 
     std::atomic<bool> churning{true};

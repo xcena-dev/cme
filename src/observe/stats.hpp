@@ -10,10 +10,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "common/timing.hpp"
 #include "core/types.hpp"
 #include "observe/event.hpp"
 #include "observe/latency.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -23,10 +23,10 @@ struct LocalPeerState;
 struct TelemetrySnapshot_t
 {
     std::uint64_t waitCount;  // Arrived(Spin+Sleep) + NotArrived
-    time::nanoseconds waitTime;
-    time::nanoseconds spinTime;
+    NanosCount waitTime;
+    NanosCount spinTime;
     std::uint64_t lockHoldCount;
-    time::nanoseconds lockHoldTime;
+    NanosCount lockHoldTime;
     std::uint64_t perDomainAcquire[MaxDomains];  // capped at MaxDomains
 
     // Handoff-latency breakdown: raw TSC cycles + sample count per segment.
@@ -73,13 +73,13 @@ void emit(observe::EventTag_t<observe::Event::OwnershipRequested>,
 void emit(observe::EventTag_t<observe::Event::OwnershipAlreadyHave>,
           LocalPeerState& peerState) noexcept;
 void emit(observe::EventTag_t<observe::Event::OwnershipArrived>,
-          LocalPeerState& peerState, time::TimePoint wallStart,
-          std::chrono::nanoseconds cpuStart, bool isSpin) noexcept;
+          LocalPeerState& peerState, const timing::Stopwatch& waited,
+          timing::Nanos cpuStart, bool isSpin) noexcept;
 void emit(observe::EventTag_t<observe::Event::OwnershipNotArrived>,
-          LocalPeerState& peerState, time::TimePoint wallStart,
-          std::chrono::nanoseconds cpuStart) noexcept;
+          LocalPeerState& peerState, const timing::Stopwatch& waited,
+          timing::Nanos cpuStart) noexcept;
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>,
-          LocalPeerState& peerState, time::TimePoint holdStart) noexcept;
+          LocalPeerState& peerState, const timing::Stopwatch& held) noexcept;
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferOnRelease>,
           LocalPeerState& peerState) noexcept;
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferOnPoll>,

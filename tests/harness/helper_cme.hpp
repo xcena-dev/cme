@@ -27,13 +27,14 @@
 
 #include "cme/shared.hpp"
 #include "cme/shared_session.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "observe/latency.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
+#include "util/cpu.hpp"
 
 namespace harness
 {
@@ -83,7 +84,7 @@ formatSession(std::uint32_t maxDomains, std::uint32_t maxPeers)
 // never come, which is the only reason to shorten it.
 [[nodiscard]] inline cme::Session
 openSession(const std::string& uri, cme::CoherencyMode coherency,
-            std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+            timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
     cme::Session::OpenOpts_t opts;
     opts.coherency = coherency;
@@ -94,7 +95,7 @@ openSession(const std::string& uri, cme::CoherencyMode coherency,
 // Same, with both the uri and the medium's mode taken from the run. This is the one a case wants:
 // getting the mode from anywhere else is how a devdax run ends up asserting CacheCoherent.
 [[nodiscard]] inline cme::Session
-openSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+openSession(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
     const TestContext& ctx = currentRun();
     return openSession(ctx.uri(), ctx.coherency(), formatTimeout);
@@ -103,7 +104,7 @@ openSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}
 // The intra-node tier, same reasoning: SharedSession::open takes the same OpenOpts_t and its bare
 // overload carries the same CacheCoherent default.
 [[nodiscard]] inline cme::SharedSession
-openSharedSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+openSharedSession(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
     const TestContext& ctx = currentRun();
     cme::Session::OpenOpts_t opts;
@@ -112,12 +113,24 @@ openSharedSession(std::chrono::milliseconds formatTimeout = cme::Session::OpenOp
     return cme::SharedSession::open(ctx.uri(), opts);
 }
 
+// Whether the acquire succeeded, with the turn given straight back. Templated on both the holder
+// and how it names a domain, because the tiers differ on the second: Session and SharedSession take
+// a name, Peer takes an id.
+//
+// The guard dies inside, at the same point the temporary optional would have died anyway, so this
+// is only a name for the check. A case that wants to hold what it took keeps the optional itself.
+template <typename T_Locker, typename T_Domain>
+[[nodiscard]] inline bool canLock(T_Locker& locker, const T_Domain& domain, timing::Nanos budget)
+{
+    return locker.tryLock(domain, budget).has_value();
+}
+
 // A region mapped and bound, which is what every accessor past getHeader needs: open() maps the
 // bytes, and bindBlocking is what reads the header and computes the section bases. A case wanting
 // the unbound state asks ctx.memory().openRegion() for it directly, since that state is then the
 // subject rather than a step.
 [[nodiscard]] inline cme::Geometry
-openBoundRegion(std::chrono::milliseconds formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
+openBoundRegion(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
     const TestContext& ctx = currentRun();
     auto region = ctx.memory().openRegion();
@@ -239,14 +252,12 @@ template <typename T_Session>
 // hook rather than a test assertion, and a case reaches it only when asked with --trace-jsonl.
 inline void dumpLatencyTrace(const char* path)
 {
-    const auto startCycles = cme::time::readTimestampCounter();
-    const auto startWall = std::chrono::steady_clock::now();
-    std::this_thread::sleep_for(std::chrono::milliseconds{50});
-    const auto endCycles = cme::time::readTimestampCounter();
-    const auto endWall = std::chrono::steady_clock::now();
+    const auto startCycles = cme::cpu::readTimestampCounter();
+    const timing::Stopwatch window;
+    std::this_thread::sleep_for(timing::Millis{50});
+    const auto endCycles = cme::cpu::readTimestampCounter();
 
-    const double windowNs = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(endWall - startWall).count());
+    const double windowNs = static_cast<double>(window.elapsed().count());
     const double gigahertz =
         windowNs > 0 ? static_cast<double>(endCycles - startCycles) / windowNs : 0.0;
 

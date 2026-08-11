@@ -32,9 +32,10 @@
 #include <utility>
 #include <vector>
 
-#include "args.hpp"
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/args.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -45,14 +46,10 @@
 namespace
 {
 
-using Clock = std::chrono::steady_clock;
-using cme::DomainId;
-using cme::PeerId;
-
-constexpr PeerId DefaultPeers = 6;
+constexpr cme::PeerId DefaultPeers = 6;
 
 // N + the control domain must fit MaxDomains, which is 64.
-const std::vector<DomainId> SweptDomainCounts = {1, 4, 16, 32, 63};
+const std::vector<cme::DomainId> SweptDomainCounts = {1, 4, 16, 32, 63};
 
 constexpr std::uint32_t ReadyPollMs = 1;
 constexpr std::uint32_t FrozenIdleMs = 20;
@@ -77,7 +74,7 @@ void worker(BenchSlot_t* slot)
     try
     {
         auto peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
-        for (DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
+        for (cme::DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
         {
             peer->joinDomain(domainId);
         }
@@ -87,25 +84,25 @@ void worker(BenchSlot_t* slot)
             // Hold all N domains at once (pinned guards), then freeze while holding.
             std::vector<cme::PeerGuard> held;
             held.reserve(slot->domainCount);
-            for (DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
+            for (cme::DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
             {
                 held.push_back(peer->lock(domainId));
             }
             slot->ready.store(true, std::memory_order_release);
             while (!slot->frozen.load(std::memory_order_acquire) && !slot->stop.load())
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds{ReadyPollMs});
+                std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
             }
             peer->setFreeze(true);  // permanent crash: stop the poll thread, keep the pins
             while (!slot->stop.load())
             {
-                std::this_thread::sleep_for(std::chrono::milliseconds{FrozenIdleMs});
+                std::this_thread::sleep_for(timing::Millis{FrozenIdleMs});
             }
             return;  // never release the guards (crash model); leak intentionally on stop
         }
 
         slot->ready.store(true, std::memory_order_release);
-        DomainId domainId = 1;
+        cme::DomainId domainId = 1;
         while (!slot->stop.load(std::memory_order_acquire))
         {
             try
@@ -138,22 +135,22 @@ struct Phases_t
 };
 
 // Reads on the shared region (main thread; cme::coherency::get = rmb + whole-slot load).
-[[nodiscard]] bool isRecovering(cme::Geometry& region, PeerId peerId,
+[[nodiscard]] bool isRecovering(cme::Geometry& region, cme::PeerId peerId,
                                 cme::CoherencyMode coherency)
 {
     return cme::coherency::get(region.getMemberSlot(peerId), coherency).isRecovering();
 }
 
-[[nodiscard]] bool isNone(cme::Geometry& region, PeerId peerId, cme::CoherencyMode coherency)
+[[nodiscard]] bool isNone(cme::Geometry& region, cme::PeerId peerId, cme::CoherencyMode coherency)
 {
     return cme::coherency::get(region.getMemberSlot(peerId), coherency)
         .hasStatus(cme::Geometry::Member_t::Status::None);
 }
 
-[[nodiscard]] bool allSeized(cme::Geometry& region, PeerId peerId, DomainId domains,
+[[nodiscard]] bool allSeized(cme::Geometry& region, cme::PeerId peerId, cme::DomainId domains,
                              cme::CoherencyMode coherency)
 {
-    for (DomainId domainId = 1; domainId <= domains; ++domainId)
+    for (cme::DomainId domainId = 1; domainId <= domains; ++domainId)
     {
         if (cme::coherency::get(region.getDomainRecord(domainId), coherency).getHolder() ==
             peerId)
@@ -164,20 +161,20 @@ struct Phases_t
     return true;
 }
 
-[[nodiscard]] Phases_t runOne(cme::Strategy strategy, DomainId domains, PeerId peers,
+[[nodiscard]] Phases_t runOne(cme::Strategy strategy, cme::DomainId domains, cme::PeerId peers,
                               const std::string& uri, cme::CoherencyMode coherency)
 {
     // Dead peer = 0: on join it re-adopts the genesis ownership parked on slot 0,
     // so it holds all N domains immediately (resident fast path) without needing a
     // grantor -- no other peer is up yet. Survivors are 1..peers-1.
-    const PeerId deadPeer = 0;
+    const cme::PeerId deadPeer = 0;
 
     auto region =
         cme::Geometry::create(uri, domains + 1, peers, cme::Geometry::FormatOpts_t{strategy});
     harness::seedDataDomains(region, domains);  // create data domains 1..n
 
     std::vector<std::unique_ptr<BenchSlot_t>> slots;
-    for (PeerId peerId = 0; peerId < peers; ++peerId)
+    for (cme::PeerId peerId = 0; peerId < peers; ++peerId)
     {
         auto slot = std::make_unique<BenchSlot_t>();
         slot->region = &region;
@@ -193,7 +190,7 @@ struct Phases_t
     slots[deadPeer]->runner = std::thread{worker, slots[deadPeer].get()};
     while (!slots[deadPeer]->ready.load(std::memory_order_acquire))
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds{ReadyPollMs});
+        std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
     }
     for (std::unique_ptr<BenchSlot_t>& slot : slots)
     {
@@ -206,11 +203,11 @@ struct Phases_t
     {
         while (!slot->ready.load(std::memory_order_acquire))
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds{ReadyPollMs});
+            std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
         }
     }
     // Steady state: every survivor is blocked on a domain the dead peer pins.
-    std::this_thread::sleep_for(std::chrono::milliseconds{SteadyStateMs});
+    std::this_thread::sleep_for(timing::Millis{SteadyStateMs});
 
     std::uint64_t acquiredBefore = 0;
     for (std::unique_ptr<BenchSlot_t>& slot : slots)
@@ -221,32 +218,36 @@ struct Phases_t
         }
     }
 
-    const Clock::time_point frozenAt = Clock::now();
+    // One instant, asked two questions: how long each phase took, and whether the whole thing has
+    // run out of time. Neither class answers both, so both start here.
+    const timing::Stopwatch sinceFreeze;
+    const timing::Deadline budget{timing::MillisF{TimeoutMs}};
     slots[deadPeer]->frozen.store(true, std::memory_order_release);  // start the clock
 
     Phases_t phases;
     // Busy-spin every wait: the DeadWindow (detect) is ~O(100ms) but claim/takeover/
     // finish are microseconds apart, so a sleeping poll would collapse them to 0.
-    while (!isRecovering(region, deadPeer, coherency) && !isNone(region, deadPeer, coherency) &&
-           harness::msSince(frozenAt) < TimeoutMs)
+    while (!isRecovering(region, deadPeer, coherency) &&
+           !isNone(region, deadPeer, coherency) &&
+           !budget.expired())
     {
     }
-    phases.detectClaimMs = harness::msSince(frozenAt);
-    while (!allSeized(region, deadPeer, domains, coherency) && harness::msSince(frozenAt) < TimeoutMs)
+    phases.detectClaimMs = sinceFreeze.elapsed<timing::MillisF>().count();
+    while (!allSeized(region, deadPeer, domains, coherency) && !budget.expired())
     {
     }
-    const double seizedAtMs = harness::msSince(frozenAt);
+    const double seizedAtMs = sinceFreeze.elapsed<timing::MillisF>().count();
     phases.takeoverMs = seizedAtMs - phases.detectClaimMs;
-    while (!isNone(region, deadPeer, coherency) && harness::msSince(frozenAt) < TimeoutMs)
+    while (!isNone(region, deadPeer, coherency) && !budget.expired())
     {
     }
-    phases.totalMs = harness::msSince(frozenAt);
+    phases.totalMs = sinceFreeze.elapsed<timing::MillisF>().count();
     phases.finishMs = phases.totalMs - seizedAtMs;
     phases.timedOut = phases.totalMs >= TimeoutMs;
 
     // Survivor liveness: acquisitions landed in a fixed window AFTER recovery
     // finishes (they were fully stalled for `total` before this).
-    std::this_thread::sleep_for(std::chrono::milliseconds{ResumeWindowMs});
+    std::this_thread::sleep_for(timing::Millis{ResumeWindowMs});
     std::uint64_t acquiredAfter = 0;
     for (std::unique_ptr<BenchSlot_t>& slot : slots)
     {
@@ -279,19 +280,19 @@ void runBench(harness::TestContext& ctx)
 {
     const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
-    const auto peers = static_cast<PeerId>(harness::argU64("--peers", DefaultPeers));
+    const auto peers = static_cast<cme::PeerId>(cliargs::argU64("--peers", DefaultPeers));
 
     // One region per swept point on shm and uc; on dax the device hands out one window per
     // --slot, so the points reuse it in turn.
-    auto uriFor = [&](DomainId domains)
+    auto uriFor = [&](cme::DomainId domains)
     {
         return ctx.memory().uriFor(std::to_string(domains));
     };
 
-    std::vector<DomainId> domainCounts;
-    if (const std::uint64_t single = harness::argU64("--domains", 0); single != 0)
+    std::vector<cme::DomainId> domainCounts;
+    if (const std::uint64_t single = cliargs::argU64("--domains", 0); single != 0)
     {
-        domainCounts = {static_cast<DomainId>(single)};
+        domainCounts = {static_cast<cme::DomainId>(single)};
     }
     else
     {
@@ -303,7 +304,7 @@ void runBench(harness::TestContext& ctx)
                 "N", "detect+claim", "takeover", "finish", "total", "perDomTk", "resumeAcq");
 
     bool anyTimedOut = false;
-    for (const DomainId domains : domainCounts)
+    for (const cme::DomainId domains : domainCounts)
     {
         const Phases_t phases =
             runOne(strategy, domains, peers, uriFor(domains), ctx.coherency());

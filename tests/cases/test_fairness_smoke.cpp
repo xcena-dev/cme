@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "helper.hpp"
@@ -87,7 +88,7 @@ void runWorker(const WorkerContext_t& shared, std::uint32_t pid)
 
         // Every peer is Active in FAM, but the DRAM member caches refresh only per tick. Warm
         // them so we time steady-state handoff, not the cold-start transient.
-        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        std::this_thread::sleep_for(timing::Millis{20});
         for (std::uint32_t i = 0; i < shared.iterPerPeer; ++i)
         {
             auto guard = peer.lock(0);

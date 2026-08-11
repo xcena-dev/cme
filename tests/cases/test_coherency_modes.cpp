@@ -25,6 +25,7 @@
 #include <cstdint>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -40,7 +41,7 @@ constexpr std::uint32_t FormatPeers = 2;
 constexpr const char* Domain = "lane0";
 
 // One poll cycle carries the grant; the rest is slack for a loaded machine.
-constexpr std::chrono::milliseconds GrantWindow{3'000};
+constexpr timing::Millis GrantWindow{3'000};
 
 // One handoff under @mode, on a region formatted for this iteration alone. A fresh region per
 // mode rather than one shared: a record written under one regime and read under another is a

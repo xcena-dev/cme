@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <thread>
 
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -67,7 +68,7 @@ void runHolder(HolderThread_t* holder, cme::Geometry* region)
             harness::sleepMs(1);
             continue;
         }
-        auto guard = peer.tryLock(Contested, std::chrono::seconds{5});
+        auto guard = peer.tryLock(Contested, timing::Secs{5});
         if (!guard)
         {
             continue;  // could not take it this round; the round below reads holding as false
@@ -110,7 +111,7 @@ void checkTimeoutLeavesNoResidue(harness::TestContext& ctx)
     std::uint32_t refused = 0;
     for (std::uint32_t attempt = 0; held && attempt < RefusedAttempts; ++attempt)
     {
-        if (!waiter.tryLock(Contested, std::chrono::milliseconds{5}))
+        if (!waiter.tryLock(Contested, timing::Millis{5}))
         {
             ++refused;
         }
@@ -119,13 +120,13 @@ void checkTimeoutLeavesNoResidue(harness::TestContext& ctx)
 
     bool waiterGot = false;
     {
-        const auto guard = waiter.tryLock(Contested, std::chrono::milliseconds{ReclaimDeadlineMs});
+        const auto guard = waiter.tryLock(Contested, timing::Millis{ReclaimDeadlineMs});
         waiterGot = guard.has_value();
     }
 
     auto prober = harness::makePeer(region, Prober);
     prober.joinDomain(Contested);
-    const auto reclaimed = prober.tryLock(Contested, std::chrono::milliseconds{ReclaimDeadlineMs});
+    const auto reclaimed = prober.tryLock(Contested, timing::Millis{ReclaimDeadlineMs});
 
     ctx.check(held, "the keeper took the domain and kept it");
     ctx.check(refused > 0, "the waiter's short attempts were refused while the keeper held it");
@@ -174,7 +175,7 @@ void runBody(harness::TestContext& ctx)
             continue;  // the holder never got it, so this round sets up nothing
         }
 
-        const auto patience = std::chrono::milliseconds{5 + round * PatienceStepMs};
+        const auto patience = timing::Millis{5 + round * PatienceStepMs};
         auto guard = waiter.tryLock(Contested, patience);
         // Read the grip after the attempt returns, not before it starts. Seeing the round begin
         // inside a grip says nothing about what the attempt met, and a round that met an empty
@@ -201,7 +202,7 @@ void runBody(harness::TestContext& ctx)
 
         // Whatever the waiter got, a third peer must be able to take the domain: by handoff if it
         // is held, by the orphan sweep if a late grant left it on a peer that walked away.
-        auto reclaimed = prober.tryLock(Contested, std::chrono::milliseconds{ReclaimDeadlineMs});
+        auto reclaimed = prober.tryLock(Contested, timing::Millis{ReclaimDeadlineMs});
         reclaimedEvery = reclaimedEvery && static_cast<bool>(reclaimed);
         reclaimed.reset();
     }

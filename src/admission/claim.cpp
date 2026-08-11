@@ -17,13 +17,13 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
-#include "util/time.hpp"
 
 namespace cme::admission
 {
@@ -59,8 +59,8 @@ std::uint64_t getRandomNonce()
 [[nodiscard]] bool isLeaseStalled(Geometry::AdmissionControl_t* admissionControl, std::uint64_t held,
                                   CoherencyMode mode)
 {
-    const auto until = std::chrono::steady_clock::now() + LeaseTimeout;
-    while (std::chrono::steady_clock::now() < until)
+    const timing::Deadline until{LeaseTimeout};
+    while (!until.expired())
     {
         std::this_thread::sleep_for(LeasePollGap);
         if (coherency::get(admissionControl, mode).nonce != held)  // rmb + 64B read
@@ -75,8 +75,8 @@ std::uint64_t getRandomNonce()
 void acquireLease(Geometry::AdmissionControl_t* admissionControl, std::uint64_t nonce,
                   CoherencyMode mode)
 {
-    const auto deadline = std::chrono::steady_clock::now() + LeaseAcquireDeadline;
-    while (std::chrono::steady_clock::now() < deadline)
+    const timing::Deadline deadline{LeaseAcquireDeadline};
+    while (!deadline.expired())
     {
         const std::uint64_t held = coherency::get(admissionControl, mode).nonce;  // rmb + 64B read
 
@@ -137,7 +137,7 @@ void releaseLease(Geometry::AdmissionControl_t* admissionControl, std::uint64_t 
                     return false;  // bad slot or already taken
                 }
                 member->setStatus(Geometry::Member_t::Status::Active);
-                member->lastSeenNanos = time::clockNowNanos();
+                member->lastSeenNanos = timing::wall<timing::Nanos>();
                 return true;
             });
         if (success)

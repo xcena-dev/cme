@@ -17,6 +17,7 @@
 #include <string>
 
 #include "admission/claim.hpp"
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -54,7 +55,7 @@ void runBody(harness::TestContext& ctx)
             std::int32_t claimed = Failed;
             try
             {
-                auto region = harness::openBoundRegion(std::chrono::milliseconds{5000});
+                auto region = harness::openBoundRegion(timing::Secs{5});
                 claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, ctx.coherency()));
             }
             catch (...)

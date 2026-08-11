@@ -11,6 +11,7 @@
 
 #include <chrono>
 
+#include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/runtime/local_peer_state.hpp"
@@ -54,7 +55,7 @@ void bumpHeartbeat(LocalPeerState& peerState);
 // Block until this peer's record line names us at a newer epoch (EpochImpliesIdentity), or
 // @timeout elapses. timeout=0 is a single non-blocking probe -- no spin, no sleep.
 [[nodiscard]] OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
-                                               std::chrono::nanoseconds timeout);
+                                               const timing::Deadline& deadline);
 
 // Reconcile holder belief across active domains and return the held+transferable set; only
 // the check turn adopts vs the record. Sole writer of holder belief in the poll cycle.

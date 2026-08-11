@@ -9,6 +9,7 @@
 #include <cstring>
 #include <string_view>
 
+#include "common/timing.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
@@ -16,7 +17,6 @@
 #include "core/types.hpp"
 #include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
 
 namespace cme::lifecycle
 {
@@ -152,7 +152,7 @@ JoinResult joinMembership(LocalPeerState& peerState)
         peerState.deactivate();
         return JoinResult::CorruptRegion;  // own member slot uninitialised / corrupted region
     }
-    selfState.lastSeenNanos = time::clockNowNanos();  // seen at join; poll thread re-stamps
+    selfState.lastSeenNanos = timing::wall<timing::Nanos>();  // seen at join; poll thread re-stamps
     // Seed participation with the control domain only -- mandatory for create/delete; data
     // domains are joined explicitly. The policy-private demand line is already clean.
     DomainBitmap participating;

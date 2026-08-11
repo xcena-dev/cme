@@ -32,6 +32,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -134,7 +135,7 @@ void checkGeometryDims(harness::TestContext& ctx)
     ctx.check(harness::threw<cme::FormatError>(formatUnbound),
               "Geometry::format refuses an unbound geometry");
 
-    region.bindBlocking(std::chrono::milliseconds{1000}, ctx.coherency());
+    region.bindBlocking(timing::Secs{1}, ctx.coherency());
     ctx.check(harness::threw<cme::FormatError>(formatTooManyGroups),
               "Geometry::format rejects aggregatorGroups above peerCount");
 }
@@ -185,7 +186,7 @@ void checkMovedFromSession(harness::TestContext& ctx)
 
     // The two that report emptiness instead of throwing. tryLock's nullopt means "not now" to
     // every caller, and a husk is a permanent not-now; getDomainNames has no region to scan.
-    ctx.check(!session.tryLock(Domain, std::chrono::milliseconds{1}).has_value(),
+    ctx.check(!harness::canLock(session, Domain, timing::Millis{1}),
               "moved-from session: tryLock yields no guard");
     ctx.check(session.getDomainNames().empty(),
               "moved-from session: getDomainNames yields nothing");
@@ -364,12 +365,12 @@ void checkParticipationRequired(harness::TestContext& ctx)
 
     // tryLock refuses on the same guard. Asserted as "no guard" rather than as a type, because
     // whether a non-participant is a timeout or an error is a contract question of its own.
-    ctx.check(!stranger.tryLock(lane, std::chrono::milliseconds{1}).has_value(),
+    ctx.check(!harness::canLock(stranger, lane, timing::Millis{1}),
               "tryLock hands out no guard for a domain the peer never joined");
 
     // And the rule is only about participation: joining makes the same call succeed.
     stranger.joinDomain(lane);
-    ctx.check(stranger.tryLock(lane, std::chrono::milliseconds{1000}).has_value(),
+    ctx.check(harness::canLock(stranger, lane, timing::Secs{1}),
               "the same call succeeds once the peer has joined");
 }
 

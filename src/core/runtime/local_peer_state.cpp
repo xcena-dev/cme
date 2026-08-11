@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
@@ -24,7 +25,6 @@
 #include "core/types.hpp"
 #include "observe/telemetry.hpp"
 #include "util/coherency.hpp"
-#include "util/time.hpp"
 
 namespace cme
 {
@@ -45,7 +45,7 @@ void LocalPeerState::activate() noexcept
 
 void LocalPeerState::stampSelfSeen() noexcept
 {
-    const std::uint64_t now = time::clockNowNanos();
+    const std::uint64_t now = timing::wall<timing::Nanos>();
     // Monotone-published guard: never publish a backward wall-clock step -- hold the
     // prior stamp so a step becomes a stall (the safe, conservative direction).
     if (now > static_cast<std::uint64_t>(selfMember_.lastSeenNanos))
@@ -174,7 +174,7 @@ void LocalPeerState::clearActiveDomain(DomainId domain) noexcept
 }
 
 void LocalPeerState::setConfig(std::uint32_t numDomains, std::uint32_t maxPeers,
-                               std::chrono::microseconds pollInterval, Strategy kind,
+                               timing::Nanos pollInterval, Strategy kind,
                                std::uint32_t aggregatorGroups) noexcept
 {
     config_.numDomains = numDomains;
@@ -193,7 +193,7 @@ std::uint32_t LocalPeerState::getMaxPeers() const noexcept
 {
     return config_.maxPeers;
 }
-std::chrono::microseconds LocalPeerState::getPollInterval() const noexcept
+timing::Nanos LocalPeerState::getPollInterval() const noexcept
 {
     return config_.pollInterval;
 }
@@ -426,8 +426,9 @@ bool LocalPeerState::tickPeriodicScan() noexcept
     return false;
 }
 
-LocalPeerState::MemberView_t LocalPeerState::getMemberView(PeerId peerId,
-                                                           std::chrono::nanoseconds maxAge) const noexcept
+LocalPeerState::MemberView_t
+LocalPeerState::getMemberView(PeerId peerId,
+                              timing::Nanos maxAge) const noexcept
 {
     MemberView_t view;
     if (!isValidPeer(peerId))
@@ -435,7 +436,7 @@ LocalPeerState::MemberView_t LocalPeerState::getMemberView(PeerId peerId,
         return view;
     }
     auto& slot = memberCache_[peerId];
-    const std::int64_t nowNs = time::getMonoTime().time_since_epoch().count();
+    const auto nowNs = static_cast<std::int64_t>(timing::monotonic<timing::Nanos>());
     if (slot.valid.load(std::memory_order_relaxed) &&
         nowNs - slot.stampNs.load(std::memory_order_relaxed) <= maxAge.count())
     {
@@ -477,7 +478,8 @@ void LocalPeerState::cacheMemberSnapshot(PeerId peerId, const Geometry::Member_t
                       std::memory_order_relaxed);
     slot.valid.store(magicValid, std::memory_order_relaxed);
     // Stamp last: a reader that sees this stamp must already see the fields above.
-    slot.stampNs.store(time::getMonoTime().time_since_epoch().count(), std::memory_order_relaxed);
+    slot.stampNs.store(static_cast<std::int64_t>(timing::monotonic<timing::Nanos>()),
+                       std::memory_order_relaxed);
 }
 
 PeerTelemetry_t& LocalPeerState::getTelemetry() noexcept

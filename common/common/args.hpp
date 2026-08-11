@@ -3,13 +3,13 @@
 //
 // args.hpp -- `--flag value` lookup over the arguments a program was given.
 //
-// Separate from helper.hpp because the standalone probes in bench/ need it and must not
-// link libcme: they measure the medium with mmap and intrinsics, so pulling in
-// cme/shared.hpp would defeat what they exist to measure. helper.hpp includes this and
-// adds the parts that do need the library.
+// Here rather than with the test harness because the shipped tools read their own flags the same
+// way, and a program a user installs must not link a test harness to do it. The standalone probes
+// in bench/ have the mirror requirement: they measure the medium with mmap and intrinsics, so
+// pulling libcme in through this would defeat what they exist to measure.
 //
-// Call takeArgs() first thing in main(). Every later lookup reads what it stored, so no
-// caller has to thread argv through.
+// Call takeArgs() first thing in main(). Every later lookup reads what it stored, so no caller has
+// to thread argv through.
 
 #pragma once
 
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace harness
+namespace cliargs
 {
 
 // The arguments takeArgs() stored, minus argv[0].
@@ -28,8 +28,8 @@ inline std::vector<std::string>& extraArgs()
     return instance;
 }
 
-// Store argv for the lookups below. Returns argc unchanged, so a caller that also runs
-// its own parse keeps working.
+// Store argv for the lookups below. Returns argc unchanged, so a caller that also runs its own
+// parse keeps working.
 inline int takeArgs(int argc, char** argv)
 {
     std::vector<std::string>& args = extraArgs();
@@ -55,8 +55,8 @@ inline std::string argStr(const char* flag, const std::string& fallback)
     return fallback;
 }
 
-// Same, parsed as an unsigned decimal. A value that does not parse, or parses to zero,
-// yields @fallback: a benchmark given --iters 0 wants the default, not an empty run.
+// Same, parsed as an unsigned decimal. A value that does not parse, or parses to zero, yields
+// @fallback: a benchmark given --iters 0 wants the default, not an empty run.
 inline std::uint64_t argU64(const char* flag, std::uint64_t fallback)
 {
     const std::string raw = argStr(flag, std::string{});
@@ -82,4 +82,4 @@ inline bool argFlag(const char* flag)
     return false;
 }
 
-}  // namespace harness
+}  // namespace cliargs

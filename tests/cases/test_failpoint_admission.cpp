@@ -14,6 +14,7 @@
 #include <exception>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
 #include "helper.hpp"
@@ -40,7 +41,7 @@ constexpr std::uint32_t RecoveryDeadlineMs = 20000;
 // Named in the unit both uses want, so a change of the constant's unit does not make the printed
 // label lie.
 constexpr auto LeaseTimeoutMs =
-    std::chrono::duration_cast<std::chrono::milliseconds>(cme::LeaseTimeout);
+    std::chrono::duration_cast<timing::Millis>(cme::LeaseTimeout);
 
 // What a child does to reach either boundary: both sit inside claimPeerSlot, which the open runs
 // on its way in, so the child never gets past this line.
@@ -62,7 +63,7 @@ void checkKilledHoldingLease(harness::TestContext& ctx)
         return;
     }
 
-    const auto began = std::chrono::steady_clock::now();
+    const timing::Stopwatch joining;
     bool joined = false;
     try
     {
@@ -74,7 +75,7 @@ void checkKilledHoldingLease(harness::TestContext& ctx)
     {
         std::printf("the joiner after the crash failed: %s\n", error.what());
     }
-    const auto waited = harness::since<std::chrono::milliseconds>(began);
+    const auto waited = joining.elapsed<timing::Millis>();
 
     std::printf("%s: the next joiner got in after %lld ms (LeaseTimeout %lld ms)\n",
                 cme::failpoint::nameOf(BeforeCommit),

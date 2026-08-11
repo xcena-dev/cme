@@ -40,6 +40,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -291,18 +292,17 @@ void lockOnce(cme::Peer& peer, cme::DomainId domainId, const Opts_t& opt, std::u
 {
     try
     {
-        const auto began = std::chrono::steady_clock::now();
+        const timing::Stopwatch waited;
         auto guard = peer.lock(domainId);
-        const auto held = std::chrono::steady_clock::now();
         if (tally.record)
         {
-            tally.localLat.push_back(harness::nsBetween(began, held));
+            tally.localLat.push_back(static_cast<std::uint64_t>(waited.elapsed().count()));
             tally.result.measuredAcq.fetch_add(1, std::memory_order_relaxed);
         }
         csWork(spinCount);
         if (opt.csSleepMs != 0)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds{opt.csSleepMs});
+            std::this_thread::sleep_for(timing::Millis{opt.csSleepMs});
         }
     }
     catch (const cme::LockTimeoutError&)
@@ -391,13 +391,12 @@ void runWorker(const WorkerContext_t& shared)
         awaitBarrier(*shared.arg.warmupBarrier, shared.workerCount);
 
         cme::trace::setMeasuring(true);  // spans past here tagged measured=true
-        const auto began = std::chrono::steady_clock::now();
+        const timing::Stopwatch measured;
         for (std::uint32_t sweep = 0; sweep < shared.opt.iterPerThread; ++sweep)
         {
             sweepDomains(shared, visit, rng, Tally_t{localLat, *shared.arg.result, true});
         }
-        const auto ended = std::chrono::steady_clock::now();
-        shared.wallTotal.fetch_add(harness::nsBetween(began, ended));
+        shared.wallTotal.fetch_add(static_cast<std::uint64_t>(measured.elapsed().count()));
 
         const std::lock_guard<std::mutex> merge(shared.arg.result->latMutex);
         auto& dst = shared.arg.result->acqLatNs;

@@ -23,6 +23,7 @@
 #include <cstdint>
 
 #include "cme/errors.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -44,7 +45,7 @@ constexpr cme::PeerId TenantId = 1;
 constexpr const char* FirstDomain = "lane0";
 constexpr const char* SecondDomain = "lane1";
 
-constexpr std::chrono::milliseconds GrantWindow{3'000};
+constexpr timing::Millis GrantWindow{3'000};
 
 }  // namespace
 
@@ -92,7 +93,7 @@ void runBody(harness::TestContext& ctx)
     // Joining is what makes the same call work, so the refusal above belongs to participation
     // rather than to a peer that cannot acquire anything.
     newcomer.joinDomain(firstLane);
-    ctx.check(newcomer.tryLock(firstLane, GrantWindow).has_value(),
+    ctx.check(harness::canLock(newcomer, firstLane, GrantWindow),
               "the new occupant acquires the domain once it joins");
 }
 

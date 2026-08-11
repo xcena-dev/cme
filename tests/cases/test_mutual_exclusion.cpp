@@ -20,6 +20,7 @@
 #include <exception>
 #include <vector>
 
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
@@ -69,7 +70,7 @@ void checkHeldDomainStaysHeld(harness::TestContext& ctx)
         HoldDeadlineMs, 1);
     if (held)
     {
-        auto guard = prober.tryLock(SharedDomain, std::chrono::milliseconds{ProbeMs});
+        auto guard = prober.tryLock(SharedDomain, timing::Millis{ProbeMs});
         intruded = guard && holder[0].holding.load(std::memory_order_acquire);
     }
     harness::joinPeerWorkers(holder, 1);

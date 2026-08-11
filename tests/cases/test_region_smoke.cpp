@@ -14,6 +14,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
@@ -54,7 +55,7 @@ void checkJoinerSeesSameHeader(const std::string& shmUri, const cme::Geometry::H
                                harness::TestContext& ctx)
 {
     auto joiner = cme::Geometry::open(shmUri);
-    joiner.bindBlocking(std::chrono::milliseconds{0}, ctx.coherency());
+    joiner.bindBlocking(timing::Millis{0}, ctx.coherency());
     const auto joinerHeader = *joiner.getHeader();
     ctx.check(joinerHeader.formatGeneration == hdr.formatGeneration,
               "joiner sees same formatGeneration");

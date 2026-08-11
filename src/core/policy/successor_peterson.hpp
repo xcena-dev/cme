@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/policy/successor_policy.hpp"
 #include "core/types.hpp"
 
@@ -34,7 +35,7 @@ public:
     // timeout bounds the climb; 0 = single-probe trylock, which is what keeps orphan
     // reclaim's tryLock(Control, 0ns) non-blocking. On timeout the partial climb rolls back.
     OwnershipResult lock(LocalPeerState& peerState, DomainId domainId,
-                         std::chrono::nanoseconds timeout) override;
+                         const timing::Deadline& deadline) override;
     void unlock(LocalPeerState& peerState, DomainId domainId) override;
     void pollCycle(LocalPeerState& peerState) override;
     void scrubRecoveredPeer(LocalPeerState& peerState, PeerId deadPeerId) noexcept override;

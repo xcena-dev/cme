@@ -18,6 +18,10 @@ using PeerId = std::uint32_t;
 // Domain index, 0..NumDomains-1. Each domain is an independent lock.
 using DomainId = std::uint32_t;
 
+// A nanosecond count as a shared 64-bit field holds it, which is what a stored counter and an
+// endian::Field_t need. Not a duration: timing::Nanos is that, and it does not fit an atomic.
+using NanosCount = std::uint64_t;
+
 // Slot 0: internal control domain (serialises create/deleteDomain). Not user-addressable.
 inline constexpr DomainId ControlDomainId = 0;
 [[nodiscard]] inline constexpr bool isControlDomain(DomainId domainId) noexcept

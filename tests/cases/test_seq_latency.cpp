@@ -36,6 +36,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -163,11 +164,10 @@ void serveOneTurn(Baton_t& baton, cme::Peer* self, cme::DomainId domain)
 {
     try
     {
-        const auto began = std::chrono::steady_clock::now();
+        const timing::Stopwatch waited;
         {
             auto guard = self->lock(domain);
-            const auto held = std::chrono::steady_clock::now();
-            baton.resultNs.store(harness::nsBetween(began, held));
+            baton.resultNs.store(static_cast<std::uint64_t>(waited.elapsed().count()));
             baton.resultTimeout.store(false, std::memory_order_relaxed);
         }  // released here -- domain takeable by the next peer
     }

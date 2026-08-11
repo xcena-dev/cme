@@ -13,6 +13,7 @@
 #include <cstdint>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/types.hpp"
 
 namespace cme
@@ -37,7 +38,7 @@ public:
     // join/leave are strategy-agnostic; SuccessorPolicy owns only the divergent ops.
     // timeout bounds the ownership wait (0 = non-blocking single probe).
     virtual OwnershipResult lock(LocalPeerState& peerState, DomainId domainId,
-                                 std::chrono::nanoseconds timeout) = 0;
+                                 const timing::Deadline& deadline) = 0;
     virtual void unlock(LocalPeerState& peerState, DomainId domainId) = 0;
     virtual void pollCycle(LocalPeerState& peerState) = 0;
 

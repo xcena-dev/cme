@@ -21,6 +21,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -84,7 +85,7 @@ void runBody(harness::TestContext& ctx)
 
     // ── tryLock success ───────────────────────────────────────────
     {
-        auto guard = first.tryLock("orders", std::chrono::milliseconds{200});
+        auto guard = first.tryLock("orders", timing::Millis{200});
         if (!ctx.check(guard.has_value(), "tryLock(orders) should succeed"))
         {
             return;
@@ -124,7 +125,7 @@ void runBody(harness::TestContext& ctx)
         bool threw = false;
         try
         {
-            (void)first.tryLock("ghost", std::chrono::milliseconds{10});
+            (void)first.tryLock("ghost", timing::Millis{10});
         }
         catch (const cme::UnknownDomainError&)
         {

@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/domain_bitmap.hpp"
@@ -234,7 +235,7 @@ void RequestAggPolicy::updateDemandAndSlice(LocalPeerState& peerState, DomainId 
 }
 
 OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domainId,
-                                       std::chrono::nanoseconds timeout)
+                                       const timing::Deadline& deadline)
 {
     // Fast path: already holder (single-peer or cached residency).
     if (ownership_transfer::holdAndCheckResident(peerState, domainId))
@@ -243,7 +244,7 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
     }
 
     updateDemandAndSlice(peerState, domainId, true);  // the request signal + its slice
-    const OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, timeout);
+    const OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     // Plain drop, no slice write. A slice late to clear attracts one grant this peer forwards on
     // (harmless, see transferHeldDomains); a slice late to appear costs a full AcquireTimeout. The
     // cost is the same rmw either way, so only the raise pays it.

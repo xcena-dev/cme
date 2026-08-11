@@ -231,6 +231,7 @@ cme_test_exe(cme-failpoint-registry-test test_failpoint_registry.cpp)
 cme_test_exe(cme-format-race-test test_format_race.cpp)
 cme_test_exe(cme-timeout-recovery-race-test test_timeout_recovery_race.cpp)
 cme_test_exe(cme-resource-lifecycle-test test_resource_lifecycle.cpp)
+cme_test_exe(cme-tool-format-test test_tool_format.cpp)
 
 # Not a case: a binary that exists to be disassembled. check_slot_codegen.sh reads its two symbols
 # and reports how wide the compiler kept a 64 B slot transfer.
@@ -279,6 +280,12 @@ cme_case(participation TARGET cme-participation-test SHM_TIMEOUT 60)
 cme_case(domain_lifecycle TARGET cme-domain-lifecycle-test SHM_TIMEOUT 60)
 cme_case(create_race TARGET cme-create-race-test SHM_TIMEOUT 60)
 cme_case(admission_stress TARGET cme-admission-stress-test)
+
+# The shipped tool, exec'd. Every backend, because what it wraps is Session::format and whether a
+# region already answers is a question each medium answers differently: an shm object may not exist
+# at all, a dax window always does, and a uc file may be there and pre-sized.
+cme_case(tool_format TARGET cme-tool-format-test SHM_TIMEOUT 60
+    ARGS --format-tool $<TARGET_FILE:cme-format>)
 
 # Recovery family. All four policies for parity: the paths under test are
 # policy-independent (shared recovery FSM, RA claim path, ghost sweep), so a

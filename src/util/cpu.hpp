@@ -1,40 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright XCENA Inc.
 //
-// time.hpp -- steady_clock wall-time + THREAD_CPUTIME_ID CPU helpers.
+// cpu.hpp -- what a waiting thread does with the CPU, and what the CPU can tell it.
+//
+// Spans and budgets go through timing::, and wall time through timing::wall. What is left is the
+// processor itself: its cycle counter, its pause hint, the backoff that feeds them, and the CPU
+// time this thread has actually burned.
 
 #pragma once
 
-#include <time.h>
+// clock_gettime and CLOCK_THREAD_CPUTIME_ID are POSIX, and <ctime> promises neither, so the C
+// header is the one that has them.
+#include <time.h>  // NOLINT(modernize-deprecated-headers)
 
 #include <chrono>
 #include <cstdint>
 #include <thread>
 
-namespace cme::time
+#include "common/timing.hpp"
+
+namespace cme::cpu
 {
-
-using SteadyClock = std::chrono::steady_clock;
-using TimePoint = SteadyClock::time_point;
-
-// Raw u64 ns count (fits std::atomic<>); convert via std::chrono::nanoseconds{value}.
-using nanoseconds = std::uint64_t;
-
-[[nodiscard]] inline TimePoint getMonoTime() noexcept
-{
-    return SteadyClock::now();
-}
-
-// Wall-clock (CLOCK_REALTIME) ns since epoch, the liveness timestamp witness.
-// Steppable; slew-only discipline assumed (HEARTBEAT design §2.4). Cross-node
-// comparisons hold under the declared skew bound δ (ClockSkewBound).
-[[nodiscard]] inline nanoseconds clockNowNanos() noexcept
-{
-    return static_cast<nanoseconds>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
-}
 
 // Raw TSC cycles for the sub-us handoff breakdown. Assumes invariant/synced TSC
 // (single-socket constant_tsc+nonstop_tsc x86), without which cross-thread deltas are
@@ -92,7 +78,7 @@ private:
 };
 
 // Per-thread CPU time; use as a delta (no fixed epoch).
-[[nodiscard]] inline std::chrono::nanoseconds getThreadCpuTime() noexcept
+[[nodiscard]] inline timing::Nanos getThreadCpuTime() noexcept
 {
     struct timespec now;
 #ifdef CLOCK_THREAD_CPUTIME_ID
@@ -100,7 +86,7 @@ private:
 #else
     clock_gettime(CLOCK_MONOTONIC, &now);
 #endif
-    return std::chrono::seconds{now.tv_sec} + std::chrono::nanoseconds{now.tv_nsec};
+    return timing::Secs{now.tv_sec} + timing::Nanos{now.tv_nsec};
 }
 
-}  // namespace cme::time
+}  // namespace cme::cpu

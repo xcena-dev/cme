@@ -13,6 +13,7 @@
 #include <cstdint>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/policy/successor_policy.hpp"
 #include "core/types.hpp"
 
@@ -24,7 +25,7 @@ class RequestPolicy : public SuccessorPolicy
 public:
     // ── ops ────────────────────────────────────────────────────────
     OwnershipResult lock(LocalPeerState& peerState, DomainId domainId,
-                         std::chrono::nanoseconds timeout) override;
+                         const timing::Deadline& deadline) override;
     void unlock(LocalPeerState& peerState, DomainId domainId) override;
     void pollCycle(LocalPeerState& peerState) override;
     // Leaving: drop this peer's demand line so holders stop granting to it.
