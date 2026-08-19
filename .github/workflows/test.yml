@@ -26,8 +26,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The lock wait is bounded because the hosted image runs its own apt timers shortly after boot,
+      # and apt-get waits for that lock without a bound by default, so contention reads as a hang.
       - name: Install the toolchain
-        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
+        run: |
+          sudo apt-get -o DPkg::Lock::Timeout=180 update
+          sudo apt-get -o DPkg::Lock::Timeout=180 install -y cmake ninja-build g++
 
       # No config.yaml: it is per-machine and gitignored, and a missing one is not an error.
       # cme_site_config_load returns early, so the dax device and the uncacheable mount both
