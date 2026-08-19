@@ -23,7 +23,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <ratio>
 #include <thread>
 
 #include "cme/errors.hpp"

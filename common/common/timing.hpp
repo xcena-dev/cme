@@ -26,6 +26,7 @@
 #include <ctime>
 #include <optional>
 #include <ratio>
+#include <type_traits>
 
 namespace timing
 {
@@ -53,9 +54,13 @@ using SecsF = std::chrono::duration<double>;
 // Stopwatch::elapsed. Those return a duration, which carries its unit in the type and makes a
 // mismatch a compile error. These return a bare count, and the words they are written into are read
 // by another node as a fixed unit, so the caller has to say which one out loud.
+// A floating target is refused rather than counted: the count is an integer, so the fraction the
+// caller asked for by naming SecsF would be floored away without a word. Construct that type instead.
 template <typename T_Duration, typename Rep, typename Period>
 [[nodiscard]] constexpr std::uint64_t countIn(std::chrono::duration<Rep, Period> value) noexcept
 {
+    static_assert(std::is_integral_v<typename T_Duration::rep>,
+                  "countIn answers an integer count; construct a floating duration instead");
     return static_cast<std::uint64_t>(std::chrono::duration_cast<T_Duration>(value).count());
 }
 

@@ -7,7 +7,6 @@
 // is stateless -- last self-stamp older than the dead window (γ.4). Successor designation
 // (γ.3) belongs to ChainRecoveryAuthorityPolicy, not here.
 
-#include <cstdint>
 #include <memory>
 #include <optional>
 

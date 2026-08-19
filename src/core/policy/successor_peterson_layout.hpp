@@ -65,8 +65,13 @@ struct PetersonNode_t
 
 static_assert(sizeof(PetersonNode_t::PeerLine_t) == CacheLineBytes, "PeerLine_t must be one cacheline");
 static_assert(sizeof(PetersonNode_t::FairnessLine_t) == CacheLineBytes, "FairnessLine_t must be one cacheline");
-static_assert(sizeof(PetersonNode_t) == 3 * CacheLineBytes, "node spans 3 cachelines");
-static_assert(offsetof(PetersonNode_t, fairness) == 2 * CacheLineBytes, "fairness on its own line");
+// Against the line types rather than the width: sizeof is already the size type, so the product needs
+// no cast, and the two asserts above are what tie each line to one cacheline.
+static_assert(sizeof(PetersonNode_t) ==
+                  2 * sizeof(PetersonNode_t::PeerLine_t) + sizeof(PetersonNode_t::FairnessLine_t),
+              "node spans 3 cachelines with no padding between them");
+static_assert(offsetof(PetersonNode_t, fairness) == 2 * sizeof(PetersonNode_t::PeerLine_t),
+              "fairness on its own line");
 
 // ── helpers ─────────────────────────────────────────────────────────
 

@@ -613,28 +613,12 @@ void render(cme::Inspector& inspector, const Opts_t& options, FrameState_t& stat
     return true;
 }
 
-}  // namespace
-
-int main(int argc, char** argv)
+// Everything past argument parsing, so main holds one try and nothing else that can throw. The open
+// is not the only thing that reads the region: every frame does, and an exception out of a later one
+// reached terminate() while this was inline.
+int run(const Opts_t& options)
 {
-    Opts_t options;
-    if (!parseArgs(argc, argv, options))
-    {
-        return 2;
-    }
-
-    // A region that is not there, or not a region at all, is the ordinary way to mistype a
-    // URI. Say which and why rather than letting the exception reach terminate().
-    std::optional<cme::Inspector> inspector;
-    try
-    {
-        inspector = cme::Inspector::open(options.path, cme::CoherencyMode::CacheCoherent);
-    }
-    catch (const std::exception& error)
-    {
-        std::fprintf(stderr, "cannot open %s: %s\n", options.path.c_str(), error.what());
-        return 1;
-    }
+    cme::Inspector inspector = cme::Inspector::open(options.path, cme::CoherencyMode::CacheCoherent);
 
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
@@ -642,7 +626,7 @@ int main(int argc, char** argv)
     FrameState_t state;
     if (options.once)
     {
-        render(*inspector, options, state);
+        render(inspector, options, state);
         return 0;
     }
 
@@ -655,7 +639,7 @@ int main(int argc, char** argv)
 
     while (g_stopRequested == 0)
     {
-        render(*inspector, options, state);
+        render(inspector, options, state);
         // The gap between frames, rechecked often enough that Ctrl-C lands well inside one.
         const timing::Deadline nextFrame{timing::Millis{options.intervalMs}};
         while (g_stopRequested == 0 && !nextFrame.expired())
@@ -669,4 +653,29 @@ int main(int argc, char** argv)
         std::fputc('\n', stdout);
     }
     return 0;
+}
+
+}  // namespace
+
+int main(int argc, char** argv)
+{
+    // Declared out here so the report can name it: the shm and dax errors say which call failed and
+    // not on what, and a URI is the thing a caller mistyped.
+    Opts_t options;
+
+    // A region that is not there, or not a region at all, is the ordinary way to mistype one, and a
+    // frame can fail on a region that goes away under it. Say why rather than reaching terminate().
+    try
+    {
+        if (!parseArgs(argc, argv, options))
+        {
+            return 2;
+        }
+        return run(options);
+    }
+    catch (const std::exception& error)
+    {
+        std::fprintf(stderr, "cme-top on %s: %s\n", options.path.c_str(), error.what());
+        return 1;
+    }
 }

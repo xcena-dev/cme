@@ -342,8 +342,9 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
 {
     const timing::Stopwatch sweep;
     const int failures = runPeers(opt, region);
-    const double wallSec =
-        timing::countIn<timing::SecsF>(sweep.elapsed());
+    // Constructed, not counted: countIn answers an integer count, so asking it for fractional seconds
+    // floors the span, and the throughput below divides by it.
+    const double wallSec = timing::SecsF{sweep.elapsed()}.count();
 
     const std::size_t sampleCount = static_cast<std::size_t>(opt.peers) * opt.iters * opt.domains;
     std::vector<std::uint64_t> samples(region.results.data(),

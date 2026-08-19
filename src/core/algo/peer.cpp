@@ -9,6 +9,7 @@
 
 #include "core/algo/peer.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <memory>

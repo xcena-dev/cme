@@ -7,7 +7,6 @@
 #include "observe/stats.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -72,7 +71,6 @@ inline void bump(std::atomic<std::uint64_t>& counter) noexcept
 inline void recordWaitCommon(LocalPeerState& peerState, const timing::Stopwatch& waited,
                              timing::Nanos cpuStart) noexcept
 {
-    using std::chrono::duration_cast;
     const auto wallElapsed = waited.elapsed();
     auto cpuElapsed = cpu::getThreadCpuTime() - cpuStart;
     if (cpuElapsed > wallElapsed)
@@ -120,7 +118,6 @@ void emit(observe::EventTag_t<observe::Event::OwnershipNotArrived>,
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>,
           LocalPeerState& peerState, const timing::Stopwatch& held) noexcept
 {
-    using std::chrono::duration_cast;
     const auto holdNs = held.elapsed();
     auto& ownership = peerState.getTelemetry().ownership;
     ownership.count.transferable.fetch_add(1, std::memory_order_relaxed);

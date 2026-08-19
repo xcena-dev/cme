@@ -1,10 +1,9 @@
-# Style gates for a pull request: clang-format over the tree, clang-tidy over the diff.
+# Style gates: clang-format and clang-tidy, both over the whole tree.
 #
-# The two run at different scopes on purpose. Formatting is already clean everywhere, so the
-# whole tree is checkable and drift anywhere fails. clang-tidy is not: the tree carries known
-# findings the policy has not been applied to yet, so checking all of it would fail every PR
-# regardless of what the PR changed. Holding only the changed lines to the policy is what
-# lets the gate exist before the backlog is gone.
+# Both are clean everywhere, so drift anywhere fails and neither gate depends on what a
+# particular change touched. Two things a diff-scoped tidy could not see: moving a definition
+# makes another file a violation without that file appearing in the diff, and a push has no base
+# commit to diff against, so its checked line count was zero.
 #
 # Neither job rewrites the branch. A gate that pushes commits the author did not write races
 # with their next push and needs write access on forks, which is a bigger cost than running
@@ -47,12 +46,10 @@ jobs:
   clang-tidy:
     runs-on: ubuntu-24.04
     steps:
-      # clang-tidy-diff needs the base commit to diff against, so the shallow default clone
-      # is not enough.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
+      # run-clang-tidy ships inside the clang-tidy-18 package and drives clang-tidy over every
+      # entry in the compile database. It is a python script, and the hosted image carries python3.
       - name: Install clang-tidy
         run: sudo apt-get update && sudo apt-get install -y clang-tidy-18 cmake ninja-build
 
@@ -63,28 +60,19 @@ jobs:
       - name: Generate the compile database
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      # A header is nobody's translation unit, so compile_commands.json has no entry for one and
-      # clang-tidy parses it with bare flags: every project include then reads as file-not-found.
-      # These three roots are what the database carries, passed absolute because clang-tidy runs
-      # from `build` for any file that does have an entry.
-      - name: Check the diff
+      # Every translation unit the database carries. A header is nobody's translation unit, so it
+      # is diagnosed where it is included from rather than on its own, which is what the unset
+      # HeaderFilterRegex in /.clang-tidy leaves in place.
+      #
+      # -j 4 is the hosted runner's core count, not a guess at this machine's: a fixed number is
+      # what makes the wall time predictable, and the whole tree is minutes here rather than the
+      # seconds a diff took.
+      - name: Check the tree
         run: |
-          base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
-            echo "no base commit to diff against; nothing to check"
-            exit 0
-          fi
-          git diff -U0 "$base"...HEAD -- 'include/*' 'common/*' 'src/*' 'tests/*' 'tools/*' 'examples/*' \
-            | python3 /usr/lib/llvm-18/share/clang/clang-tidy-diff.py \
-                -p1 -path build -clang-tidy-binary clang-tidy-18 -use-color \
-                -extra-arg=-std=c++17 \
-                -extra-arg=-I"$PWD/include" \
-                -extra-arg=-I"$PWD/common" \
-                -extra-arg=-I"$PWD/src" \
-                -extra-arg=-I"$PWD/tests/harness" \
-            | tee tidy.log
+          run-clang-tidy-18 -p build -j 4 -quiet -use-color 2>&1 | tee tidy.log
           if grep -q 'warning:' tidy.log; then
             echo
-            echo "The lines this PR touches must satisfy /.clang-tidy."
+            echo "The tree must satisfy /.clang-tidy. Reproduce with:"
+            echo "  cmake -S . -B build -G Ninja && run-clang-tidy-18 -p build -quiet"
             exit 1
           fi
