@@ -57,6 +57,8 @@ public:
         std::printf("  %s : ", held ? "OK  " : "FAIL");
         std::va_list args;
         va_start(args, format);
+        // The va_list checker loses the va_start above when this header is analysed through another one.
+        // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
         std::vprintf(format, args);
         va_end(args);
         std::fputc('\n', stdout);

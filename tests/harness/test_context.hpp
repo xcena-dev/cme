@@ -25,7 +25,9 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
 
+#include "cme/shared.hpp"
 #include "config_reader.hpp"
 #include "test_memory.hpp"
 #include "test_options.hpp"
@@ -267,6 +269,8 @@ public:
         std::printf("  %s : ", cond ? "OK  " : "FAIL");
         va_list args;
         va_start(args, fmt);
+        // The va_list checker loses the va_start above when this header is analysed through another one.
+        // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
         std::vprintf(fmt, args);
         va_end(args);
         std::fputc('\n', stdout);

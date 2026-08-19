@@ -67,6 +67,8 @@ inline void log(const char* fmt, ...)
 
     va_list args;
     va_start(args, fmt);
+    // The va_list checker loses the va_start above when this header is analysed through another one.
+    // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
     std::vprintf(fmt, args);
     va_end(args);
 

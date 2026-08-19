@@ -19,7 +19,7 @@
 // every consumer to <chrono> for a type it never spells.
 // timespec and timeval are here for the same reason countIn is: a kernel interface takes a duration
 // as its own shape, and every caller converting by hand is every caller getting the remainder wrong.
-#include <sys/time.h>
+#include <sys/time.h>  // IWYU pragma: export
 
 #include <chrono>  // IWYU pragma: export
 #include <cstdint>

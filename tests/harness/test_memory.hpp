@@ -29,6 +29,7 @@
 #include "cme/shared.hpp"
 #include "config_reader.hpp"
 #include "core/layout/geometry.hpp"
+#include "core/types.hpp"
 #include "memory/memory.hpp"
 
 namespace harness

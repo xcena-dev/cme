@@ -13,6 +13,7 @@
 
 #include <cstdint>
 
+#include "cme/shared.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"

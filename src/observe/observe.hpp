@@ -13,7 +13,7 @@
 // unexpanded macro, so it reads this header as unused.
 #include "common/timing.hpp"  // NOLINT(misc-include-cleaner)
 #include "observe/event.hpp"
-#include "observe/latency.hpp"  // OBSERVE_LATENCY_BEGIN/END + Latency enum + trace
+#include "observe/latency.hpp"  // NOLINT(misc-include-cleaner) -- OBSERVE_LATENCY_BEGIN/END below
 #include "observe/logging.hpp"
 #include "observe/stats.hpp"
 #include "util/cpu.hpp"  // NOLINT(misc-include-cleaner) -- OBSERVE_CPU_TIME below

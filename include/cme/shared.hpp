@@ -27,7 +27,9 @@
 #include <utility>
 #include <vector>
 
-#include "cme/errors.hpp"
+// Exported: every call below throws these, so a caller including this one has to be able to catch
+// them without being sent to a second header for the names.
+#include "cme/errors.hpp"  // IWYU pragma: export
 
 namespace cme
 {

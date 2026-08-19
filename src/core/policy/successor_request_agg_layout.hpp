@@ -26,7 +26,6 @@
 #include "core/layout/geometry.hpp"
 #include "core/policy/request_demand_region.hpp"
 #include "core/runtime/local_peer_state.hpp"
-#include "core/types.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
 #include "util/util.hpp"

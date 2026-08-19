@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include <string.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -162,7 +160,10 @@ public:
         // Name as a string_view (fixed-width field, NUL-terminated).
         [[nodiscard]] std::string_view getName() const noexcept
         {
-            return std::string_view{name, ::strnlen(name, MaxNameLen)};
+            // A name that fills the field carries no terminator, so the view ends at the first NUL or
+            // at the field's end.
+            const std::string_view stored{name, MaxNameLen};
+            return stored.substr(0, stored.find('\0'));
         }
         [[nodiscard]] PeerId getHolder() const noexcept
         {
