@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cinttypes>
 #include <csignal>
 #include <cstdint>
@@ -62,6 +61,10 @@ constexpr std::uint32_t MinIntervalMs = 50;
 constexpr std::uint32_t StopCheckMs = 50;
 
 constexpr std::size_t TimeTextBytes = 32;
+
+// Participant ids printed before the column gives up and prints a remainder instead. A domain every
+// peer joined says the same thing with three ids as with sixty-four, and the column has to fit.
+constexpr std::uint32_t ParticipantsListed = 3;
 
 constexpr double PercentScale = 100.0;
 
@@ -300,6 +303,7 @@ struct FrameState_t
 };
 
 using OwnershipList = std::vector<std::optional<cme::Inspector::OwnershipSnapshot_t>>;
+using PeerList = std::vector<std::optional<cme::Inspector::PeerSnapshot_t>>;
 
 void renderSummary(const cme::Inspector::HeaderSnapshot_t& info, const Opts_t& options,
                    const char* timeText)
@@ -322,13 +326,48 @@ void renderSummary(const cme::Inspector::HeaderSnapshot_t& info, const Opts_t& o
     return cme::isControlDomain(domainId) ? "control" : "-";
 }
 
+// Peers carrying the participation bit for @domainId. The count leads, because that is what refuses
+// a delete; the ids follow so the refusal names somebody.
+[[nodiscard]] std::string formatParticipants(const PeerList& peers, cme::DomainId domainId)
+{
+    std::string listed;
+    std::uint32_t counted = 0;
+
+    for (std::uint32_t peerId = 0; peerId < peers.size(); ++peerId)
+    {
+        const auto& peer = peers[peerId];
+        if (!peer.has_value() || !peer->participatingDomains.has(domainId))
+        {
+            continue;
+        }
+
+        ++counted;
+        if (counted <= ParticipantsListed)
+        {
+            listed += (counted == 1 ? "p" : ",p") + std::to_string(peerId);
+        }
+    }
+
+    if (counted == 0)
+    {
+        return "-";
+    }
+    if (counted > ParticipantsListed)
+    {
+        listed += ",+" + std::to_string(counted - ParticipantsListed);
+    }
+    return std::to_string(counted) + " {" + listed + "}";
+}
+
 // Returns which peers hold at least one domain, which is what decides the Holding role.
-[[nodiscard]] std::vector<bool> renderDomains(const OwnershipList& ownership, FrameState_t& state)
+[[nodiscard]] std::vector<bool> renderDomains(const OwnershipList& ownership, const PeerList& peers,
+                                              FrameState_t& state)
 {
     std::vector<bool> holdsAnyDomain(MaxPeers, false);
 
     std::printf("DOMAINS%s", ClearToLineEnd);
-    std::printf("  %3s  %-12s  %-9s  %-14s%s", "id", "name", "holder", "generation",
+    std::printf("  %3s  %-12s  %-9s  %-14s  %-16s%s",
+                "id", "name", "holder", "generation", "participants",
                 ClearToLineEnd);
     for (std::uint32_t domainId = 0; domainId < ownership.size(); ++domainId)
     {
@@ -347,9 +386,10 @@ void renderSummary(const cme::Inspector::HeaderSnapshot_t& info, const Opts_t& o
         }
         const std::string holderText =
             formatHolder(holder, state.prevHolder[domainId], !state.isFirstFrame);
-        std::printf("  %3u  %-12s  %-9s  %-14" PRIu64 "%s", domainId,
-                    formatDomainName(domainId, entry->name).c_str(), holderText.c_str(),
-                    entry->epoch, ClearToLineEnd);
+        std::printf("  %3u  %-12s  %-9s  %-14" PRIu64 "  %-16s%s",
+                    domainId, formatDomainName(domainId, entry->name).c_str(),
+                    holderText.c_str(), entry->epoch, formatParticipants(peers, domainId).c_str(),
+                    ClearToLineEnd);
         state.prevHolder[domainId] = holder;
     }
     std::printf("%s", ClearToLineEnd);
@@ -378,19 +418,20 @@ void renderSummary(const cme::Inspector::HeaderSnapshot_t& info, const Opts_t& o
     return Role::Idle;
 }
 
-void renderPeers(cme::Inspector& inspector, std::uint32_t peerCount,
-                 const std::vector<bool>& holdsAnyDomain, FrameState_t& state,
-                 std::uint64_t frameNs)
+void renderPeers(const PeerList& peers, const std::vector<bool>& holdsAnyDomain,
+                 FrameState_t& state, std::uint64_t frameNs)
 {
     const std::uint64_t realtimeNs = timing::wall<timing::Nanos>();
 
     std::printf("PEERS%s", ClearToLineEnd);
-    std::printf("  %3s  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %s%s", "id", "status", "role",
-                "poll%", "worker%", "wait%", "spin%", "hb_age", "pending", ClearToLineEnd);
+    std::printf("  %3s  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %-14s  %s%s",
+                "id", "status", "role", "poll%", "worker%", "wait%",
+                "spin%", "hb_age", "pending", "joined",
+                ClearToLineEnd);
 
-    for (std::uint32_t peerId = 0; peerId < peerCount; ++peerId)
+    for (std::uint32_t peerId = 0; peerId < peers.size(); ++peerId)
     {
-        const std::optional<cme::Inspector::PeerSnapshot_t> peer = inspector.readPeer(peerId);
+        const std::optional<cme::Inspector::PeerSnapshot_t>& peer = peers[peerId];
         if (!peer.has_value())
         {
             std::printf("  %3u  BAD%s", peerId, ClearToLineEnd);
@@ -415,11 +456,13 @@ void renderPeers(cme::Inspector& inspector, std::uint32_t peerCount,
         state.prevWaitNs[peerId] = peer->time.wait;
         state.prevSpinNs[peerId] = peer->time.spin;
 
-        std::printf("  %3u  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %s%s", peerId,
-                    peer->active ? "ACTIVE" : "NONE", getRoleName(role), pollText.c_str(),
-                    workerText.c_str(), waitText.c_str(), spinText.c_str(),
+        std::printf("  %3u  %-6s  %-8s  %-7s  %-9s  %-7s  %-7s  %-9s  %-14s  %s%s",
+                    peerId, peer->active ? "ACTIVE" : "NONE", getRoleName(role),
+                    pollText.c_str(), workerText.c_str(), waitText.c_str(), spinText.c_str(),
                     formatHeartbeatAge(timing::WallStamp{peer->lastSeenNanos}, realtimeNs).c_str(),
-                    formatMask(peer->pendingDomains).c_str(), ClearToLineEnd);
+                    formatMask(peer->pendingDomains).c_str(),
+                    formatMask(peer->participatingDomains).c_str(),
+                    ClearToLineEnd);
     }
     std::printf("%s", ClearToLineEnd);
 }
@@ -468,17 +511,24 @@ void render(cme::Inspector& inspector, const Opts_t& options, FrameState_t& stat
     const std::uint32_t domainCount = std::min<std::uint32_t>(info->numDomains, MaxDomains);
     const std::uint32_t peerCount = std::min<std::uint32_t>(info->maxPeers, MaxPeers);
 
-    // Sample every ownership record before rendering, so one frame shows one instant rather
-    // than a walk across several.
+    // Sample every ownership record and every peer slot before rendering, so one frame shows one
+    // instant rather than a walk across several. The participants column also needs the peers before
+    // the domains are printed.
     OwnershipList ownership(domainCount);
     for (std::uint32_t domainId = 0; domainId < domainCount; ++domainId)
     {
         ownership[domainId] = inspector.readOwnership(domainId);
     }
 
+    PeerList peers(peerCount);
+    for (std::uint32_t peerId = 0; peerId < peerCount; ++peerId)
+    {
+        peers[peerId] = inspector.readPeer(peerId);
+    }
+
     renderSummary(*info, options, timeText);
-    const std::vector<bool> holdsAnyDomain = renderDomains(ownership, state);
-    renderPeers(inspector, peerCount, holdsAnyDomain, state, frameNs);
+    const std::vector<bool> holdsAnyDomain = renderDomains(ownership, peers, state);
+    renderPeers(peers, holdsAnyDomain, state, frameNs);
 
     if (!options.once)
     {

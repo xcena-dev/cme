@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <cstdint>
 
 #include "common/timing.hpp"

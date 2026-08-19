@@ -14,7 +14,6 @@
 // Creating domains is not part of formatting. The flag is here because a region is provisioned once
 // and its domains are usually known then, and any peer can do the same at run time.
 
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <exception>

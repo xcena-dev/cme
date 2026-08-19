@@ -21,7 +21,6 @@
 // getDomainRecordShadow takes a peer index. Admission picks the slot a Session lands on and
 // reports it nowhere, so the id has to be named by the case.
 
-#include <chrono>
 #include <cstdint>
 
 #include "common/timing.hpp"

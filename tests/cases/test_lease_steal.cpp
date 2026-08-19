@@ -22,7 +22,6 @@
 // state beyond that one line.
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <ratio>
 #include <thread>

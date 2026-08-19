@@ -9,6 +9,7 @@
 
 #include <cstdint>
 
+#include "cme/limits.hpp"
 #include "cme/shared.hpp"
 #include "util/coherency.hpp"
 

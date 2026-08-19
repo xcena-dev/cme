@@ -13,7 +13,6 @@
 #pragma once
 
 #include <algorithm>
-#include <chrono>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>

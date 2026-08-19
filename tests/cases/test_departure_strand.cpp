@@ -15,7 +15,6 @@
 // --iters sets the iteration count (default DefaultIters); raise it for a long run.
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

@@ -5,7 +5,6 @@
 
 #include "cme/shared.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -144,6 +143,43 @@ Guard Session::lock(std::string_view name)
     auto peerGuard = impl_->peer->lock(impl_->resolveDomainName(name));  // throws LockTimeoutError
     auto guardImpl = std::make_unique<Guard::Impl>();
     guardImpl->peerGuard = std::move(peerGuard);
+    return Guard{std::move(guardImpl)};
+}
+
+DomainId Session::resolveDomain(std::string_view name) const
+{
+    if (!impl_)
+    {
+        throw JoinError{"cme::Session::resolveDomain: session not joined"};
+    }
+    return impl_->resolveDomainName(name);
+}
+
+Guard Session::lock(DomainId domainId)
+{
+    if (!impl_)
+    {
+        throw JoinError{"cme::Session::lock: session not joined"};
+    }
+    auto peerGuard = impl_->peer->lock(domainId);  // throws LockTimeoutError
+    auto guardImpl = std::make_unique<Guard::Impl>();
+    guardImpl->peerGuard = std::move(peerGuard);
+    return Guard{std::move(guardImpl)};
+}
+
+std::optional<Guard> Session::tryLock(DomainId domainId, timing::Nanos timeout)
+{
+    if (!impl_)
+    {
+        return std::nullopt;
+    }
+    auto peerGuardOpt = impl_->peer->tryLock(domainId, timeout);
+    if (!peerGuardOpt)
+    {
+        return std::nullopt;
+    }
+    auto guardImpl = std::make_unique<Guard::Impl>();
+    guardImpl->peerGuard = std::move(*peerGuardOpt);
     return Guard{std::move(guardImpl)};
 }
 

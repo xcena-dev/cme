@@ -20,7 +20,6 @@
 // options: --strategy, --domains (a single count, else the swept set), --peers (default 6).
 
 #include <atomic>
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>

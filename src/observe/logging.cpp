@@ -12,7 +12,6 @@
 #include "observe/event.hpp"
 
 #if defined(CME_LOGGING)
-#include <chrono>
 #include <cinttypes>
 #include <cstdio>
 

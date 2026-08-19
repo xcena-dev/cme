@@ -8,7 +8,6 @@
 
 #include "core/policy/successor_request.hpp"
 
-#include <chrono>
 #include <cstdint>
 
 #include "common/timing.hpp"

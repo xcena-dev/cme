@@ -5,7 +5,6 @@
 
 #include "core/layout/geometry.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>

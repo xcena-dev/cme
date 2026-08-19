@@ -32,6 +32,10 @@
 namespace cme
 {
 
+// Domain index, 0..maxDomains-1. The alias core/types.hpp declares, repeated here so a caller can hold
+// one without reaching into the internal headers.
+using DomainId = std::uint32_t;
+
 // Successor-policy kind. Recorded in region header; joiners use matching impl.
 //   Order      -- token-ring, fair under symmetric load
 //   Request    -- hand-raise / grant, lower latency under bursts (default)
@@ -165,6 +169,19 @@ public:
     // joinDomain is idempotent. Unknown name -> UnknownDomainError.
     void joinDomain(std::string_view name);
     void leaveDomain(std::string_view name);
+
+    // ── by index ────────────────────────────────────────────────────
+    // The index a name resolves to. Resolving by name walks the region's domain records, so a caller
+    // that locks the same domain repeatedly pays that walk once here. Throws UnknownDomainError.
+    [[nodiscard]] DomainId resolveDomain(std::string_view name) const;
+
+    // Acquire by index, without the walk. The index is the caller's to keep valid: a domain that was
+    // deleted and whose slot was claimed again answers for whatever is in it now, and says nothing.
+    [[nodiscard]] Guard lock(DomainId domainId);
+
+    // The bounded form of the same, so a caller that resolved once has both shapes by index.
+    [[nodiscard]] std::optional<Guard>
+    tryLock(DomainId domainId, std::chrono::nanoseconds timeout = std::chrono::seconds{5});
 
     // ── dynamic domains (create / delete) ───────────────────────────
     // Serialised via control domain. Throws DomainExistsError / DomainLimitError.

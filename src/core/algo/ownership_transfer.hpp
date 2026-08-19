@@ -9,8 +9,6 @@
 
 #pragma once
 
-#include <chrono>
-
 #include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"

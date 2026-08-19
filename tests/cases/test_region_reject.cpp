@@ -26,7 +26,6 @@
 // The fourth clearLayout, behind isLayoutAligned, is not reachable from here: the section bases
 // are offsets from an mmap result, and mmap already returns page-aligned memory.
 
-#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <string>

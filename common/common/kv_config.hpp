@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include <sys/stat.h>
+
 #include <cstdint>
 #include <fstream>
 #include <istream>
@@ -27,6 +29,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "common/timing.hpp"
 
 namespace kvconfig
 {
@@ -43,6 +47,10 @@ class KeyValueConfig
 {
 public:
     // ── factories ──────────────────────────────────────────────────
+    // Both refuse a file anyone but its owner can write, because a file someone else can rewrite
+    // decides what the reader was configured to do. Whose job that is to fix is the operator's, and
+    // the only thing a reader can usefully do about it is stop.
+    //
     // Throws ParseError when the file cannot be opened. Use loadIfPresent where absence is a
     // normal answer rather than a fault.
     [[nodiscard]] static KeyValueConfig load(const std::string& path);
@@ -72,6 +80,10 @@ public:
     // indistinguishable from a deliberate 0 in the file.
     [[nodiscard]] std::uint64_t getU64(const std::string& key, std::uint64_t fallback) const;
 
+    // getU64 in the units the caller keeps. The fallback is the caller's own current value, so a key
+    // the file leaves out keeps the default its struct was built with.
+    [[nodiscard]] timing::Millis getMillis(const std::string& key, timing::Millis fallback) const;
+
     [[nodiscard]] bool getBool(const std::string& key, bool fallback) const;
 
     // Empty when the key is absent. `[]` and a key with no value both give an empty list.
@@ -95,6 +107,8 @@ private:
     {
         return origin_ + ":" + std::to_string(line) + ": ";
     }
+
+    static void refuseUnsafeFile(const std::string& path);
 
     [[nodiscard]] const std::string& require(const std::string& key) const;
 
@@ -221,8 +235,26 @@ inline KeyValueConfig KeyValueConfig::parse(std::istream& input, std::string ori
     return config;
 }
 
+// An absent file is not untrusted: it carries no values, so there is nothing to be misled by. What is
+// refused is a file that exists and that someone other than its owner can rewrite.
+inline void KeyValueConfig::refuseUnsafeFile(const std::string& path)
+{
+    struct stat found = {};
+    if (::stat(path.c_str(), &found) != 0)
+    {
+        return;
+    }
+
+    if ((found.st_mode & (S_IWGRP | S_IWOTH)) != 0)
+    {
+        throw ParseError{path + ": writable by group or other, so it is not trustworthy"};
+    }
+}
+
 inline KeyValueConfig KeyValueConfig::load(const std::string& path)
 {
+    refuseUnsafeFile(path);
+
     std::ifstream file{path};
     if (!file)
     {
@@ -233,6 +265,8 @@ inline KeyValueConfig KeyValueConfig::load(const std::string& path)
 
 inline KeyValueConfig KeyValueConfig::loadIfPresent(const std::string& path)
 {
+    refuseUnsafeFile(path);
+
     std::ifstream file{path};
     if (!file)
     {
@@ -266,6 +300,11 @@ inline std::uint64_t KeyValueConfig::getU64(const std::string& key, std::uint64_
         throw ParseError{origin_ + ": " + key + ": `" + raw + "` is not a number"};
     }
     return value;
+}
+
+inline timing::Millis KeyValueConfig::getMillis(const std::string& key, timing::Millis fallback) const
+{
+    return timing::Millis{getU64(key, static_cast<std::uint64_t>(fallback.count()))};
 }
 
 inline bool KeyValueConfig::getBool(const std::string& key, bool fallback) const

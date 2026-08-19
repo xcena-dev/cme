@@ -20,7 +20,6 @@
 // takes a DomainId. Session resolves a name to whatever slot currently carries it, which is the
 // indirection this case exists to look behind.
 
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 

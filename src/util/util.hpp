@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <thread>
 
 #include "common/timing.hpp"

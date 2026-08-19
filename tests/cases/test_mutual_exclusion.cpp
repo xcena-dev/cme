@@ -12,7 +12,6 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>

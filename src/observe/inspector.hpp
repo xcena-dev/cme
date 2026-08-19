@@ -47,6 +47,9 @@ public:
         PeerId selfId;
         std::uint64_t lastSeenNanos;
         DomainBitmap pendingDomains;
+        // Domains this peer has joined. A delete is refused while any peer other than the deleter
+        // still carries the bit, so this is what says which one that is.
+        DomainBitmap participatingDomains;
         ProfileTimes_t time;  // all-zero if profile cacheline invalid
     };
 

@@ -24,7 +24,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>

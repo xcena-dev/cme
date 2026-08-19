@@ -25,7 +25,6 @@
 // configured Allman with no short lambdas, so a lambda written inside a call gets its braces
 // aligned to the argument column, which is where the ragged indentation comes from.
 
-#include <chrono>
 #include <cstdint>
 #include <string>
 #include <utility>

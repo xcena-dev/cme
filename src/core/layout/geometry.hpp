@@ -12,12 +12,12 @@
 
 #include <string.h>
 
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string_view>
 
+#include "cme/limits.hpp"
 #include "cme/shared.hpp"
 #include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
@@ -125,7 +125,7 @@ public:
     struct DomainRecord_t
     {
         static constexpr std::uint32_t Magic = 0x434D4554u;  // "CMET"
-        static constexpr std::size_t MaxNameLen = 16;
+        static constexpr std::size_t MaxNameLen = MaxDomainNameLen;
 
         // Active = live domain; Free = reusable spare. createDomain fills Free then
         // flips Active as last write; a mid-write crash leaves it Free (safely reclaimable).
@@ -201,10 +201,10 @@ public:
         // to be asserted rather than assumed.
         static constexpr std::uint32_t NamedBytes =
             16 + sizeof(endian::Field_t<std::uint64_t>) * DomainWordCount;
-        static_assert(NamedBytes < 64,
+        static_assert(NamedBytes < CacheLineBytes,
                       "Member_t: participatingDomains leaves no pad; lower MaxDomains");
 
-        std::uint8_t reserved[64 - NamedBytes];
+        std::uint8_t reserved[CacheLineBytes - NamedBytes];
 
         [[nodiscard]] bool isValidMagic() const noexcept
         {
@@ -244,10 +244,10 @@ public:
     // RA-policy-private region (recovery_authority.cpp), sized/formatted by
     // RecoveryAuthorityPolicy -- see getRecoveryAuthorityAreaBase().
 
-    static_assert(sizeof(Header_t) == 64, "Header_t must be 64 B");
-    static_assert(sizeof(AdmissionControl_t) == 64, "AdmissionControl_t must be 64 B");
-    static_assert(sizeof(DomainRecord_t) == 64, "DomainRecord_t must be 64 B");
-    static_assert(sizeof(Member_t) == 64, "Member_t must be 64 B");
+    static_assert(sizeof(Header_t) == CacheLineBytes, "Header_t must be one cacheline");
+    static_assert(sizeof(AdmissionControl_t) == CacheLineBytes, "AdmissionControl_t must be one cacheline");
+    static_assert(sizeof(DomainRecord_t) == CacheLineBytes, "DomainRecord_t must be one cacheline");
+    static_assert(sizeof(Member_t) == CacheLineBytes, "Member_t must be one cacheline");
 
     struct FormatOpts_t
     {

@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <utility>
 
 // timing::Nanos is used only inside OBSERVE_CPU_TIME's body, and include-cleaner does not read an

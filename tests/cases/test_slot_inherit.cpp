@@ -19,7 +19,6 @@
 // that slot by index and hand the same index to the next occupant. Admission chooses where a
 // Session lands and reports it nowhere.
 
-#include <chrono>
 #include <cstdint>
 
 #include "cme/errors.hpp"

@@ -10,7 +10,6 @@
 
 #include "admission/claim.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <random>
 #include <thread>

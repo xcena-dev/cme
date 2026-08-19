@@ -18,8 +18,6 @@
 // Two peers, not 64. What is under test is the size of the region, not the number of participants,
 // and 64 poll threads would make this one of the slowest cases in the suite for nothing.
 
-#include <chrono>
-
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"

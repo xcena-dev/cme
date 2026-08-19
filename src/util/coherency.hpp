@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "cme/limits.hpp"  // CacheLineBytes: the unit every transaction below moves
 #include "cme/shared.hpp"  // CoherencyMode: one type, set per Session at format/open
 
 // Every regime now compiles into every build, so the whole file is x86-only. Kept as one
@@ -38,7 +39,9 @@
 namespace cme
 {
 
-inline constexpr std::size_t CacheLineBytes = 64;
+// The line width as an address mask. Widened here rather than at each use, because inverting a
+// 32-bit width gives a 32-bit mask and anding that with a 64-bit address clears its upper half.
+inline constexpr std::uintptr_t LineOffsetMask = static_cast<std::uintptr_t>(CacheLineBytes) - 1;
 
 // What a record has to satisfy to live in a region and be moved by get/set below: whole
 // cachelines, so a write moves one line; trivially copyable, so get/set may move it as
@@ -67,7 +70,7 @@ inline void wmb(const void* addr, std::size_t len, Mode mode) noexcept
     }
     if (mode == Mode::Flush)
     {
-        const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~(CacheLineBytes - 1);
+        const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~LineOffsetMask;
         const auto end = reinterpret_cast<std::uintptr_t>(addr) + len;
         // The walk is integer arithmetic because void* has none, and aligning a pointer below
         // its own object is out of bounds. Nothing dereferences what comes back.
@@ -86,7 +89,7 @@ inline void rmb(const void* addr, std::size_t len, Mode mode) noexcept
     {
         if (mode == Mode::Flush)
         {
-            const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~(CacheLineBytes - 1);
+            const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~LineOffsetMask;
             const auto end = reinterpret_cast<std::uintptr_t>(addr) + len;
             // Integer walk for the same reason as wmb: void* has no arithmetic, and aligning a
             // pointer below its own object is out of bounds.
@@ -114,7 +117,7 @@ inline void mb() noexcept
 template <typename T>
 [[nodiscard]] inline T get(const T* slot, Mode mode) noexcept
 {
-    static_assert(sizeof(T) == 64, "coherency::get is for 64B cacheline structs");
+    static_assert(sizeof(T) == CacheLineBytes, "coherency::get is for one-cacheline structs");
     rmb(slot, sizeof(T), mode);
     return *slot;
 }
@@ -122,7 +125,7 @@ template <typename T>
 template <typename T>
 inline void set(T* slot, const T& value, Mode mode) noexcept
 {
-    static_assert(sizeof(T) == 64, "coherency::set is for 64B cacheline structs");
+    static_assert(sizeof(T) == CacheLineBytes, "coherency::set is for one-cacheline structs");
     *slot = value;
     wmb(slot, sizeof(T), mode);
 }

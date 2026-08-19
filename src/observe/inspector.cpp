@@ -112,6 +112,9 @@ std::optional<Inspector::PeerSnapshot_t> Inspector::readPeer(PeerId peerId) cons
                                   ? request_demand::loadPending(geometry_.getSuccessorAreaBase(), peerId, coherency_)
                                   : DomainBitmap{};
 
+    // Participation lives in the member slot, so the 64B read above already carries it.
+    snapshot.participatingDomains = memberSlot.loadParticipatingDomains();
+
     // readProfile gates build toggle + null + magic, and resolveProfileSlot rmb's the
     // slot itself -- no separate barrier here. All-zero when the section is absent.
     snapshot.time = readProfile(geometry_.getProfileSlot(peerIndex), coherency_);

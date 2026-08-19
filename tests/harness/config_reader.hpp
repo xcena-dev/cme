@@ -25,6 +25,8 @@
 #include <sys/types.h>
 
 #include <cstdint>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -58,7 +60,7 @@ public:
     // A missing file is not an error: every fact then reads as absent, and a run that
     // wanted one of them fails when it asks, not here.
     explicit ConfigReader(std::string path = CME_SITE_CONFIG_PATH)
-        : values_{kvconfig::KeyValueConfig::loadIfPresent(path)},
+        : values_{readOwnStream(path)},
           path_{std::move(path)}
     {
         resolve();
@@ -67,6 +69,22 @@ public:
     [[nodiscard]] const Site_t& site() const noexcept
     {
         return site_;
+    }
+
+    // Opened here rather than through KeyValueConfig::loadIfPresent, which refuses a file group or
+    // other can write. This one is a checkout's own file, and git gives it whatever the developer's
+    // umask allows, so that rule would make a 002 umask mean the tests do not run.
+    [[nodiscard]] static kvconfig::KeyValueConfig readOwnStream(const std::string& path)
+    {
+        std::ifstream file{path};
+        if (file)
+        {
+            return kvconfig::KeyValueConfig::parse(file, path);
+        }
+
+        // An absent file carries no keys, which is what an empty stream parses to.
+        std::istringstream nothing;
+        return kvconfig::KeyValueConfig::parse(nothing, path);
     }
 
     // Named in the message when a run refuses, so the reader is told which file to fix.

@@ -37,7 +37,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -344,7 +343,7 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
     const timing::Stopwatch sweep;
     const int failures = runPeers(opt, region);
     const double wallSec =
-        std::chrono::duration_cast<timing::SecsF>(sweep.elapsed()).count();
+        timing::countIn<timing::SecsF>(sweep.elapsed());
 
     const std::size_t sampleCount = static_cast<std::size_t>(opt.peers) * opt.iters * opt.domains;
     std::vector<std::uint64_t> samples(region.results.data(),

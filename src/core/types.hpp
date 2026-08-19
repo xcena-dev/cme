@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <limits>
 
+#include "cme/limits.hpp"  // IWYU pragma: export
+
 namespace cme
 {
 
@@ -43,9 +45,8 @@ inline constexpr PeerId NoPeer = std::numeric_limits<PeerId>::max();
     return peerId == NoPeer;
 }
 
-// Hardcoded ceilings; mirror me_layout.h's enum me_limits.
-inline constexpr std::uint32_t MaxPeers = 64;
-inline constexpr std::uint32_t MaxDomains = 64;
+// MaxPeers and MaxDomains come from cme/limits.hpp, which is where a consumer laying out its own table
+// against a cme domain reads them too.
 
 // Bound-checked predicates for layout dimension parameters.
 [[nodiscard]] inline constexpr bool isValidDomainCount(std::uint32_t count) noexcept

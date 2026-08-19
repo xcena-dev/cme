@@ -43,6 +43,7 @@
 #include <thread>
 #include <vector>
 
+#include "cme/limits.hpp"
 #include "common/args.hpp"
 #include "helper_util.hpp"
 #include "test_memory.hpp"
@@ -50,7 +51,6 @@
 namespace
 {
 
-constexpr std::uint64_t CacheLineBytes = 64;
 constexpr std::uint64_t PmdBytes = harness::TestMemory::WindowBytes;
 constexpr std::uint64_t DefaultIterations = 2'000'000;
 constexpr std::int64_t CalibrationNs = 100'000'000;
@@ -151,7 +151,7 @@ struct Mapping_t
 // small-stride run at exactly 2 MiB and comparable with every other.
 [[nodiscard]] std::uint64_t computeMapBytes(const RunOptions_t& options)
 {
-    const std::uint64_t needed = options.pollers * options.stride + CacheLineBytes;
+    const std::uint64_t needed = options.pollers * options.stride + cme::CacheLineBytes;
     if (needed <= PmdBytes)
     {
         return PmdBytes;

@@ -14,8 +14,16 @@
 
 #pragma once
 
-#include <chrono>
+// The aliases below are this header's surface, and a caller naming Millis is not naming
+// std::chrono::milliseconds. Exported so include-cleaner attributes them here rather than sending
+// every consumer to <chrono> for a type it never spells.
+// timespec and timeval are here for the same reason countIn is: a kernel interface takes a duration
+// as its own shape, and every caller converting by hand is every caller getting the remainder wrong.
+#include <sys/time.h>
+
+#include <chrono>  // IWYU pragma: export
 #include <cstdint>
+#include <ctime>
 #include <optional>
 #include <ratio>
 
@@ -49,6 +57,35 @@ template <typename T_Duration, typename Rep, typename Period>
 [[nodiscard]] constexpr std::uint64_t countIn(std::chrono::duration<Rep, Period> value) noexcept
 {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<T_Duration>(value).count());
+}
+
+// A duration as the two-field shapes the kernel interfaces take: timespec for futex and nanosleep,
+// timeval for the socket timeouts.
+//
+// The sub-second field is the remainder of a subtraction and not a second cast of the whole span.
+// Mixing periods lands in the finer of the two, so the ratio between them stays in the types instead
+// of being written out as a constant that has to agree with them.
+//
+// decltype on the members rather than a named width: tv_sec and tv_nsec are not the same type
+// everywhere.
+template <typename Rep, typename Period>
+[[nodiscard]] constexpr ::timespec toTimespec(std::chrono::duration<Rep, Period> span) noexcept
+{
+    const Secs seconds = std::chrono::duration_cast<Secs>(span);
+    ::timespec value = {};
+    value.tv_sec = static_cast<decltype(value.tv_sec)>(seconds.count());
+    value.tv_nsec = static_cast<decltype(value.tv_nsec)>(countIn<Nanos>(span - seconds));
+    return value;
+}
+
+template <typename Rep, typename Period>
+[[nodiscard]] constexpr ::timeval toTimeval(std::chrono::duration<Rep, Period> span) noexcept
+{
+    const Secs seconds = std::chrono::duration_cast<Secs>(span);
+    ::timeval value = {};
+    value.tv_sec = static_cast<decltype(value.tv_sec)>(seconds.count());
+    value.tv_usec = static_cast<decltype(value.tv_usec)>(countIn<Micros>(span - seconds));
+    return value;
 }
 
 [[nodiscard]] inline TimePoint now() noexcept

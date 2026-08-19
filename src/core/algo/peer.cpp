@@ -9,7 +9,6 @@
 
 #include "core/algo/peer.hpp"
 
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <memory>

@@ -14,7 +14,6 @@
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
-#include <chrono>
 #include <cstdlib>
 
 #include "cme/errors.hpp"

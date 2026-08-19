@@ -21,7 +21,6 @@
 // The scenario is the smallest one that crosses a peer boundary. What differs between the modes
 // is the fence and flush around each record write, so any real acquire exercises it.
 
-#include <chrono>
 #include <cstdint>
 
 #include "cme/shared.hpp"

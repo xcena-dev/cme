@@ -12,7 +12,6 @@
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

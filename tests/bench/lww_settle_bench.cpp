@@ -36,7 +36,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -46,6 +45,7 @@
 #include <thread>
 #include <vector>
 
+#include "cme/limits.hpp"
 #include "common/args.hpp"
 #include "common/timing.hpp"
 #include "helper_util.hpp"
@@ -54,7 +54,6 @@
 namespace
 {
 
-constexpr std::uint64_t CacheLineBytes = 64;
 constexpr std::uint64_t WordsPerLine = 8;
 constexpr std::uint32_t DefaultRepeats = 200;
 constexpr std::uint32_t MinContendedStakers = 2;
@@ -315,7 +314,7 @@ int main(int argc, char** argv)
 
     // Map one cacheline: the uncacheable file when a backend was selected, else a heap line
     // as the write-back baseline.
-    static std::uint64_t heapLine[WordsPerLine] __attribute__((aligned(CacheLineBytes))) = {0};
+    static std::uint64_t heapLine[WordsPerLine] __attribute__((aligned(cme::CacheLineBytes))) = {0};
     volatile std::uint64_t* nonce = heapLine;
     std::unique_ptr<harness::TestMemory> memory;
     if (!backend.empty())

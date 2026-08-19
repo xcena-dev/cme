@@ -14,7 +14,6 @@
 
 #include "core/policy/successor_peterson.hpp"
 
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

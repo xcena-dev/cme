@@ -13,7 +13,6 @@
 
 #include "core/policy/successor_request_agg.hpp"
 
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 

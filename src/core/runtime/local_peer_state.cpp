@@ -6,7 +6,6 @@
 #include "core/runtime/local_peer_state.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <thread>
