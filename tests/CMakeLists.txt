@@ -214,6 +214,7 @@ cme_test_exe(cme-shadow-authority-test test_shadow_authority.cpp)
 cme_test_exe(cme-coherency-modes-test test_coherency_modes.cpp)
 cme_test_exe(cme-slot-inherit-test test_slot_inherit.cpp)
 cme_test_exe(cme-domain-incarnation-test test_domain_incarnation.cpp)
+cme_test_exe(cme-domain-handle-test test_domain_handle.cpp)
 cme_test_exe(cme-file-presized-test test_file_presized.cpp)
 cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
 cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
@@ -366,6 +367,10 @@ cme_case(slot_inherit TARGET cme-slot-inherit-test STRATEGY request SHM_TIMEOUT 
 # holding the old view is refused until it re-joins. One policy, for the same reason as
 # domain_lifecycle -- the registry sits above the successor policy.
 cme_case(domain_incarnation TARGET cme-domain-incarnation-test STRATEGY request SHM_TIMEOUT 60)
+
+# The API that reads the field the case above watches rise. One policy for the same reason: what is
+# under test is the comparison in Session::lock, and the successor policy sits below it.
+cme_case(domain_handle TARGET cme-domain-handle-test STRATEGY request SHM_TIMEOUT 60)
 
 # The two dimension corners. All four policies at one peer, because what degenerates there is the
 # successor policy itself: the ring walk, the grant scan and the tournament tree each reduce to a

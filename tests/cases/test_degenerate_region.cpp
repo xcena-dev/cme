@@ -84,7 +84,7 @@ void runBody(harness::TestContext& ctx)
               "the sole participant cannot leave the domain");
 
     solo.deleteDomain(lane);
-    ctx.check(solo.resolveDomainName(Domain) == cme::NoDomain, "the domain is gone after delete");
+    ctx.check(harness::resolvedSlot(solo, Domain) == cme::NoDomain, "the domain is gone after delete");
 }
 
 }  // namespace test

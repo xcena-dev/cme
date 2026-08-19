@@ -112,7 +112,7 @@ void worker(ChurnSlot_t* peerSlot)
         try
         {
             if (privateId != cme::NoDomain &&
-                peerSlot->peer->resolveDomainName(privateName) != privateId)
+                harness::resolvedSlot(*peerSlot->peer, privateName) != privateId)
             {
                 privateId = cme::NoDomain;  // reclaimed while we were away
             }

@@ -65,7 +65,7 @@ void runBody(harness::TestContext& ctx)
     harness::log("A: peer %u creates 'solo' (sole participant + genesis holder)", SoloOwner);
     const auto soloId = peers[SoloOwner]->createDomain("solo");
     harness::sleepMs(200);
-    ctx.checkf(peers[0]->resolveDomainName("solo") != cme::NoDomain,
+    ctx.checkf(harness::resolvedSlot(*peers[0], "solo") != cme::NoDomain,
                "'solo' (id=%u) visible to survivor before crash", soloId);
 
     harness::log("A: freeze peer %u (its sole participant crashes)", SoloOwner);
@@ -77,7 +77,7 @@ void runBody(harness::TestContext& ctx)
     const bool freed = harness::waitUntil(
         [&]
         {
-            return peers[0]->resolveDomainName("solo") == cme::NoDomain;
+            return harness::resolvedSlot(*peers[0], "solo") == cme::NoDomain;
         },
         RecoveryDeadlineMs);
     ctx.checkf(freed, "'solo' orphan reclaimed after sole participant crash (slot freed)");
@@ -93,7 +93,7 @@ void runBody(harness::TestContext& ctx)
     const auto sharedId = peers[SharedHolder]->createDomain("shared");
     peers[SharedJoiner]->joinDomain(sharedId);
     harness::sleepMs(200);
-    ctx.checkf(peers[SharedHolder]->resolveDomainName("shared") != cme::NoDomain,
+    ctx.checkf(harness::resolvedSlot(*peers[SharedHolder], "shared") != cme::NoDomain,
                "'shared' (id=%u) visible", sharedId);
 
     // With a second participant alive, delete is refused.
@@ -133,7 +133,7 @@ void runBody(harness::TestContext& ctx)
         },
         RecoveryDeadlineMs);
     ctx.checkf(deleted, "deleteDomain succeeds after dead participant's participation scrubbed");
-    ctx.checkf(peers[SharedHolder]->resolveDomainName("shared") == cme::NoDomain,
+    ctx.checkf(harness::resolvedSlot(*peers[SharedHolder], "shared") == cme::NoDomain,
                "'shared' gone after delete");
 
     // ── teardown ───────────────────────────────────────────────────────

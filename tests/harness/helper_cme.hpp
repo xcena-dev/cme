@@ -124,6 +124,15 @@ template <typename T_Locker, typename T_Domain>
     return locker.tryLock(domain, budget).has_value();
 }
 
+// Which slot a name resolves to, for a case asking whether the name is live rather than acting on it.
+// Peer answers the incarnation alongside the id so that acting on the answer cannot straddle a reuse. A
+// case comparing slot numbers has no use for it, and the discard belongs here rather than in each case.
+[[nodiscard]] inline cme::DomainId resolvedSlot(const cme::Peer& peer, std::string_view name)
+{
+    std::uint64_t unusedIncarnation = 0;
+    return peer.resolveDomainName(name, unusedIncarnation);
+}
+
 // A region mapped and bound, which is what every accessor past getHeader needs: open() maps the
 // bytes, and bindBlocking is what reads the header and computes the section bases. A case wanting
 // the unbound state asks ctx.memory().openRegion() for it directly, since that state is then the

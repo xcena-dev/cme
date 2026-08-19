@@ -52,8 +52,17 @@ void leaveMembership(LocalPeerState& peerState) noexcept;
 [[nodiscard]] LeaveResult leaveDomain(LocalPeerState& peerState, DomainId domainId);
 
 // Resolve a name to its Active data-domain id (live scan; skips control + Free).
-// NoDomain if unknown.
-[[nodiscard]] DomainId findDataDomainByName(const LocalPeerState& peerState, std::string_view name);
+// NoDomain and 0 if unknown.
+//
+// @outIncarnation comes from the visit that matched the name, and is not optional: asked as a second
+// call, a delete and create between the two answer a pair naming a domain nobody resolved.
+[[nodiscard]] DomainId findDataDomainByName(const LocalPeerState& peerState, std::string_view name,
+                                            std::uint64_t& outIncarnation);
+
+// The incarnation the slot carries now. A slot freed and claimed again reports a different one, which is
+// what tells a handle kept across that from one still naming the domain it was resolved in.
+// PRECONDITION: @domainId is in range; the record lookup is bare index arithmetic.
+[[nodiscard]] std::uint64_t readDomainIncarnation(const LocalPeerState& peerState, DomainId domainId);
 
 // ── dynamic domain registry (§1.3 / §1.4 / §1.6) ────────────────────
 

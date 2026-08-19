@@ -123,7 +123,8 @@ namespace
 
 }  // namespace
 
-DomainId findDataDomainByName(const LocalPeerState& peerState, std::string_view name)
+DomainId findDataDomainByName(const LocalPeerState& peerState, std::string_view name,
+                              std::uint64_t& outIncarnation)
 {
     for (const DomainId domainId : peerState.getDataDomainIdRange())
     {
@@ -132,10 +133,26 @@ DomainId findDataDomainByName(const LocalPeerState& peerState, std::string_view 
             record.hasState(Geometry::DomainRecord_t::State::Active) &&
             record.getName() == name)
         {
+            // From this snapshot, not a second read of the slot: the match and the incarnation have to
+            // come from one visit or they can describe two different domains.
+            outIncarnation = record.generation;
             return domainId;
         }
     }
+    outIncarnation = 0;
     return NoDomain;
+}
+
+// Zero for a slot that is not a live domain, which is a value no live incarnation has: createDomain
+// bumps generation before it flips the slot Active.
+std::uint64_t readDomainIncarnation(const LocalPeerState& peerState, DomainId domainId)
+{
+    const auto record = peerState.loadDomainRecordSnapshot(domainId);  // get (rmb)
+    if (!record.isValidMagic() || !record.hasState(Geometry::DomainRecord_t::State::Active))
+    {
+        return 0;
+    }
+    return record.generation;
 }
 
 JoinResult joinMembership(LocalPeerState& peerState)
@@ -289,7 +306,9 @@ CreateResult createDomainLocked(LocalPeerState& peerState, std::string_view name
     }
 
     // Control lock holds the Active set stable for uniqueness + slot scan.
-    if (!isNoDomain(findDataDomainByName(peerState, name)))
+    // The incarnation is discarded: the question is whether the name is taken, not by which domain.
+    std::uint64_t takenIncarnation = 0;
+    if (!isNoDomain(findDataDomainByName(peerState, name, takenIncarnation)))
     {
         return CreateResult::DuplicateName;
     }

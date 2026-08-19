@@ -107,6 +107,22 @@ LocalPeerState& validatedState(LocalPeerState* impl, DomainId domainId, const ch
     return *impl;
 }
 
+// Refuse a slot whose incarnation differs from the one the caller resolved. Call it holding the lock that
+// freezes the slot, since create and delete both take that lock.
+void refuseReplacedDomain(const LocalPeerState& state, DomainId domainId,
+                          std::optional<std::uint64_t> expectedIncarnation, const char* opName)
+{
+    if (!expectedIncarnation)
+    {
+        return;
+    }
+    if (lifecycle::readDomainIncarnation(state, domainId) != *expectedIncarnation)
+    {
+        throw UnknownDomainError{std::string{"cme::Peer::"} + opName +
+                                 ": the domain this named is gone"};
+    }
+}
+
 }  // namespace
 
 Peer::Peer(Geometry& geometry, PeerId peerId, CoherencyMode coherency)
@@ -222,17 +238,21 @@ std::optional<PeerGuard> Peer::tryLock(DomainId domainId, timing::Nanos timeout)
     return PeerGuard{this, domainId};
 }
 
-void Peer::joinDomain(DomainId domainId)
+void Peer::joinDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation)
 {
     auto& state = validatedState(impl_.get(), domainId, "joinDomain");
     if (state.isParticipating(domainId))
     {
+        // Refused rather than reported idempotent: this peer is in some domain on that slot, and a
+        // caller whose incarnation disagrees is asking about a different one.
+        refuseReplacedDomain(state, domainId, expectedIncarnation, "joinDomain");
         return;  // idempotent -- no control lock needed
     }
 
     // Control lock serialises participation publish against deleteDomain re-check.
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = state.lockControlSection();  // control lock is per-peer, not per-thread
+    refuseReplacedDomain(state, domainId, expectedIncarnation, "joinDomain");
     const auto result = lifecycle::joinDomain(state, domainId);
     controlGuard.release();
 
@@ -247,7 +267,7 @@ void Peer::joinDomain(DomainId domainId)
     }
 }
 
-void Peer::leaveDomain(DomainId domainId)
+void Peer::leaveDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation)
 {
     auto& state = validatedState(impl_.get(), domainId, "leaveDomain");
     if (isControlDomain(domainId))
@@ -259,6 +279,7 @@ void Peer::leaveDomain(DomainId domainId)
     // concurrent leave/delete (two bare-leaves would both retract, orphaning the domain).
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = state.lockControlSection();
+    refuseReplacedDomain(state, domainId, expectedIncarnation, "leaveDomain");
     const auto result = lifecycle::leaveDomain(state, domainId);
     controlGuard.release();
 
@@ -307,7 +328,7 @@ DomainId Peer::createDomain(std::string_view name)
     throw JoinError{"cme::Peer::createDomain: corrupt region"};
 }
 
-void Peer::deleteDomain(DomainId domainId)
+void Peer::deleteDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation)
 {
     auto& state = validatedState(impl_.get(), domainId, "deleteDomain");
     if (isControlDomain(domainId))
@@ -320,6 +341,9 @@ void Peer::deleteDomain(DomainId domainId)
     auto domainGuard = lock(domainId);
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = state.lockControlSection();  // always last: no inversion
+    // Both locks held, so this is the last word: nothing can replace the domain between here and the flip
+    // to Free, and deleting the wrong domain is unrecoverable.
+    refuseReplacedDomain(state, domainId, expectedIncarnation, "deleteDomain");
     const auto result = lifecycle::deleteDomainLocked(state, domainId);
     controlGuard.release();
     domainGuard.release();
@@ -346,9 +370,25 @@ void Peer::setFreeze(bool frozen) noexcept
     }
 }
 
-DomainId Peer::resolveDomainName(std::string_view name) const
+DomainId Peer::resolveDomainName(std::string_view name, std::uint64_t& outIncarnation) const
 {
-    return impl_ ? lifecycle::findDataDomainByName(*impl_, name) : NoDomain;
+    if (!impl_)
+    {
+        outIncarnation = 0;
+        return NoDomain;
+    }
+    return lifecycle::findDataDomainByName(*impl_, name, outIncarnation);
+}
+
+std::uint64_t Peer::readDomainIncarnation(DomainId domainId) const
+{
+    // Range-checked here because this is where an id from outside the library enters: a handle carries
+    // one the caller may have built rather than resolved, and getDomainRecord is bare index arithmetic.
+    if (!impl_ || domainId >= impl_->getNumDomains())
+    {
+        return 0;  // not a slot at all, and no live incarnation is zero
+    }
+    return lifecycle::readDomainIncarnation(*impl_, domainId);
 }
 
 CoherencyMode Peer::getCoherencyMode() const noexcept

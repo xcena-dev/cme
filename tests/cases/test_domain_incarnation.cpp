@@ -3,6 +3,9 @@
 //
 // test_domain_incarnation.cpp -- a reused domain slot is a new incarnation, not the old one.
 //
+// Peer rather than Session for the second half: join, leave and delete take the incarnation the caller
+// resolved, and Session resolves afresh on every call, so only this tier can hand them a stale one.
+//
 // createDomainLocked bumps generation on the slot it reuses and leaves epoch alone, and the
 // comments name what each field is for: generation is the slot-reuse ABA guard, and a monotonic
 // epoch is what lets prior holders still tell a newer transfer from an older one.
@@ -90,9 +93,9 @@ void runBody(harness::TestContext& ctx)
                afterGeneration);
     ctx.checkf(afterEpoch >= beforeEpoch, "epoch is not reset by reuse (%" PRIu64 " -> %" PRIu64 ")",
                beforeEpoch, afterEpoch);
-    ctx.check(holder.resolveDomainName(FirstName) == cme::NoDomain,
+    ctx.check(harness::resolvedSlot(holder, FirstName) == cme::NoDomain,
               "the old name resolves to nothing");
-    ctx.check(holder.resolveDomainName(SecondName) == lane,
+    ctx.check(harness::resolvedSlot(holder, SecondName) == lane,
               "the new name resolves to the reused slot");
 
     // The tenant still holds a view of the old incarnation, and the slot number it knows is now
@@ -105,9 +108,33 @@ void runBody(harness::TestContext& ctx)
     ctx.check(harness::threw<cme::NotParticipatingError>(lockStaleView),
               "the tenant cannot act on the new incarnation with its old view");
 
+    // The incarnation a caller resolved, handed back to the three operations that change participation.
+    // Session resolves afresh on every call, so only this tier can present the pair a live race would:
+    // a slot that is a domain, and an incarnation belonging to the one before it.
+    const auto joinStale = [&tenant, lane, beforeGeneration]
+    {
+        tenant.joinDomain(lane, beforeGeneration);
+    };
+    ctx.check(harness::threw<cme::UnknownDomainError>(joinStale),
+              "joinDomain refuses the incarnation the caller resolved before the reuse");
+
+    const auto deleteStale = [&holder, lane, beforeGeneration]
+    {
+        holder.deleteDomain(lane, beforeGeneration);
+    };
+    ctx.check(harness::threw<cme::UnknownDomainError>(deleteStale),
+              "and deleteDomain refuses it rather than freeing the domain that took the slot");
+
     tenant.joinDomain(lane);
     ctx.check(harness::canLock(tenant, lane, GrantWindow),
               "the tenant acquires the new incarnation after re-syncing");
+
+    const auto leaveStale = [&tenant, lane, beforeGeneration]
+    {
+        tenant.leaveDomain(lane, beforeGeneration);
+    };
+    ctx.check(harness::threw<cme::UnknownDomainError>(leaveStale),
+              "leaveDomain refuses it too, so a stale view cannot retract live participation");
 }
 
 }  // namespace test

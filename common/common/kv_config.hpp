@@ -17,12 +17,16 @@
 
 #pragma once
 
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include <cerrno>
+#include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <istream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -108,7 +112,10 @@ private:
         return origin_ + ":" + std::to_string(line) + ": ";
     }
 
-    static void refuseUnsafeFile(const std::string& path);
+    // nullopt when the path cannot be opened, which carries no values and so cannot mislead. Throws when
+    // the file is there and anyone but its owner can write it: what a config decides is what the reader
+    // does, so stopping is the only thing the reader can usefully do about that.
+    [[nodiscard]] static std::optional<std::string> readIfTrusted(const std::string& path);
 
     [[nodiscard]] const std::string& require(const std::string& key) const;
 
@@ -237,44 +244,102 @@ inline KeyValueConfig KeyValueConfig::parse(std::istream& input, std::string ori
 
 // An absent file is not untrusted: it carries no values, so there is nothing to be misled by. What is
 // refused is a file that exists and that someone other than its owner can rewrite.
-inline void KeyValueConfig::refuseUnsafeFile(const std::string& path)
+inline std::optional<std::string> KeyValueConfig::readIfTrusted(const std::string& path)
 {
-    struct stat found = {};
-    if (::stat(path.c_str(), &found) != 0)
+    // Closed however this returns, including through the throw below.
+    class OpenFile
     {
-        return;
+    public:
+        explicit OpenFile(const std::string& named) noexcept
+            : descriptor_{::open(named.c_str(), O_RDONLY | O_CLOEXEC)}
+        {
+        }
+
+        OpenFile(const OpenFile&) = delete;
+        OpenFile(OpenFile&&) = delete;
+        OpenFile& operator=(const OpenFile&) = delete;
+        OpenFile& operator=(OpenFile&&) = delete;
+
+        ~OpenFile() noexcept
+        {
+            if (descriptor_ >= 0)
+            {
+                static_cast<void>(::close(descriptor_));
+            }
+        }
+
+        [[nodiscard]] int get() const noexcept
+        {
+            return descriptor_;
+        }
+
+    private:
+        int descriptor_;
+    };
+
+    const OpenFile opened{path};
+    if (opened.get() < 0)
+    {
+        return std::nullopt;
     }
 
+    // The descriptor and not the path. A mode read through the path says nothing about the bytes read
+    // afterwards, because the name can be pointed at another file in between.
+    struct stat found = {};
+    if (::fstat(opened.get(), &found) != 0)
+    {
+        throw ParseError{path + ": cannot be examined"};
+    }
     if ((found.st_mode & (S_IWGRP | S_IWOTH)) != 0)
     {
         throw ParseError{path + ": writable by group or other, so it is not trustworthy"};
+    }
+
+    std::string text;
+    char buffer[4096];
+    while (true)
+    {
+        const ::ssize_t taken = ::read(opened.get(), buffer, sizeof(buffer));
+        if (taken == 0)
+        {
+            return text;
+        }
+        if (taken < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            throw ParseError{path + ": cannot be read"};
+        }
+        text.append(buffer, static_cast<std::size_t>(taken));
     }
 }
 
 inline KeyValueConfig KeyValueConfig::load(const std::string& path)
 {
-    refuseUnsafeFile(path);
-
-    std::ifstream file{path};
-    if (!file)
+    const std::optional<std::string> text = readIfTrusted(path);
+    if (!text)
     {
         throw ParseError{path + ": cannot open"};
     }
-    return parse(file, path);
+
+    std::istringstream stream{*text};
+    return parse(stream, path);
 }
 
 inline KeyValueConfig KeyValueConfig::loadIfPresent(const std::string& path)
 {
-    refuseUnsafeFile(path);
-
-    std::ifstream file{path};
-    if (!file)
+    const std::optional<std::string> text = readIfTrusted(path);
+    if (!text)
     {
         KeyValueConfig empty;
         empty.origin_ = path;
         return empty;
     }
-    return parse(file, path);
+
+    std::istringstream stream{*text};
+    return parse(stream, path);
 }
 
 // ── typed reads ────────────────────────────────────────────────────────

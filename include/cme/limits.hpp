@@ -8,8 +8,8 @@
 // ceiling is a copy that can disagree, and nothing in a build says which one the region was formatted
 // with.
 //
-// These mirror the kernel's me_layout.h enum me_limits. That header is the origin; this one is how
-// userspace reads it, and the two are checked against each other where the region is formatted.
+// Fixed at build time, not read from the region. Both halves of a deployment therefore have to compile
+// the same values, and a region formatted against one set and opened against another would not say so.
 
 #pragma once
 

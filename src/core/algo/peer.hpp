@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -58,18 +59,28 @@ public:
     // ── participation (opt-in) ─────────────────────────────────────
     // lock() on non-joined domain throws NotParticipatingError.
     // leaveDomain throws it when sole participant. JoinError on range/corrupt.
-    void joinDomain(DomainId domainId);
-    void leaveDomain(DomainId domainId);
+    //
+    // @expectedIncarnation refuses a slot that changed hands since the caller resolved the name it used.
+    // Compared under the control lock, which is what create and delete take, so the answer is final.
+    // nullopt for a caller naming a raw slot: an index has no incarnation to disagree with.
+    void joinDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation = std::nullopt);
+    void leaveDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation = std::nullopt);
 
     // ── dynamic domain registry ─────────────────────────────────────
     // Create a data domain; acquires control lock internally.
     // Throws DomainExistsError / DomainLimitError / LockTimeoutError.
     [[nodiscard]] DomainId createDomain(std::string_view name);
     // Delete @domainId (dual-lock: target + control). Throws if not sole participant / not holder.
-    void deleteDomain(DomainId domainId);
+    void deleteDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation = std::nullopt);
 
-    // Resolve a domain name to DomainId (live scan). NoDomain if unknown.
-    [[nodiscard]] DomainId resolveDomainName(std::string_view name) const;
+    // Which live slot carries @name, and the incarnation that same visit read. NoDomain and 0 if unknown.
+    // One call for both, because two calls can straddle a delete and create and answer with the
+    // incarnation of the domain that took the slot.
+    [[nodiscard]] DomainId resolveDomainName(std::string_view name, std::uint64_t& outIncarnation) const;
+
+    // The incarnation @domainId's slot carries now, or 0 for a slot holding no live domain. A caller
+    // that kept an id compares this to tell its own domain from whatever claimed the slot after it.
+    [[nodiscard]] std::uint64_t readDomainIncarnation(DomainId domainId) const;
 
     // ── accessors ──────────────────────────────────────────────────
     [[nodiscard]] PeerId getPeerId() const noexcept;

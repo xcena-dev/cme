@@ -36,6 +36,17 @@ namespace cme
 // one without reaching into the internal headers.
 using DomainId = std::uint32_t;
 
+// A domain and the incarnation of the slot it was found in. An index alone cannot say which domain it
+// names: a slot freed and claimed again keeps its index, so an index kept across that would acquire
+// whatever took the slot and report nothing. The incarnation is what refuses instead.
+// Zero names no domain: a free slot reads zero, so a default-constructed handle is refused rather than
+// matching one.
+struct DomainHandle_t
+{
+    DomainId id;
+    std::uint64_t incarnation;
+};
+
 // Successor-policy kind. Recorded in region header; joiners use matching impl.
 //   Order      -- token-ring, fair under symmetric load
 //   Request    -- hand-raise / grant, lower latency under bursts (default)
@@ -170,18 +181,22 @@ public:
     void joinDomain(std::string_view name);
     void leaveDomain(std::string_view name);
 
-    // ── by index ────────────────────────────────────────────────────
-    // The index a name resolves to. Resolving by name walks the region's domain records, so a caller
+    // ── by handle ───────────────────────────────────────────────────
+    // The handle a name resolves to. Resolving by name walks the region's domain records, so a caller
     // that locks the same domain repeatedly pays that walk once here. Throws UnknownDomainError.
-    [[nodiscard]] DomainId resolveDomain(std::string_view name) const;
+    [[nodiscard]] DomainHandle_t resolveDomain(std::string_view name) const;
 
-    // Acquire by index, without the walk. The index is the caller's to keep valid: a domain that was
-    // deleted and whose slot was claimed again answers for whatever is in it now, and says nothing.
-    [[nodiscard]] Guard lock(DomainId domainId);
+    // Acquire by handle, without the walk. A handle whose domain was deleted throws UnknownDomainError
+    // rather than acquiring the domain that took its slot.
+    //
+    // The incarnation is compared once before the turn and once with it held. Only the second decides:
+    // deleting a domain takes its lock, so nothing can replace the domain under a granted turn.
+    [[nodiscard]] Guard lock(DomainHandle_t handle);
 
-    // The bounded form of the same, so a caller that resolved once has both shapes by index.
+    // The bounded form of the same, so a caller that resolved once has both shapes by handle. nullopt is
+    // the timeout alone; a handle that names no live domain throws, as it does through lock.
     [[nodiscard]] std::optional<Guard>
-    tryLock(DomainId domainId, std::chrono::nanoseconds timeout = std::chrono::seconds{5});
+    tryLock(DomainHandle_t handle, std::chrono::nanoseconds timeout = std::chrono::seconds{5});
 
     // ── dynamic domains (create / delete) ───────────────────────────
     // Serialised via control domain. Throws DomainExistsError / DomainLimitError.

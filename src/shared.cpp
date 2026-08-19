@@ -87,15 +87,56 @@ struct Session::Impl
     Geometry geometry;
     std::unique_ptr<Peer> peer;
 
-    // Resolve name to Active domain id; throws UnknownDomainError on miss.
-    [[nodiscard]] DomainId resolveDomainName(std::string_view name) const
+    // Resolve name to Active domain id and the incarnation that slot carried; UnknownDomainError on miss.
+    // One walk answers both words. Read by two calls, a delete and create between them pair the slot
+    // with the incarnation of whatever took it, and that pair names a domain nobody resolved.
+    [[nodiscard]] DomainHandle_t resolveHandle(std::string_view name) const
     {
-        const DomainId domainId = peer->resolveDomainName(name);
+        std::uint64_t incarnation = 0;
+        const DomainId domainId = peer->resolveDomainName(name, incarnation);
         if (isNoDomain(domainId))
         {
             throw UnknownDomainError{std::string{"cme: unknown domain: "} + std::string{name}};
         }
-        return domainId;
+        return DomainHandle_t{domainId, incarnation};
+    }
+
+    // A handle naming a slot that now holds another domain would otherwise acquire that one and answer
+    // as if it were the domain the caller resolved.
+    //
+    // Zero is refused without asking the region. A free slot reads 0, so a handle carrying 0 compares
+    // equal to a slot holding no domain at all.
+    void refuseStaleHandle(DomainHandle_t handle) const
+    {
+        if (handle.incarnation == 0 || peer->readDomainIncarnation(handle.id) != handle.incarnation)
+        {
+            throw UnknownDomainError{"cme: the domain this handle named is gone"};
+        }
+    }
+
+    // Called once before the acquire and once with the turn held. The first refusal saves a turn nobody
+    // wants; only the second is final, because deleting a domain takes its lock and so cannot run
+    // between the check and the grant once that lock is ours.
+    [[nodiscard]] PeerGuard lockByHandle(DomainHandle_t handle) const
+    {
+        refuseStaleHandle(handle);
+        auto peerGuard = peer->lock(handle.id);  // throws LockTimeoutError
+        refuseStaleHandle(handle);
+        return peerGuard;
+    }
+
+    // The same pair around a tryLock. A timeout stays nullopt; a handle whose domain went is refused
+    // with the error lock throws, because the caller asked for a domain and there is none to wait for.
+    [[nodiscard]] std::optional<PeerGuard> tryLockByHandle(DomainHandle_t handle, timing::Nanos timeout) const
+    {
+        refuseStaleHandle(handle);
+        auto peerGuardOpt = peer->tryLock(handle.id, timeout);
+        if (!peerGuardOpt)
+        {
+            return std::nullopt;
+        }
+        refuseStaleHandle(handle);
+        return peerGuardOpt;
     }
 };
 
@@ -140,40 +181,43 @@ Guard Session::lock(std::string_view name)
     {
         throw JoinError{"cme::Session::lock: session not joined"};
     }
-    auto peerGuard = impl_->peer->lock(impl_->resolveDomainName(name));  // throws LockTimeoutError
+    // Through a handle, not straight to the id the walk found. A name resolved to a bare id has the same
+    // window the handle exists to close: the slot can change hands before the turn is granted.
+    auto peerGuard = impl_->lockByHandle(impl_->resolveHandle(name));  // throws LockTimeoutError
     auto guardImpl = std::make_unique<Guard::Impl>();
     guardImpl->peerGuard = std::move(peerGuard);
     return Guard{std::move(guardImpl)};
 }
 
-DomainId Session::resolveDomain(std::string_view name) const
+DomainHandle_t Session::resolveDomain(std::string_view name) const
 {
     if (!impl_)
     {
         throw JoinError{"cme::Session::resolveDomain: session not joined"};
     }
-    return impl_->resolveDomainName(name);
+
+    return impl_->resolveHandle(name);
 }
 
-Guard Session::lock(DomainId domainId)
+Guard Session::lock(DomainHandle_t handle)
 {
     if (!impl_)
     {
         throw JoinError{"cme::Session::lock: session not joined"};
     }
-    auto peerGuard = impl_->peer->lock(domainId);  // throws LockTimeoutError
+    auto peerGuard = impl_->lockByHandle(handle);
     auto guardImpl = std::make_unique<Guard::Impl>();
     guardImpl->peerGuard = std::move(peerGuard);
     return Guard{std::move(guardImpl)};
 }
 
-std::optional<Guard> Session::tryLock(DomainId domainId, timing::Nanos timeout)
+std::optional<Guard> Session::tryLock(DomainHandle_t handle, timing::Nanos timeout)
 {
     if (!impl_)
     {
         return std::nullopt;
     }
-    auto peerGuardOpt = impl_->peer->tryLock(domainId, timeout);
+    auto peerGuardOpt = impl_->tryLockByHandle(handle, timeout);
     if (!peerGuardOpt)
     {
         return std::nullopt;
@@ -191,8 +235,7 @@ std::optional<Guard> Session::tryLock(std::string_view name,
         return std::nullopt;
     }
     // Unknown/deleted name throws (same as lock()); nullopt is timeout-only.
-    const DomainId domainId = impl_->resolveDomainName(name);
-    auto peerGuardOpt = impl_->peer->tryLock(domainId, timeout);
+    auto peerGuardOpt = impl_->tryLockByHandle(impl_->resolveHandle(name), timeout);
     if (!peerGuardOpt)
     {
         return std::nullopt;
@@ -208,7 +251,8 @@ void Session::joinDomain(std::string_view name)
     {
         throw JoinError{"cme::Session::joinDomain: session not joined"};
     }
-    impl_->peer->joinDomain(impl_->resolveDomainName(name));
+    const DomainHandle_t handle = impl_->resolveHandle(name);
+    impl_->peer->joinDomain(handle.id, handle.incarnation);
 }
 
 void Session::leaveDomain(std::string_view name)
@@ -217,7 +261,8 @@ void Session::leaveDomain(std::string_view name)
     {
         throw JoinError{"cme::Session::leaveDomain: session not joined"};
     }
-    impl_->peer->leaveDomain(impl_->resolveDomainName(name));
+    const DomainHandle_t handle = impl_->resolveHandle(name);
+    impl_->peer->leaveDomain(handle.id, handle.incarnation);
 }
 
 void Session::createDomain(std::string_view name)
@@ -235,7 +280,8 @@ void Session::deleteDomain(std::string_view name)
     {
         throw JoinError{"cme::Session::deleteDomain: session not joined"};
     }
-    impl_->peer->deleteDomain(impl_->resolveDomainName(name));
+    const DomainHandle_t handle = impl_->resolveHandle(name);
+    impl_->peer->deleteDomain(handle.id, handle.incarnation);
 }
 
 std::vector<std::string> Session::getDomainNames() const
