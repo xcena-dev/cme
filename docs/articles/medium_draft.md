@@ -31,7 +31,7 @@ CME coordinates ownership across hosts so that only the current owner writes to 
 ## No Atomics: Where the Old Road Ends
 
 Most locks eventually depend on one thing: an atomic lock word.
-Spinlocks, ticket locks, MCS locks, futexes, RDMA locks built on NIC atomics — all assume that hardware can select one winner.
+Spinlocks, ticket locks, MCS locks, futexes, RDMA locks built on NIC atomics — all assume that hardware can select exactly one winner.
 
 CXL shared memory cannot do that across hosts.
 Picking a winner takes something that can serialize the attempts.
@@ -94,16 +94,17 @@ The name still says so.
 A mutex answers only the first question.
 A real multi-host deployment has to answer all four.
 
-At that point, we were no longer building a mutex, but **ownership coordination**.
+At that point, we were no longer building a mutex, but an **ownership coordination framework**.
 
 ***
 
-## CME: An Ownership Coordination Framework
+## CME: What Replaces the Mutex
 
 CME ships as a library inside every peer.
-There is no central coordinator.
+There is no central coordinator and no separate service to deploy or keep alive.
 
 All of the coordination state lives in CXL memory itself: who owns what, who is a member, and whatever extra a policy needs.
+That state outlives any individual call or peer.
 
 CME has three parts.
 
@@ -112,10 +113,11 @@ If the core is wrong, two peers write at once.
 
 **The policies** answer the questions that change with the deployment.
 Who goes next. Who counts as dead. Who recovers that peer.
-The core stays the same, and the answers can change.
+The core stays the same.
+The policies can change.
 
 **The engine** runs in the background inside every peer.
-It handles ownership, membership, liveness and recovery.
+It handles ownership, membership, liveness and recovery, even when no application is asking.
 Whenever there is a choice, it asks the policies.
 
 Back to the four questions:
@@ -136,7 +138,8 @@ Back to the four questions:
 The worst case we measured was 64 peers on one hot domain.
 CME acquired ownership in about **144 μs**.
 With the same 64 peers spread over 64 domains, acquire took about **7 μs**.
-Most of the 144 μs was waiting for a busy domain, not coordination work.
+Most of the 144 μs came from waiting for a busy domain, not coordination work.
+CME's cost tracks contention within a domain more than total membership size.
 
 [RDMA locks](https://www.cs.sfu.ca/~tzwang/farlock.pdf) solve the same problem on a different substrate, using NIC atomics.
 That makes them a useful reference point for CME.
@@ -154,7 +157,37 @@ The dashed lines are a ticket lock over RoCE, on different hardware.*
 
 ***
 
-## Wrapping Up
+## Coherence Gives Us Order. It Does Not Give Us Ownership.
+
+CXL 3.x changes the picture.
+Hardware coherence handles much of the visibility and ordering work that CME must manage in a non-coherent system.
+
+But return to where we started:
+
+Host A can write a cacheline.
+Host B can write the same cacheline.
+
+Both stores work.
+But whose write survives?
+
+Coherence can order those writes.
+It can even bring atomics back, and a lock word with them.
+
+A lock word answers only the first of the four questions.
+So did classical DME.
+
+The other three still stand.
+Who takes over after a crash?
+Who tracks peers as they come and go?
+Who keeps coordination running when no one is asking?
+
+Shared memory is not a mutex.
+Coherence is not ownership.
+That is why CME exists.
+
+***
+
+## What This Means
 
 CXL gave us shared memory.
 It did not give us cross-host atomics.
@@ -168,8 +201,16 @@ The owner is written down.
 What remains is deciding who goes next, who takes over when an owner crashes, and who keeps ownership moving as peers come and go.
 
 That is CME.
+It is why we stopped calling it a mutex.
+
+One future direction is a node-local daemon.
+It arbitrates the contention inside its own node, so what reaches CXL memory is one peer per node rather than one per process.
 
 The technical report has the rest: memory model, formal specification, recovery, implementation, policies, and full evaluation.
+
+Code: https://github.com/xcena-dev/cme
+
+Technical report: https://github.com/xcena-dev/cme/blob/main/docs/design/technical_report.md
 
 ***
 

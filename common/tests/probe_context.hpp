@@ -54,13 +54,26 @@ public:
     // reject a %u handed a 64-bit value.
     [[gnu::format(printf, 3, 4)]] bool checkf(bool held, const char* format, ...)
     {
-        std::printf("  %s : ", held ? "OK  " : "FAIL");
         std::va_list args;
         va_start(args, format);
-        // The va_list checker loses the va_start above when this header is analysed through another one.
+        const bool answer = checkv(held, format, args);
+        va_end(args);
+        return answer;
+    }
+
+    // checkf's body, taking a list a caller already started. A varargs function cannot forward its
+    // own arguments, so a caller with its own checkf reaches this rather than writing the line, the
+    // tally and the flush again. printf and vprintf are split for the same reason.
+    //
+    // The 0 says the values cannot be checked from here, which is what a va_list means: the format
+    // string is still checked for being a valid one, and its arguments were checked at the checkf
+    // that started the list.
+    [[gnu::format(printf, 3, 0)]] bool checkv(bool held, const char* format, std::va_list args)
+    {
+        std::printf("  %s : ", held ? "OK  " : "FAIL");
+        // The va_list checker loses the va_start when it reaches this through another header.
         // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
         std::vprintf(format, args);
-        va_end(args);
         std::fputc('\n', stdout);
         std::fflush(stdout);
         if (!held)

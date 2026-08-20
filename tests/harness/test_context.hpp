@@ -31,6 +31,7 @@
 #include "config_reader.hpp"
 #include "test_memory.hpp"
 #include "test_options.hpp"
+#include "tests/probe_context.hpp"
 
 namespace harness
 {
@@ -251,14 +252,12 @@ public:
     // every invariant it broke rather than only the first.
     // Returns @cond, so a case whose later steps depend on this one can write
     // `if (!ctx.check(...)) { return; }`. Most callers ignore it and keep going.
+    //
+    // Delegated, all four: what a probe records and what a case records are the same thing, and two
+    // copies of it are two line shapes a reader has to compare to know they agree.
     bool check(bool cond, const char* msg)
     {
-        std::printf("  %s : %s\n", cond ? "OK  " : "FAIL", msg);
-        if (!cond)
-        {
-            ++failures_;
-        }
-        return cond;
+        return verdict_.check(cond, msg);
     }
 
     // check() for a message that has to carry a runtime value. Same verdict, same tally, same
@@ -266,26 +265,17 @@ public:
     // makes the compiler reject a %u handed a 64-bit value.
     [[gnu::format(printf, 3, 4)]] bool checkf(bool cond, const char* fmt, ...)
     {
-        std::printf("  %s : ", cond ? "OK  " : "FAIL");
         va_list args;
         va_start(args, fmt);
-        // The va_list checker loses the va_start above when this header is analysed through another one.
-        // NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized)
-        std::vprintf(fmt, args);
+        const bool answer = verdict_.checkv(cond, fmt, args);
         va_end(args);
-        std::fputc('\n', stdout);
-        std::fflush(stdout);
-        if (!cond)
-        {
-            ++failures_;
-        }
-        return cond;
+        return answer;
     }
 
     // For a run that prints its own failure line and only needs the tally.
     void recordFailure() noexcept
     {
-        ++failures_;
+        verdict_.recordFailure();
     }
 
     // End the run as skipped. Asked before any check, since a case that reaches its assertions on
@@ -298,7 +288,7 @@ public:
     // Read by runCase alone. A run can add to the tally and cannot take anything off it.
     [[nodiscard]] std::int32_t failures() const noexcept
     {
-        return failures_;
+        return verdict_.failures();
     }
 
     // ── what the harness did not take ──────────────────────────────────
@@ -317,7 +307,7 @@ private:
     // Declaration order is the contract. parse() fills opts_, config_ reads the file it
     // names, the medium is built from both, and the policy is read off the flags last.
     Options_t opts_{};
-    std::int32_t failures_{0};
+    probe::Context verdict_;
     int argc_;
     char** argv_;
     ConfigReader config_;
