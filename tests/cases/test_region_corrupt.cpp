@@ -110,7 +110,7 @@ void checkJoinRecordCleared(harness::TestContext& ctx)
     // has to take that lock from it.
     auto holder = harness::makePeer(region, 0);
     auto bystander = harness::makePeer(region, 1);
-    const cme::DomainId lane = holder.createDomain(Domain);
+    const cme::DomainId lane = holder.createDomain(Domain).id;
 
     clearMagic(region.getDomainRecord(lane), coherency);
 
@@ -136,7 +136,7 @@ void checkHeldRecordCleared(harness::TestContext& ctx)
     auto region = harness::createRegion(FormatDomains, FormatPeers);
 
     auto holder = harness::makePeer(region, 0);
-    const cme::DomainId lane = holder.createDomain(Domain);
+    const cme::DomainId lane = holder.createDomain(Domain).id;
     {
         // The creator is holder, so this one comes off the resident fast path. Without it the
         // timeout below would not distinguish a dropped belief from a domain never acquired.

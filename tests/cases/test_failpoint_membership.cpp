@@ -75,7 +75,8 @@ struct RoundResult_t
     RoundResult_t result;
     if (!killAMemberAt(boundary, takeDomain))
     {
-        std::printf("  the victim left without reaching %s\n", cme::failpoint::nameOf(boundary));
+        std::printf("  the victim left without reaching %s\n",
+                    cme::failpoint::readName(boundary));
         return result;  // nothing crashed, so what follows would be about a clean departure
     }
 
@@ -98,7 +99,7 @@ struct RoundResult_t
         std::printf("  the survivor could not take the domain back: %s\n", error.what());
     }
 
-    std::printf("  %s: slot %s, domain %s\n", cme::failpoint::nameOf(boundary),
+    std::printf("  %s: slot %s, domain %s\n", cme::failpoint::readName(boundary),
                 result.freed ? "reached None" : "never reached None",
                 result.reacquired ? "came back" : "did not come back");
     return result;

@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "cme/shared.hpp"
+#include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/policy/successor.hpp"
@@ -41,6 +42,10 @@ constexpr const char* OtherDomain = "lane1";  // the guard move-assign needs two
 // 3 = control(0) + the two data domains the guard case holds at once.
 constexpr std::uint32_t FormatDomains = 3;
 constexpr std::uint32_t FormatPeers = 4;
+
+// How long the observing peer is given to take the domain the assignment released. Wide enough for
+// the holder's poll cycle to carry the grant across.
+constexpr timing::Millis ReleaseWindow{3'000};
 
 // Every strategy the public enum offers. Kept here rather than derived from a count, so adding a
 // kind to the enum without teaching the factory about it fails this case instead of being skipped.
@@ -93,6 +98,11 @@ void checkGuardMoveAssign(harness::TestContext& ctx)
     session.createDomain(Domain);
     session.createDomain(OtherDomain);
 
+    // A second peer, because the release the assignment owes is not observable from the peer that
+    // held the guard: its own token makes a re-acquire of its own domain a resident fast path.
+    auto observer = harness::openSession();
+    observer.joinDomain(Domain);
+
     // Two shapes, because what the target already holds decides what the assignment has to do.
     // An empty target only takes the source's domain. A live one gives its own back first.
     {
@@ -111,12 +121,17 @@ void checkGuardMoveAssign(harness::TestContext& ctx)
         // compile: a check for it could not fail, and a check that cannot fail is not one.
         holder = std::move(donor);
         ctx.check(static_cast<bool>(holder), "guard move assignment: the target holds a domain");
+
+        // The overwritten domain has to be free while the target still holds the source's. An
+        // assignment that swaps the pointer without destroying the pointee leaves it pinned, and
+        // the observer's deadline is the only place that shows.
+        const auto observed = observer.tryLock(Domain, ReleaseWindow);
+        ctx.check(observed.has_value(),
+                  "guard move assignment: another peer takes the overwritten domain");
     }
 
     // Both Guards are gone now. A release that ran twice or not at all shows up here: the first
-    // leaves a domain unowned mid-transfer, the second leaves it pinned. Whether the assignment
-    // released Domain at the moment it overwrote the holder is not observable from one peer, since
-    // this peer's own token makes a re-acquire of its own domain a resident fast path.
+    // leaves a domain unowned mid-transfer, the second leaves it pinned.
     const auto reacquired = session.lock(Domain);
     ctx.check(static_cast<bool>(reacquired), "after the assignment: the overwritten domain locks");
     const auto other = session.lock(OtherDomain);
@@ -137,7 +152,7 @@ void checkPeerMove(harness::TestContext& ctx)
                                         cme::Geometry::FormatOpts_t{ctx.strategy()});
 
     auto origin = harness::makePeer(region, 0);
-    const cme::DomainId lane = origin.createDomain("lane1");
+    const cme::DomainId lane = origin.createDomain("lane1").id;
     origin.joinDomain(lane);
 
     cme::Peer moved{std::move(origin)};

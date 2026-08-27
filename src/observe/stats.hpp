@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 #include "common/timing.hpp"
@@ -34,7 +33,7 @@ struct TelemetrySnapshot_t
     std::uint64_t transferOnRelease, transferOnPoll;
 
     // Indexed by trace::LatencyStage; mirrors PeerTelemetry::handoffLat.
-    static constexpr std::size_t LatCount = static_cast<std::size_t>(trace::LatencyStage::Count);
+    static constexpr std::uint32_t LatCount = static_cast<std::uint32_t>(trace::LatencyStage::Count);
     struct
     {
         std::uint64_t cycles[LatCount];

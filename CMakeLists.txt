@@ -159,7 +159,9 @@ target_compile_definitions(cme
 target_compile_options(cme PRIVATE
     -Wall -Wextra -Wshadow -Wpointer-arith
     -Wnon-virtual-dtor -Wold-style-cast
+    -Wconversion -Wsign-conversion
     -Wno-unused-parameter
+    -Werror
 )
 
 # The ISA the 64B slot access needs, carried as its own target so that a bench which
@@ -188,9 +190,11 @@ target_link_libraries(cme PUBLIC
 # The app warning set, carried as an INTERFACE target rather than a plain
 # variable: a variable reads as empty in any subdirectory added before it is
 # set, and does so silently. The library itself is stricter (see above).
+# -Wconversion and -Werror because a width this tree owns is fixed and a narrowing is a value cut in
+# silence. The one place a narrowing is intended carries an explicit cast, which these do not flag.
 add_library(cme_app_warnings INTERFACE)
 target_compile_options(cme_app_warnings INTERFACE
-    -Wall -Wextra -Wno-unused-parameter)
+    -Wall -Wextra -Wconversion -Wsign-conversion -Wno-unused-parameter -Werror)
 
 # Harness support: the headers that read config.yaml, and where that file lives.
 # Not part of the shipped library -- libcme reads no configuration of its own.

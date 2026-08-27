@@ -10,6 +10,7 @@
 
 #include <dirent.h>
 
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -85,9 +86,8 @@ void runBody(harness::TestContext& ctx)
     const std::int64_t fdsAfter = countProcEntries("fd");
     const std::int64_t threadsAfter = countProcEntries("task");
 
-    std::printf("%u cycles: fd %lld -> %lld, threads %lld -> %lld\n", Cycles,
-                static_cast<long long>(fdsBefore), static_cast<long long>(fdsAfter),
-                static_cast<long long>(threadsBefore), static_cast<long long>(threadsAfter));
+    std::printf("%u cycles: fd %" PRId64 " -> %" PRId64 ", threads %" PRId64 " -> %" PRId64 "\n",
+                Cycles, fdsBefore, fdsAfter, threadsBefore, threadsAfter);
 
     ctx.check(fdsAfter - fdsBefore <= Slack, "no file descriptor was left open per cycle");
     ctx.check(threadsAfter - threadsBefore <= Slack, "no thread was left running per cycle");

@@ -61,8 +61,8 @@ static_assert(sizeof(LatencyNames) / sizeof(LatencyNames[0]) == static_cast<std:
 
 [[nodiscard]] inline const char* getLatencyName(LatencyStage stage) noexcept
 {
-    const auto index = static_cast<std::size_t>(stage);
-    return index < static_cast<std::size_t>(LatencyStage::Count) ? LatencyNames[index] : "?";
+    const auto index = static_cast<std::uint32_t>(stage);
+    return index < static_cast<std::uint32_t>(LatencyStage::Count) ? LatencyNames[index] : "?";
 }
 
 }  // namespace cme::trace
@@ -109,13 +109,13 @@ void writeJsonl(const char* path, double clockGhz) noexcept;
 
 // stage = bare LatencyStage value name (e.g. Hold); the macro adds the qualifier and
 // indexes the handoffLat arrays. Mirrors the OBSERVE_EVENT(Event::X) style.
-#define CME_LAT_ADD(peerState, stage, deltaCycles)                                                  \
-    do                                                                                              \
-    {                                                                                               \
-        auto& handoffLat = (peerState).getTelemetry().handoffLat;                                   \
-        const std::size_t stageIndex = static_cast<std::size_t>(::cme::trace::LatencyStage::stage); \
-        handoffLat.cycles[stageIndex].fetch_add((deltaCycles), std::memory_order_relaxed);          \
-        handoffLat.count[stageIndex].fetch_add(1, std::memory_order_relaxed);                       \
+#define CME_LAT_ADD(peerState, stage, deltaCycles)                                             \
+    do                                                                                         \
+    {                                                                                          \
+        auto& handoffLat = (peerState).getTelemetry().handoffLat;                              \
+        const auto stageIndex = static_cast<std::uint32_t>(::cme::trace::LatencyStage::stage); \
+        handoffLat.cycles[stageIndex].fetch_add((deltaCycles), std::memory_order_relaxed);     \
+        handoffLat.count[stageIndex].fetch_add(1, std::memory_order_relaxed);                  \
     } while (0)
 
 // Close the segment opened by OBSERVE_LATENCY_BEGIN(stage): charge counter + draw

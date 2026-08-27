@@ -117,28 +117,37 @@ void checkPeerAcquireReleaseCycles(cme::Geometry& region, cme::DomainId numDomai
     auto peer = harness::makePeer(region, 0);
     ctx.check(peer.getPeerId() == 0, "Peer::getPeerId() matches ctor arg");
 
-    // Create + join the data domains (slots 1..numDomains-1); slot 0 is
-    // control (joined by default). Opt-in: createDomain alone does not
-    // participate, so join before locking.
+    // Create the data domains (slots 1..numDomains-1); slot 0 is control, seeded at open.
+    // createDomain joins its creator, so the joinDomain here is idempotent rather than required.
     for (cme::DomainId domainId = 1; domainId < numDomains; ++domainId)
     {
-        peer.joinDomain(peer.createDomain("lane" + std::to_string(domainId)));
+        peer.joinDomain(peer.createDomain("lane" + std::to_string(domainId)).id);
     }
 
     // Single-peer ORDER strategy: peer 0 holds control (genesis) +
     // every domain it created (no contention); acquire/release should
     // round-trip without ever hitting the 5 s deadline.
-    for (int i = 0; i < 100; ++i)
+    //
+    // The record is read inside the hold, not the guard alone: a lock() that hands back an empty
+    // guard raises nothing here, and only the truth line says the acquire reached the region.
+    constexpr int Cycles = 100;
+    bool heldEveryCycle = true;
+    for (int cycle = 0; cycle < Cycles; ++cycle)
     {
         auto guard = peer.lock(0);
+        heldEveryCycle = heldEveryCycle && static_cast<bool>(guard) &&
+                         harness::readDomainRecord(region, 0).isHeldBy(0);
     }
-    ctx.check(true, "100 acquire/release cycles on domain 0 (no timeout)");
+    ctx.check(heldEveryCycle, "100 cycles on domain 0, each with the record naming peer 0");
 
+    bool heldEveryDomain = true;
     for (cme::DomainId domainId = 0; domainId < numDomains; ++domainId)
     {
         auto guard = peer.lock(domainId);
+        heldEveryDomain = heldEveryDomain && static_cast<bool>(guard) &&
+                          harness::readDomainRecord(region, domainId).isHeldBy(0);
     }
-    ctx.check(true, "acquire/release each domain once");
+    ctx.check(heldEveryDomain, "each domain acquired once, with the record naming peer 0");
 }
 
 // ORDER strategy: create -> joiner attach -> inspector read -> Peer acquire/release, all on
@@ -152,7 +161,10 @@ void checkOrderStrategyRoundTrip(const std::string& shmUri, cme::DomainId numDom
     checkJoinerSeesSameHeader(shmUri, hdr, ctx);
     checkInspectorMatchesHeader(shmUri, hdr, numDomains, maxPeers, ctx);
     checkPeerAcquireReleaseCycles(region, numDomains, ctx);
-    ctx.check(true, "Peer dtor returned without crash");
+
+    // The peer above went out of scope with the call, so the slot is what its destructor left.
+    ctx.check(harness::hasMemberStatus(region, 0, cme::Geometry::Member_t::Status::None),
+              "the Peer destructor gave slot 0 back as None");
 }
 
 // REQUEST strategy single-peer round-trip, on its own region so it does not reuse the
@@ -167,18 +179,26 @@ void checkRequestStrategyRoundTrip(cme::DomainId numDomains, cme::PeerId maxPeer
     auto peer = harness::makePeer(region, 0);
     for (cme::DomainId domainId = 1; domainId < numDomains; ++domainId)
     {
-        peer.joinDomain(peer.createDomain("lane" + std::to_string(domainId)));
+        peer.joinDomain(peer.createDomain("lane" + std::to_string(domainId)).id);
     }
-    for (int i = 0; i < 100; ++i)
+    constexpr int Cycles = 100;
+    bool heldEveryCycle = true;
+    for (int cycle = 0; cycle < Cycles; ++cycle)
     {
         auto guard = peer.lock(0);
+        heldEveryCycle = heldEveryCycle && static_cast<bool>(guard) &&
+                         harness::readDomainRecord(region, 0).isHeldBy(0);
     }
-    ctx.check(true, "REQUEST: 100 acquire/release cycles on domain 0");
+    ctx.check(heldEveryCycle, "REQUEST: 100 cycles on domain 0, each with the record naming peer 0");
+
+    bool heldEveryDomain = true;
     for (cme::DomainId domainId = 0; domainId < numDomains; ++domainId)
     {
         auto guard = peer.lock(domainId);
+        heldEveryDomain = heldEveryDomain && static_cast<bool>(guard) &&
+                          harness::readDomainRecord(region, domainId).isHeldBy(0);
     }
-    ctx.check(true, "REQUEST: acquire/release each domain once");
+    ctx.check(heldEveryDomain, "REQUEST: each domain acquired once, with the record naming peer 0");
 }
 
 // Memory backends do not auto-unlink on dtor, so after an explicit shm_unlink, a fresh joiner

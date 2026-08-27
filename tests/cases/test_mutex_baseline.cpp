@@ -342,7 +342,7 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
 {
     const timing::Stopwatch sweep;
     const int failures = runPeers(opt, region);
-    // Constructed, not counted: countIn answers an integer count, so asking it for fractional seconds
+    // Constructed, not counted: getTicks answers an integer count, so asking it for fractional seconds
     // floors the span, and the throughput below divides by it.
     const double wallSec = timing::SecsF{sweep.elapsed()}.count();
 

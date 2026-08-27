@@ -99,35 +99,40 @@ void checkGracefulHandoff(harness::TestContext& ctx)
     auto region = makeAggRegion(ctx);
     harness::seedDataDomains(region, NumDomains);
 
-    // format seeds group g's record with peer g, so group1 opens naming peer 1. The seeding
-    // creator above took slot 0 and left, which is why group0's is the one that starts at NoPeer.
     auto peers = harness::makePeers(region, MaxPeers, NumDomains);
     const bool ready = harness::waitUntil(
         [&region]
         {
-            return harness::hasMemberStatus(region, 3, cme::Geometry::Member_t::Status::Active);
+            return harness::hasMemberStatus(region, 1, cme::Geometry::Member_t::Status::Active) &&
+                   harness::hasMemberStatus(region, 3, cme::Geometry::Member_t::Status::Active);
         },
         ActiveWaitMs);
-    if (!ctx.check(ready, "peer 3 is Active before its group's aggregator leaves"))
-    {
-        return;
-    }
-    if (!ctx.check(readAggregatorPeerId(region, 1, ctx.coherency()) == 1,
-                   "group1 opens with its format-seeded aggregator, peer 1"))
+    if (!ctx.check(ready, "both group1 members are Active before their aggregator leaves"))
     {
         return;
     }
 
-    peers[1].reset();  // the destructor is the graceful leave
+    // Which member holds the duty is the peers' to settle: format seeds the record with peer g, and
+    // a member's poll tick volunteers for a duty it reads as vacant. Read the holder, do not name it.
+    const cme::PeerId opened = readAggregatorPeerId(region, 1, ctx.coherency());
+    if (!ctx.checkf(opened == 1 || opened == 3, "group1 opens on one of its members (peer %u)",
+                    opened))
+    {
+        return;
+    }
 
-    // Polled, not read once: a handoff that lands on NoPeer is corrected by peer 3's next tick,
+    const cme::PeerId partner = groupPartner(opened);
+    peers[opened].reset();  // the destructor is the graceful leave
+
+    // Polled, not read once: a handoff that lands on NoPeer is corrected by the partner's next tick,
     // and settling on the live member is the property, not which write got there first.
     const cme::PeerId handedTo = pollAggregatorUntil(
-        region, 1, ctx.coherency(), HandoffWaitMs, [](cme::PeerId aggregator)
+        region, 1, ctx.coherency(), HandoffWaitMs, [partner](cme::PeerId aggregator)
         {
-            return aggregator == 3;
+            return aggregator == partner;
         });
-    ctx.checkf(handedTo == 3, "group1 settles on live member peer 3 once peer 1 leaves (got %u)",
+    ctx.checkf(handedTo == partner,
+               "group1 settles on live member peer %u once peer %u leaves (got %u)", partner, opened,
                handedTo);
 }
 

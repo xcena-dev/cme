@@ -11,6 +11,9 @@
 // last locker, so a random pick migrates with prob ~(N-1)/N and the rest are resident
 // re-locks; we report the split, and --force-migrate makes every pick a migration.
 //
+// The latency numbers are reported, not gated. The gate is that every measured acquire arrived
+// inside its deadline, which nothing here should be able to miss with no second locker.
+//
 // Backend via --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 // Strategy via --order|--request|--request-agg|--peterson (default request).
 //
@@ -232,7 +235,7 @@ void oneAcquire(const Opts_t& opt, Baton_t& baton, DriveState_t& state, std::uin
         }
         else
         {
-            const std::uint32_t sampleNs = baton.resultNs.load(std::memory_order_relaxed);
+            const std::uint64_t sampleNs = baton.resultNs.load(std::memory_order_relaxed);
             state.latAll.push_back(sampleNs);
             (migrate ? state.latMigrate : state.latResident).push_back(sampleNs);
         }
@@ -357,8 +360,10 @@ void runBody(harness::TestContext& ctx)
     printReport(opt, dataDomains, state, ctx.backendName());
     writeCsvRow(opt, dataDomains, state);
 
-    // Bench, not a pass/fail gate: the only thing that fails it is nothing completing.
-    ctx.check(!(state.latAll.empty() && state.timeouts > 0), "at least one acquire completed");
+    // The distribution above is reported, not gated. What is gated is the handoff: nothing
+    // contends here, so an acquire that spent its whole deadline waiting is a handoff defect.
+    ctx.check(state.timeouts == 0 && state.latAll.size() == opt.iters,
+              "every measured acquire completed inside its deadline");
 }
 
 }  // namespace test

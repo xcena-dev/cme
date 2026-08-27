@@ -13,6 +13,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry_profile.hpp"
@@ -39,6 +40,10 @@ namespace
 // ~1.03 MB, so ~16k lines at the measured 94-320 ns marginal flush, i.e. 1.5-5 ms against a
 // 5 s format timeout.
 inline constexpr CoherencyMode FormatCoherency = CoherencyMode::Flush;
+
+// The gap between looks while waiting for a formatter to stamp the header. What is waited on is
+// another process finishing a one-time write, so the look is cheap and the wait can be coarse.
+inline constexpr timing::Millis HeaderPollGap{10};
 
 [[nodiscard]] bool isHeaderReady(void* base, CoherencyMode mode) noexcept
 {
@@ -194,11 +199,11 @@ void Geometry::bindBlocking(timing::Millis timeout, CoherencyMode mode)
     {
         throw RegionInvalidError{"cme::Geometry::bindBlocking: region not mapped"};
     }
-    if (!waitUntil([base, mode]
-                   {
-                       return isHeaderReady(base, mode);
-                   },
-                   timeout))
+    if (!poll::waitUntil([base, mode]
+                         {
+                             return isHeaderReady(base, mode);
+                         },
+                         timeout, HeaderPollGap))
     {
         throw RegionNotFormattedError{
             "cme::Geometry::bindBlocking: region not formatted within timeout"};

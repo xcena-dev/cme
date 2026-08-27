@@ -69,7 +69,9 @@ public:
     // ── dynamic domain registry ─────────────────────────────────────
     // Create a data domain; acquires control lock internally.
     // Throws DomainExistsError / DomainLimitError / LockTimeoutError.
-    [[nodiscard]] DomainId createDomain(std::string_view name);
+    // Answers the handle the create wrote, both halves from that one visit: a later read of the slot
+    // could find the incarnation of whatever took it after this domain.
+    [[nodiscard]] DomainHandle_t createDomain(std::string_view name);
     // Delete @domainId (dual-lock: target + control). Throws if not sole participant / not holder.
     void deleteDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation = std::nullopt);
 

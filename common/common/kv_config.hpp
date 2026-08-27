@@ -87,6 +87,11 @@ public:
     // getU64 in the units the caller keeps. The fallback is the caller's own current value, so a key
     // the file leaves out keeps the default its struct was built with.
     [[nodiscard]] timing::Millis getMillis(const std::string& key, timing::Millis fallback) const;
+    [[nodiscard]] timing::Micros getMicros(const std::string& key, timing::Micros fallback) const;
+
+    // Octal, because a mode written 0660 in a file means what `chmod 660` means and reading it as six
+    // hundred and sixty would silently grant something else.
+    [[nodiscard]] std::uint32_t getMode(const std::string& key, std::uint32_t fallback) const;
 
     [[nodiscard]] bool getBool(const std::string& key, bool fallback) const;
 
@@ -121,8 +126,12 @@ private:
 
     static std::string_view trim(std::string_view text);
     static std::string unquote(std::string_view text);
-    static std::uint64_t indentOf(std::string_view line, std::uint64_t lineNumber, const std::string& origin);
+    static std::uint64_t readIndent(std::string_view line, std::uint64_t lineNumber, const std::string& origin);
     static std::string_view stripComment(std::string_view line);
+
+    // nullopt for a digit outside base 8 or a value above 0777. Apart from getMode(), so the one
+    // refusal it turns into is worded once and outside the loop that finds the fault.
+    [[nodiscard]] static std::optional<std::uint32_t> readOctal(const std::string& written) noexcept;
 
     std::map<std::string, std::string> entries_;
     std::string origin_;
@@ -180,7 +189,7 @@ inline std::string_view KeyValueConfig::stripComment(std::string_view line)
 // Tabs are refused rather than counted. YAML forbids them in indentation, and one tab counted as
 // one column would place a child under the wrong parent without any line looking wrong.
 inline std::uint64_t
-KeyValueConfig::indentOf(std::string_view line, std::uint64_t lineNumber, const std::string& origin)
+KeyValueConfig::readIndent(std::string_view line, std::uint64_t lineNumber, const std::string& origin)
 {
     const std::uint64_t column = line.find_first_not_of(' ');
     if (column != std::string_view::npos && line[column] == '\t')
@@ -208,7 +217,7 @@ inline KeyValueConfig KeyValueConfig::parse(std::istream& input, std::string ori
             continue;
         }
 
-        const std::uint64_t column = indentOf(body, lineNumber, config.origin_);
+        const std::uint64_t column = readIndent(body, lineNumber, config.origin_);
         while (!open.empty() && open.back().column >= column)
         {
             open.pop_back();
@@ -370,6 +379,46 @@ inline std::uint64_t KeyValueConfig::getU64(const std::string& key, std::uint64_
 inline timing::Millis KeyValueConfig::getMillis(const std::string& key, timing::Millis fallback) const
 {
     return timing::Millis{getU64(key, static_cast<std::uint64_t>(fallback.count()))};
+}
+
+inline timing::Micros KeyValueConfig::getMicros(const std::string& key, timing::Micros fallback) const
+{
+    return timing::Micros{getU64(key, static_cast<std::uint64_t>(fallback.count()))};
+}
+
+// Base 8 by hand, since a permission is the one number in these files that is not decimal.
+inline std::optional<std::uint32_t> KeyValueConfig::readOctal(const std::string& written) noexcept
+{
+    std::uint32_t parsed = 0;
+    for (const char digit : written)
+    {
+        if (digit < '0' || digit > '7')
+        {
+            return std::nullopt;
+        }
+        parsed = (parsed * 8) + static_cast<std::uint32_t>(digit - '0');
+        if (parsed > 0777)
+        {
+            return std::nullopt;
+        }
+    }
+    return parsed;
+}
+
+inline std::uint32_t KeyValueConfig::getMode(const std::string& key, std::uint32_t fallback) const
+{
+    const std::string written = getString(key, "");
+    if (written.empty())
+    {
+        return fallback;
+    }
+
+    const std::optional<std::uint32_t> parsed = readOctal(written);
+    if (!parsed)
+    {
+        throw ParseError{origin_ + ": " + key + ": `" + written + "` is not a permission"};
+    }
+    return *parsed;
 }
 
 inline bool KeyValueConfig::getBool(const std::string& key, bool fallback) const

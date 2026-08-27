@@ -60,7 +60,7 @@ void runBody(harness::TestContext& ctx)
     auto holder = harness::makePeer(region, HolderId);
     auto tenant = harness::makePeer(region, TenantId);
 
-    const cme::DomainId lane = holder.createDomain(FirstName);
+    const cme::DomainId lane = holder.createDomain(FirstName).id;
     tenant.joinDomain(lane);
     if (!ctx.check(harness::canLock(tenant, lane, GrantWindow),
                    "the tenant acquires the first incarnation"))
@@ -77,7 +77,7 @@ void runBody(harness::TestContext& ctx)
     ctx.check(!harness::readDomainRecord(region, lane).hasState(cme::Geometry::DomainRecord_t::State::Active),
               "the deleted slot is no longer Active");
 
-    const cme::DomainId reused = holder.createDomain(SecondName);
+    const cme::DomainId reused = holder.createDomain(SecondName).id;
     if (!ctx.checkf(reused == lane, "the new domain lands on slot %u again", lane))
     {
         return;

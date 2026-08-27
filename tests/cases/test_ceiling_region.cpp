@@ -8,8 +8,8 @@
 // mapping, which is the opposite check: that one asserts the refusal, this one asserts the fit.
 //
 // What the ceiling exercises is the layout arithmetic and the shadow indexing at their largest
-// values. ShadowGroupSize is 1, so 64 peers mean 64 shadow groups and 65 record copies per domain,
-// and the waiter below is peer 63 precisely so its shadow is the last one in that block.
+// values. The waiter below is the last member slot precisely so that its shadow is the last copy
+// in the per-domain record block.
 //
 // Registered on every medium rather than shm alone. The arithmetic is medium-independent, but
 // whether the area fits is not: a devdax window is 2 MiB and a uc file is sized by its creator, so
@@ -46,12 +46,16 @@ void runBody(harness::TestContext& ctx)
 
     ctx.checkf(region.getDomainCount() == cme::MaxDomains && region.getPeerCount() == cme::MaxPeers,
                "the region formats at %u domains x %u peers", cme::MaxDomains, cme::MaxPeers);
-    ctx.checkf(cme::Geometry::getRecordsPerDomain(cme::MaxPeers) == cme::MaxPeers + 1,
-               "one truth copy and %u shadows per domain", cme::MaxPeers);
+    // The sizing function against the indexing one, rather than either against a literal: the copy
+    // the last peer polls has to sit inside the block the same dimensions sized.
+    const auto copies = cme::Geometry::getRecordsPerDomain(cme::MaxPeers);
+    const auto lastShadow = cme::Geometry::getGroupIndex(WaiterId) + 1;  // + the truth at index 0
+    ctx.checkf(lastShadow < copies, "the last peer's shadow is copy %u of %u per domain", lastShadow,
+               copies);
 
     auto holder = harness::makePeer(region, HolderId);
     auto waiter = harness::makePeer(region, WaiterId);
-    const cme::DomainId lane = holder.createDomain(Domain);
+    const cme::DomainId lane = holder.createDomain(Domain).id;
     waiter.joinDomain(lane);
 
     const auto granted = waiter.tryLock(lane, GrantWindow);

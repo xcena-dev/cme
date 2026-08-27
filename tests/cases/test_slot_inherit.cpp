@@ -53,8 +53,8 @@ void runBody(harness::TestContext& ctx)
     auto region = harness::createRegion(FormatDomains, FormatPeers);
 
     auto holder = harness::makePeer(region, HolderId);
-    const cme::DomainId firstLane = holder.createDomain(FirstDomain);
-    const cme::DomainId secondLane = holder.createDomain(SecondDomain);
+    const cme::DomainId firstLane = holder.createDomain(FirstDomain).id;
+    const cme::DomainId secondLane = holder.createDomain(SecondDomain).id;
 
     {
         auto tenant = harness::makePeer(region, TenantId);

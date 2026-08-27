@@ -39,18 +39,42 @@ constexpr std::uint32_t RecoveryDeadlineMs = 20000;
 // Cheap enough to repeat: each round costs one recovery, not one grace window per peer.
 constexpr std::uint32_t Rounds = 3;
 
-// Whether the round judged anything, and if so what. Unreached is not a verdict: no crash happened
-// there, so the recovery that follows is a clean departure's and says nothing about this boundary.
-enum class RoundOutcome
+// What one round observed. `crashed` is what tells a verdict from an accident: a round that never
+// reached the boundary saw a clean departure, and its recovery says nothing about this boundary.
+struct RoundResult_t
 {
-    CameBack,
-    Stranded,
-    Unreached,
+    bool crashed;
+    bool shadowAhead;
+    bool cameBack;
 };
+
+// Whether any group's shadow sits above its truth, on any domain. publishDomainRecord writes the
+// shadow first, so one left above the truth is a publish interrupted between the two writes.
+//
+// Every domain, because arm() is per process and not per domain: the holder's own poll cycle
+// transfers the control domain too, and that is the publish the boundary usually lands in.
+[[nodiscard]] bool anyShadowAheadOfTruth(const cme::Geometry& region)
+{
+    for (cme::DomainId domainId = 0; domainId < region.getDomainCount(); ++domainId)
+    {
+        const auto truthEpoch =
+            static_cast<std::uint64_t>(harness::readDomainRecord(region, domainId).epoch);
+        for (cme::PeerId peerId = 0; peerId < region.getPeerCount(); ++peerId)
+        {
+            const auto shadowEpoch = static_cast<std::uint64_t>(
+                harness::readDomainRecordShadow(region, domainId, peerId).epoch);
+            if (shadowEpoch > truthEpoch)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 // One crash and the recovery after it. A fresh region each round, since the residue of one would
 // decide the next.
-[[nodiscard]] RoundOutcome oneRound(cme::failpoint::Boundary boundary)
+[[nodiscard]] RoundResult_t oneRound(cme::failpoint::Boundary boundary)
 {
     harness::formatSession(MaxDomains, MaxPeers);
     {
@@ -78,12 +102,14 @@ enum class RoundOutcome
         // Peterson vacates on release instead of transferring, so a boundary inside
         // transferOwnership can go unreached. The peer then left cleanly and the domain comes back
         // for a reason this case is not about.
-        std::printf("  the holder left without reaching %s\n", cme::failpoint::nameOf(boundary));
-        return RoundOutcome::Unreached;
+        std::printf("  the holder left without reaching %s\n",
+                    cme::failpoint::readName(boundary));
     }
 
+    // Read before the grace window runs out, so the residue is the crash's and not recovery's.
     auto region = harness::openBoundRegion();
     const cme::PeerId named = harness::readDomainRecord(region, Contested).holder;
+    const bool shadowAhead = died && anyShadowAheadOfTruth(region);
 
     bool reclaimed = false;
     const bool got = harness::waitUntil(
@@ -101,40 +127,46 @@ enum class RoundOutcome
             return true;
         },
         RecoveryDeadlineMs);
-    std::printf("  %s: record named peer %u, domain %s\n",
-                cme::failpoint::nameOf(boundary), named,
+    std::printf("  %s: record named peer %u, shadow %s the truth, domain %s\n",
+                cme::failpoint::readName(boundary), named, shadowAhead ? "above" : "level with",
                 got && reclaimed ? "came back" : "did not come back");
-    return got && reclaimed ? RoundOutcome::CameBack : RoundOutcome::Stranded;
+    return {died, shadowAhead, got && reclaimed};
 }
 
 // A domain nobody holds and nobody can reach is the failure both boundaries risk. Rounds, because
 // what varies is not the crash but what the survivor's poll cycle was doing when the residue landed.
+//
+// @shadowExpected says whether this boundary sits between the shadow write and the truth write,
+// which is the residue that tells the two boundaries apart.
 void checkDomainComesBack(harness::TestContext& ctx, cme::failpoint::Boundary boundary,
-                          const char* what)
+                          bool shadowExpected, const char* what)
 {
     bool cameBackEvery = true;
-    std::uint32_t judged = 0;
+    std::uint32_t crashed = 0;
+    std::uint32_t shadowAhead = 0;
     for (std::uint32_t round = 0; round < Rounds; ++round)
     {
-        const RoundOutcome outcome = oneRound(boundary);
-        if (outcome == RoundOutcome::Unreached)
-        {
-            continue;
-        }
-        ++judged;
-        cameBackEvery = (outcome == RoundOutcome::CameBack) && cameBackEvery;
+        const RoundResult_t result = oneRound(boundary);
+        crashed += result.crashed ? 1 : 0;
+        shadowAhead += result.shadowAhead ? 1 : 0;
+        cameBackEvery = result.cameBack && cameBackEvery;
     }
 
     // Peterson's unlock vacates the record where the others hand to a successor, so it never enters
     // transferOwnership and cannot strand a domain there. Named in the line, not in the code, so a
     // second policy going quiet shows up instead of hiding behind a hardcoded exception.
-    if (judged == 0)
+    if (crashed == 0)
     {
-        std::printf("  %s is unreachable under %s, so this round judged nothing\n",
-                    cme::failpoint::nameOf(boundary), ctx.strategySuffix());
+        ctx.checkf(cameBackEvery,
+                   "no round reached %s under %s, and every clean departure left the domain "
+                   "reachable",
+                   cme::failpoint::readName(boundary), ctx.strategySuffix());
         return;
     }
     ctx.check(cameBackEvery, what);
+    ctx.checkf(shadowAhead == (shadowExpected ? crashed : 0),
+               "%s left a shadow above the truth in %u of the %u rounds that crashed there",
+               cme::failpoint::readName(boundary), shadowAhead, crashed);
 }
 
 }  // namespace
@@ -146,9 +178,9 @@ void runBody(harness::TestContext& ctx)
         harness::TestContext::skip("built without CME_FAILPOINT, so nothing would be killed");
     }
 
-    checkDomainComesBack(ctx, BeforePublish,
+    checkDomainComesBack(ctx, BeforePublish, false,
                          "a crash before the record write leaves the domain reachable");
-    checkDomainComesBack(ctx, BeforeTruth,
+    checkDomainComesBack(ctx, BeforeTruth, true,
                          "a crash between the shadow and the truth leaves the domain reachable");
 }
 

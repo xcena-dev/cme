@@ -19,6 +19,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/poll.hpp"
 #include "common/timing.hpp"
 
 namespace harness
@@ -97,16 +98,7 @@ template <typename T_Pred>
 [[nodiscard]] bool waitUntil(T_Pred pred, std::uint32_t deadlineMs,
                              std::uint32_t stepMs = PollStepMs)
 {
-    const timing::Deadline deadline{timing::Millis{deadlineMs}};
-    while (!deadline.expired())
-    {
-        if (pred())
-        {
-            return true;
-        }
-        sleepMs(stepMs);
-    }
-    return pred();
+    return poll::waitUntil(pred, timing::Millis{deadlineMs}, timing::Millis{stepMs});
 }
 
 // Poll @pred for @windowMs and report whether it held the whole time; false the moment it does not.

@@ -8,6 +8,10 @@
 // exercises claimPeerSlot's optimistic protocol and, in particular, that a
 // losing claimer never resets a slot a winner already staked.
 //
+// The claims are aligned on a spin barrier the parent opens only once every child is forked.
+// Without it the claim instants are spread by the fork stagger and by how long each child's
+// open + bindBlocking takes, which is far wider than the window a lost stake needs.
+//
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
 #include <cstdint>
@@ -40,21 +44,27 @@ void runBody(harness::TestContext& ctx)
     static_cast<void>(harness::createRegion(Domains, Claimers));
 
     const auto results = ctx.scratch<std::int32_t>("results", Claimers);
-    if (!results)
+    const auto barrier = ctx.scratch<std::int32_t>("barrier", 1);
+    if (!results || !barrier)
     {
-        ctx.check(false, "shared result buffer mapped");
+        ctx.check(false, "shared result buffer and barrier mapped");
         return;
     }
     results.fill(Unset);
+    __atomic_store_n(barrier.data(), 0, __ATOMIC_RELEASE);
 
     const std::uint32_t spawned = harness::spawnChildren(
         Claimers,
-        [&ctx, &results](std::uint32_t index)
+        [&ctx, &results, &barrier](std::uint32_t index)
         {
             std::int32_t claimed = Failed;
             try
             {
                 auto region = harness::openBoundRegion(timing::Secs{5});
+                while (__atomic_load_n(barrier.data(), __ATOMIC_ACQUIRE) == 0)
+                {
+                    // spin, so the claim below lands with the others rather than after them
+                }
                 claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, ctx.coherency()));
             }
             catch (...)
@@ -63,6 +73,8 @@ void runBody(harness::TestContext& ctx)
             }
             results[index] = claimed;
         });
+
+    __atomic_store_n(barrier.data(), 1, __ATOMIC_RELEASE);  // release every claimer together
 
     harness::reapChildren(spawned);
     if (!ctx.check(spawned == Claimers, "every claimer forked"))

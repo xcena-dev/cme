@@ -205,7 +205,7 @@ void checkPeerArguments(harness::TestContext& ctx)
               "Peer construction rejects a peer id at the ceiling");
 
     auto peer = harness::makePeer(region, 0);
-    const cme::DomainId lane = peer.createDomain(Domain);
+    const cme::DomainId lane = peer.createDomain(Domain).id;
     peer.joinDomain(lane);
 
     // The region has FormatDomains slots, so that count is the first id outside it. NoDomain is the
@@ -301,7 +301,7 @@ void checkMovedFromPeer(harness::TestContext& ctx)
     auto region = harness::createRegion(FormatDomains, FormatPeers);
 
     auto peer = harness::makePeer(region, 0);
-    const cme::DomainId lane = peer.createDomain(Domain);
+    const cme::DomainId lane = peer.createDomain(Domain).id;
     const cme::Peer live{std::move(peer)};
 
     // NOLINTBEGIN(bugprone-use-after-move, clang-analyzer-cplusplus.Move)
@@ -336,12 +336,18 @@ void checkMovedFromPeer(harness::TestContext& ctx)
 // ── flush with nothing to flush ────────────────────────────────────
 // The public flush is what a caller uses on its own payload, so it takes whatever pointer that
 // caller has. A null address or a zero length is a no-op rather than a fenced write of nothing.
+//
+// The two guarded calls have no result to read: they fault if the guards go, and the harness
+// reports the fault. The third is the one with a value behind it, and the sentinel is what makes
+// it worth reading -- a barrier that stores instead of flushing leaves zeroes.
 void checkFlushNoOp(harness::TestContext& ctx)
 {
-    std::uint64_t target = 0;
+    constexpr std::uint64_t Sentinel = 0xA5A5'5A5A'C3C3'3C3Cull;
+    std::uint64_t target = Sentinel;
     cme::flush(nullptr, sizeof(target), ctx.coherency());
     cme::flush(&target, 0, ctx.coherency());
-    ctx.check(target == 0, "flush with no range leaves the target alone");
+    cme::flush(&target, sizeof(target), ctx.coherency());
+    ctx.check(target == Sentinel, "flush leaves the range it was handed unchanged");
 }
 
 // ── participation is opt-in ────────────────────────────────────────
@@ -352,7 +358,7 @@ void checkParticipationRequired(harness::TestContext& ctx)
 {
     auto region = harness::createRegion(FormatDomains, FormatPeers);
     auto owner = harness::makePeer(region, 0);
-    const cme::DomainId lane = owner.createDomain(Domain);
+    const cme::DomainId lane = owner.createDomain(Domain).id;
 
     auto stranger = harness::makePeer(region, 1);  // never joins lane
     const auto lockUnjoined = [&stranger, lane]

@@ -8,7 +8,11 @@
 // per-domain intra-node tier. This test drives both tiers: N sessions x T threads each.
 //
 // Each thread does a non-atomic RMW on one shared counter inside the CS, so both tiers
-// holding means exactly N*T*M; a lost update shows up short. Also asserts bounded-wait.
+// holding means exactly N*T*M; a lost update shows up short.
+//
+// Bounded wait is not counted here. A starved acquire spends lock()'s own deadline and throws,
+// which the exception gate reads; a thread that never returns at all is a ctest TIMEOUT, and no
+// assertion after the join is reached in that run.
 //
 // Strategy from --strategy (helper strategyChoice).
 
@@ -126,7 +130,7 @@ struct Worker_t
 
 // One thread's whole run: itersPerThread sweeps, each locking every data domain once.
 void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
-               std::vector<std::uint32_t>& done, std::vector<std::uint64_t>& localLat)
+               std::vector<std::uint64_t>& localLat)
 {
     std::vector<std::uint32_t> visit(cfg.numDomains);
     for (std::uint32_t k = 0; k < cfg.numDomains; ++k)
@@ -150,14 +154,13 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
                 recordCriticalSection(domainId, acquiring, localLat);
             }
         }
-        ++done[worker.slot];
     }
 }
 
 // The worker index IS the slot: peer p's threads occupy p * threadsPerPeer .. +threadsPerPeer-1,
 // so the flat index carries both and the peer id divides back out of it.
-void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>& done,
-                std::vector<std::uint64_t>& acqLatNs, std::atomic<int>& failures)
+void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint64_t>& acqLatNs,
+                std::atomic<int>& failures)
 {
     std::mutex latMutex;
 
@@ -170,7 +173,7 @@ void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint32_t>&
             {
                 std::vector<std::uint64_t> localLat;
                 localLat.reserve(static_cast<std::size_t>(cfg.itersPerThread) * cfg.numDomains);
-                runSweeps(cfg, tiers, Worker_t{pid, slot}, done, localLat);
+                runSweeps(cfg, tiers, Worker_t{pid, slot}, localLat);
                 const std::lock_guard<std::mutex> merge(latMutex);
                 acqLatNs.insert(acqLatNs.end(), localLat.begin(), localLat.end());
             }
@@ -259,20 +262,13 @@ void runBody(harness::TestContext& ctx)
     // misroute to a not-yet-Active peer and strand the token into starvation timeouts.
     std::this_thread::sleep_for(timing::Millis{100});
 
-    std::vector<std::uint32_t> done(static_cast<std::size_t>(cfg.numPeers) * cfg.threadsPerPeer, 0);
     std::vector<std::uint64_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)
     std::atomic<int> failures{0};
-    runWorkers(cfg, tiers, done, acqLatNs, failures);
+    runWorkers(cfg, tiers, acqLatNs, failures);
 
     const bool meOk = countersMatch(cfg, stratSuffix);
     ctx.check(failures.load() == 0, "every thread ran without exception");
     ctx.check(meOk, "two-tier ME: no lost update (each domain == N*T*M)");
-    ctx.check(std::all_of(done.begin(), done.end(),
-                          [&](std::uint32_t sweeps)
-                          {
-                              return sweeps == cfg.itersPerThread;
-                          }),
-              "bounded-wait: every thread completed all M iters (no starvation)");
 
     reportLatency(cfg, acqLatNs);
     teardown(tiers);

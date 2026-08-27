@@ -10,7 +10,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -123,7 +122,7 @@ public:
     struct DomainRecord_t
     {
         static constexpr std::uint32_t Magic = 0x434D4554u;  // "CMET"
-        static constexpr std::size_t MaxNameLen = MaxDomainNameLen;
+        static constexpr std::uint32_t MaxNameLen = MaxDomainNameLen;
 
         // Active = live domain; Free = reusable spare. createDomain fills Free then
         // flips Active as last write; a mid-write crash leaves it Free (safely reclaimable).

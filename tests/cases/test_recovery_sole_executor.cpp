@@ -5,10 +5,11 @@
 //
 // A second executor would seize a domain the first already re-seized, which is split ownership.
 // The count is RecoveryCompleted, emitted once per executor; rounds, because a fork is a race.
-// Only CME_STATS bumps it, so a default build runs the scenario without asserting the count.
+// Only CME_STATS bumps it, so a build without it leaves by SKIP rather than asserting nothing.
 
 #include <array>
 #include <atomic>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 
@@ -67,11 +68,8 @@ void runBody(harness::TestContext& ctx)
         return;
     }
 
+    // Asked past allPeersJoined, since a worker whose Peer never came up reads as not counting.
     const bool counting = harness::readTelemetry(peers[0]).countersLive;
-    if (!counting)
-    {
-        std::printf("no CME_STATS: the scenario runs, the executor count is not asserted\n");
-    }
 
     bool freedEvery = true;
     bool soleEvery = true;
@@ -98,17 +96,24 @@ void runBody(harness::TestContext& ctx)
         harness::sleepMs(ForkWindowMs);  // let a second executor show up if there is one
         const std::uint64_t executed = totalCompleted(peers) - before;
         soleEvery = soleEvery && executed == 1;
-        std::printf("round %u: peer %u recovered by %llu authority\n", round, dead,
-                    static_cast<unsigned long long>(executed));
+        std::printf("round %u: peer %u recovered by %" PRIu64 " authority\n", round, dead, executed);
     }
 
     ctx.check(freedEvery, "every round's dead peer had its slot freed");
-    if (counting)
-    {
-        ctx.check(soleEvery, "every round was carried through by exactly one authority");
-    }
-
     harness::joinPeerWorkers(peers, MaxPeers);
+
+    // R2 is the subject and the counter is the only place it shows, so a build that keeps no
+    // counters leaves by SKIP rather than reporting the green of a run that asserted it. A failure
+    // already on the tally outranks that: SKIP would take it off.
+    if (!counting)
+    {
+        if (ctx.failures() == 0)
+        {
+            harness::TestContext::skip("built without CME_STATS, so no RecoveryCompleted is counted");
+        }
+        return;
+    }
+    ctx.check(soleEvery, "every round was carried through by exactly one authority");
 }
 
 }  // namespace test

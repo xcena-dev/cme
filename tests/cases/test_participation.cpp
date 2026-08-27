@@ -3,22 +3,26 @@
 //
 // test_participation.cpp -- Phase 2 opt-in participation API.
 //
-// A freshly opened session participates everywhere by default, so the guard is driven by
-// explicitly leaving a domain and re-joining it. Covers:
-//   - default participation: lock works without an explicit join
+// A session locks a domain only after joining it, and createDomain joins its creator. So the
+// guard is driven by a second session that never joined, and by leaving and re-joining. Covers:
+//   - no join -> lock refused
+//   - joinDomain enables lock (re-baseline + re-advertise)
 //   - leaveDomain -> lock / tryLock on that domain now refused
-//   - joinDomain re-enables lock (re-baseline + re-advertise)
 //   - sole-participant leave is refused (would orphan the domain)
-//   - joinDomain idempotent
+//   - joinDomain idempotent: the slot's participation bitmap is unchanged
 //   - unknown domain name -> UnknownDomainError
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 
+#include <cstdint>
 #include <cstdlib>
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
 #include "common/timing.hpp"
+#include "core/domain_bitmap.hpp"
+#include "core/layout/geometry.hpp"
+#include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -26,6 +30,24 @@ namespace test
 {
 namespace
 {
+
+// The owner opens first on a fresh region, so admission gives it the lowest slot. The idempotence
+// check reads that slot, and a wrong index shows up as the whole expected set failing to match.
+constexpr cme::PeerId OwnerPeerId = 0;
+
+// Whether the two bitmaps hold the same domain ids. Bits carries no operator==, and a stray bit
+// anywhere in the words is what a broken idempotence writes, so every word is compared.
+[[nodiscard]] bool sameDomainSet(const cme::DomainBitmap& left, const cme::DomainBitmap& right)
+{
+    for (std::uint32_t word = 0; word < cme::DomainWordCount; ++word)
+    {
+        if (left.getWord(word) != right.getWord(word))
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 void runBody(harness::TestContext& ctx)
 {
@@ -97,8 +119,27 @@ void runBody(harness::TestContext& ctx)
             return;
         }
     }
-    // Idempotent: joining again is a no-op.
+    // Idempotent: a second join leaves the slot's participation set exactly as it stands. Against
+    // the whole expected set rather than a before/after diff, because a stray bit raised on every
+    // idempotent call stands before the second one too and a diff would not see it.
+    auto region = harness::openBoundRegion();
+    cme::DomainBitmap expected;
+    expected.set(cme::ControlDomainId);  // seeded at admission, so it is part of the set
+    expected.set(owner.resolveDomain("inv").id);
+    expected.set(owner.resolveDomain("orders").id);
+    if (!ctx.check(sameDomainSet(harness::readMemberSlot(region, OwnerPeerId).loadParticipatingDomains(),
+                                 expected),
+                   "the owner's slot carries the control domain, inv and orders, and nothing else"))
+    {
+        return;
+    }
     owner.joinDomain("orders");
+    if (!ctx.check(sameDomainSet(harness::readMemberSlot(region, OwnerPeerId).loadParticipatingDomains(),
+                                 expected),
+                   "a second joinDomain(orders) leaves that set unchanged"))
+    {
+        return;
+    }
 
     // ── sole-participant leave refused ────────────────────────────
     // Drop the joiner from orders, leaving the owner the only participant; the owner then

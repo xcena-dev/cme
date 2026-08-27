@@ -34,7 +34,7 @@ void runBody(harness::TestContext& ctx)
 
     auto owner = harness::openSession();  // peer 0, control genesis holder
 
-    // ── create makes a name lockable (opt-in: join before lock) ───
+    // ── create makes a name lockable, and joins its creator ───────
     owner.createDomain("inv");
     owner.joinDomain("inv");
     {

@@ -71,7 +71,8 @@ void checkCrashedFormatter(harness::TestContext& ctx)
     {
         return;
     }
-    std::printf("  %s: every slot stamped, no header magic\n", cme::failpoint::nameOf(BeforeHeader));
+    std::printf("  %s: every slot stamped, no header magic\n",
+                cme::failpoint::readName(BeforeHeader));
 
     // A second format finishes what the corpse left, which is the route back a caller has.
     harness::formatSession(Ceiling, MaxPeers);
@@ -120,14 +121,19 @@ void runBody(harness::TestContext& ctx)
     harness::joinPeerWorkers(peers, MaxPeers);
 
     // Last, because it reformats the region every check above was using.
-    if (cme::failpoint::Compiled)
+    if (!cme::failpoint::Compiled)
     {
-        checkCrashedFormatter(ctx);
+        // The checks above ran and stand. Leaving by SKIP is what keeps a build that could run only
+        // half the case from reporting the same green as one that ran all of it. A failure already
+        // on the tally outranks that: SKIP would take it off.
+        if (ctx.failures() == 0)
+        {
+            harness::TestContext::skip(
+                "built without CME_FAILPOINT, so the crashed formatter is unreachable");
+        }
+        return;
     }
-    else
-    {
-        std::printf("no CME_FAILPOINT: only the hand-blanked claim area is checked\n");
-    }
+    checkCrashedFormatter(ctx);
 }
 
 }  // namespace test

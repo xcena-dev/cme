@@ -243,11 +243,20 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
     }
 
     updateDemandAndSlice(peerState, domainId, true);  // the request signal + its slice
-    const OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
+    OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     // Plain drop, no slice write. A slice late to clear attracts one grant this peer forwards on
     // (harmless, see transferHeldDomains); a slice late to appear costs a full AcquireTimeout. The
     // cost is the same rmw either way, so only the raise pays it.
     request_demand::drop(peerState, domainId);
+    if (result == OwnershipResult::Arrived)
+    {
+        return result;
+    }
+
+    // Timeout, demand already dropped so no new grant is decided. Without this settle the record can
+    // name a caller that was told it did not get the domain, and under agg nothing local forwards it.
+    result = ownership_transfer::waitForOwnership(peerState, domainId,
+                                                  timing::Deadline{RequestWithdrawSettle});
     if (result == OwnershipResult::Arrived)
     {
         return result;

@@ -26,10 +26,10 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "config_reader.hpp"
@@ -641,11 +641,11 @@ int run(const Opts_t& options)
     {
         render(inspector, options, state);
         // The gap between frames, rechecked often enough that Ctrl-C lands well inside one.
-        const timing::Deadline nextFrame{timing::Millis{options.intervalMs}};
-        while (g_stopRequested == 0 && !nextFrame.expired())
-        {
-            std::this_thread::sleep_for(timing::Millis{StopCheckMs});
-        }
+        static_cast<void>(poll::waitUntil([]
+                                          {
+                                              return g_stopRequested != 0;
+                                          },
+                                          timing::Millis{options.intervalMs}, timing::Millis{StopCheckMs}));
     }
 
     if (!useTui)

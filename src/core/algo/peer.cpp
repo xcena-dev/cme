@@ -184,6 +184,8 @@ Peer::~Peer()
     // stays up so a grant landing anyway is forwarded, not stranded on a slot about to be None.
     state.getSelfMemberState().setStatus(Geometry::Member_t::Status::Leaving);
     state.publishSelfMemberState();
+
+    CME_FAILPOINT_REACH(failpoint::Boundary::LeaveInDrain);
     std::this_thread::sleep_for(LeaveDrainWindow);
 
     state.requestPollStop();
@@ -295,7 +297,7 @@ void Peer::leaveDomain(DomainId domainId, std::optional<std::uint64_t> expectedI
     }
 }
 
-DomainId Peer::createDomain(std::string_view name)
+DomainHandle_t Peer::createDomain(std::string_view name)
 {
     if (!impl_ || !impl_->getSuccessorPolicy())
     {
@@ -311,13 +313,14 @@ DomainId Peer::createDomain(std::string_view name)
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = impl_->lockControlSection();
     DomainId newDomainId = 0;
-    const auto result = lifecycle::createDomainLocked(*impl_, name, newDomainId);
+    std::uint64_t incarnation = 0;
+    const auto result = lifecycle::createDomainLocked(*impl_, name, newDomainId, incarnation);
     controlGuard.release();
 
     switch (result)
     {
         case lifecycle::CreateResult::Ok:
-            return newDomainId;
+            return DomainHandle_t{newDomainId, incarnation};
         case lifecycle::CreateResult::DuplicateName:
             throw DomainExistsError{std::string{"cme: domain exists: "} + std::string{name}};
         case lifecycle::CreateResult::NoFreeSlot:

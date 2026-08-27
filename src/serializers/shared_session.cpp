@@ -175,10 +175,11 @@ SharedSession::Guard SharedSession::lock(std::string_view name)
     return Guard{std::move(guardImpl)};
 }
 
-void SharedSession::joinDomain(std::string_view name)
+DomainHandle_t SharedSession::joinDomain(std::string_view name)
 {
-    impl_->session.joinDomain(name);
+    const DomainHandle_t joined = impl_->session.joinDomain(name);
     impl_->ensureEntry(name);
+    return joined;
 }
 
 void SharedSession::leaveDomain(std::string_view name)
@@ -189,10 +190,11 @@ void SharedSession::leaveDomain(std::string_view name)
     // unique_lock on it would be undefined. A later rejoin reuses it.
 }
 
-void SharedSession::createDomain(std::string_view name)
+DomainHandle_t SharedSession::createDomain(std::string_view name)
 {
-    impl_->session.createDomain(name);
+    const DomainHandle_t created = impl_->session.createDomain(name);
     impl_->ensureEntry(name);  // the creator participates, so it can lock straight away
+    return created;
 }
 
 void SharedSession::deleteDomain(std::string_view name)

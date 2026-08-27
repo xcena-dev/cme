@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "common/spin.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
@@ -196,7 +197,7 @@ OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
 
     // Adaptive spin backoff: start tight (catch a near token fast), widen the
     // inter-poll gap as the wait drags (cuts cacheline/FAM traffic).
-    cpu::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
+    spin::Backoff backoff{SpinPausesMin, SpinPausesMax};
 
     // Poll our group's shadow rather than the shared truth: spreading the wait across
     // shadows avoids a read storm on one line. epoch>last also rejects a stale read.
@@ -236,7 +237,7 @@ OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
 
         if (spinning)
         {
-            cpu::relaxCpu(backoff.next());
+            backoff.pause();
         }
         else
         {

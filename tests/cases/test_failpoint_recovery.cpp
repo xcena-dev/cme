@@ -107,7 +107,8 @@ constexpr std::uint32_t Rounds = 2;
         });
     if (!died)
     {
-        std::printf("  the authority left without reaching %s\n", cme::failpoint::nameOf(boundary));
+        std::printf("  the authority left without reaching %s\n",
+                    cme::failpoint::readName(boundary));
         return false;
     }
 
@@ -130,7 +131,7 @@ constexpr std::uint32_t Rounds = 2;
         }));
 
     const bool freed = harness::hasMemberStatus(region, doomed, Status::None);
-    std::printf("  %s: the doomed peer's slot %s\n", cme::failpoint::nameOf(boundary),
+    std::printf("  %s: the doomed peer's slot %s\n", cme::failpoint::readName(boundary),
                 freed ? "reached None" : "never reached None");
     return freed;
 }

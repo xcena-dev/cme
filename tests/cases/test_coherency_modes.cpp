@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright XCENA Inc.
 //
-// test_coherency_modes.cpp -- all three regimes over one medium.
+// test_coherency_modes.cpp -- every barrier regime executed over one medium.
 //
 // CoherencyMode is a runtime Session option rather than a property of the region, so a caller
 // may pair any mode with any medium. Each test backend hard-codes exactly one: shm reports
@@ -15,11 +15,16 @@
 // a few hundred nanoseconds, which is why one medium can carry all three. A hosted runner has
 // no device, and this is what keeps the flush path running there.
 //
+// What the checks read is that a regime's barrier path executed and the handoff still completed.
+// They do not read a barrier's effect: shm is coherent whatever the mode, so a build with every
+// fence and flush stripped out passes all three. Telling the regimes apart from their effect needs
+// two processes over a medium that is not coherent, which no single host offers.
+//
 // Session rather than Peer, unlike the other record-level cases: nothing here names a peer slot
 // or reads a record directly, and the mode reaches the library through the public open option.
 //
 // The scenario is the smallest one that crosses a peer boundary. What differs between the modes
-// is the fence and flush around each record write, so any real acquire exercises it.
+// is the fence and flush around each record write, so any real acquire executes it.
 
 #include <cstdint>
 
@@ -54,7 +59,7 @@ void checkHandoff(harness::TestContext& ctx, cme::CoherencyMode mode, const char
     holder.createDomain(Domain);
 
     // The joiner reads a registry the holder published under this mode, so the read side of the
-    // regime is exercised before the acquire is.
+    // regime runs before the acquire does.
     if (!ctx.checkf(harness::listsDomain(joiner, Domain), "%s: the joiner sees the domain",
                     modeName))
     {
@@ -63,7 +68,8 @@ void checkHandoff(harness::TestContext& ctx, cme::CoherencyMode mode, const char
 
     joiner.joinDomain(Domain);
     const auto granted = joiner.tryLock(Domain, GrantWindow);
-    ctx.checkf(granted.has_value(), "%s: the joiner acquires the domain", modeName);
+    ctx.checkf(granted.has_value(), "%s: the barrier path runs and the handoff completes",
+               modeName);
 }
 
 }  // namespace

@@ -49,6 +49,14 @@ struct DomainHandle_t
     std::uint64_t incarnation;
 };
 
+// One live data domain, as one visit to its record answered. Name and handle together, because a
+// caller that resolved the name afterwards could read the slot's next domain instead.
+struct DomainEntry_t
+{
+    std::string name;
+    DomainHandle_t handle;
+};
+
 // Successor-policy kind. Recorded in region header; joiners use matching impl.
 //   Order      -- token-ring, fair under symmetric load
 //   Request    -- hand-raise / grant, lower latency under bursts (default)
@@ -179,9 +187,14 @@ public:
 
     // ── participation (opt-in) ─────────────────────────────────────
     // lock() on a non-joined domain throws NotParticipatingError.
-    // joinDomain is idempotent. Unknown name -> UnknownDomainError.
-    void joinDomain(std::string_view name);
+    // joinDomain is idempotent. Unknown name -> UnknownDomainError. Answers the handle it resolved to
+    // join by, so a caller that needs one after joining pays no second scan of the region's records.
+    DomainHandle_t joinDomain(std::string_view name);
     void leaveDomain(std::string_view name);
+
+    // Leaving by the handle a join answered, without the walk. The incarnation refuses a slot that
+    // changed hands, so a caller that kept a handle leaves its own domain and not the one after it.
+    void leaveDomain(DomainHandle_t handle);
 
     // ── by handle ───────────────────────────────────────────────────
     // The handle a name resolves to. Resolving by name walks the region's domain records, so a caller
@@ -201,12 +214,18 @@ public:
     tryLock(DomainHandle_t handle, std::chrono::nanoseconds timeout = std::chrono::seconds{5});
 
     // ── dynamic domains (create / delete) ───────────────────────────
-    // Serialised via control domain. Throws DomainExistsError / DomainLimitError.
-    void createDomain(std::string_view name);
+    // Serialised via control domain. Throws DomainExistsError / DomainLimitError. Answers the handle
+    // the new domain took, since the create already knows it and resolving by name is a scan. Not
+    // nodiscard: most callers create for the side effect and have no use for the handle.
+    DomainHandle_t createDomain(std::string_view name);
     // Caller must be sole participant. Throws UnknownDomainError / NotParticipatingError.
     void deleteDomain(std::string_view name);
 
     // ── accessors ──────────────────────────────────────────────────
+    // Every live data domain, each with the handle to reach it by. One scan for both, where resolving
+    // each name in turn is one scan apiece.
+    [[nodiscard]] std::vector<DomainEntry_t> getDomainEntries() const;
+
     // Names of all live (Active) data domains; excludes the control domain.
     [[nodiscard]] std::vector<std::string> getDomainNames() const;
 

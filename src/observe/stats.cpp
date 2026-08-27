@@ -7,7 +7,6 @@
 #include "observe/stats.hpp"
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 
 #include "common/timing.hpp"
@@ -44,7 +43,7 @@ TelemetrySnapshot_t getTelemetrySnapshot(LocalPeerState& peerState) noexcept
     snapshot.transferOnRelease = telemetry.ownership.count.transferOnRelease.load(std::memory_order_relaxed);
     snapshot.transferOnPoll = telemetry.ownership.count.transferOnPoll.load(std::memory_order_relaxed);
     const auto& latency = telemetry.handoffLat;
-    for (std::size_t bucket = 0; bucket < TelemetrySnapshot_t::LatCount; ++bucket)
+    for (std::uint32_t bucket = 0; bucket < TelemetrySnapshot_t::LatCount; ++bucket)
     {
         snapshot.handoffLat.cycles[bucket] = latency.cycles[bucket].load(std::memory_order_relaxed);
         snapshot.handoffLat.count[bucket] = latency.count[bucket].load(std::memory_order_relaxed);

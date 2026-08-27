@@ -63,7 +63,7 @@ void runBody(harness::TestContext& ctx)
     // ── Scenario A: orphan-free ────────────────────────────────────────
     constexpr cme::PeerId SoloOwner = 3;  // sole participant + genesis holder
     harness::log("A: peer %u creates 'solo' (sole participant + genesis holder)", SoloOwner);
-    const auto soloId = peers[SoloOwner]->createDomain("solo");
+    const cme::DomainId soloId = peers[SoloOwner]->createDomain("solo").id;
     harness::sleepMs(200);
     ctx.checkf(harness::resolvedSlot(*peers[0], "solo") != cme::NoDomain,
                "'solo' (id=%u) visible to survivor before crash", soloId);
@@ -90,7 +90,7 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId SharedHolder = 0;  // genesis holder + participant
     constexpr cme::PeerId SharedJoiner = 1;  // second participant (non-holder)
     harness::log("B: peer %u creates 'shared'; peer %u also joins", SharedHolder, SharedJoiner);
-    const auto sharedId = peers[SharedHolder]->createDomain("shared");
+    const cme::DomainId sharedId = peers[SharedHolder]->createDomain("shared").id;
     peers[SharedJoiner]->joinDomain(sharedId);
     harness::sleepMs(200);
     ctx.checkf(harness::resolvedSlot(*peers[SharedHolder], "shared") != cme::NoDomain,

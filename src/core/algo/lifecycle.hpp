@@ -77,7 +77,7 @@ enum class CreateResult
 // Claim a Free entry and publish it Active with @name; caller becomes genesis holder.
 // PRECONDITION: caller holds the control lock. On Ok, *outDomainId = new domain.
 [[nodiscard]] CreateResult createDomainLocked(LocalPeerState& peerState, std::string_view name,
-                                              DomainId& outDomainId);
+                                              DomainId& outDomainId, std::uint64_t& outIncarnation);
 
 enum class DeleteResult
 {

@@ -9,7 +9,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -24,7 +23,7 @@ namespace
 {
 
 // shm name (including leading slash) must fit in one filesystem component (NAME_MAX=255).
-inline constexpr std::size_t MaxShmNameLen = 255;
+inline constexpr std::uint32_t MaxShmNameLen = 255;
 
 [[nodiscard]] std::string normaliseShmName(std::string_view name)
 {

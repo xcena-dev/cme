@@ -8,7 +8,6 @@
 #pragma once
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 
 #include "core/types.hpp"
@@ -58,7 +57,7 @@ struct PeerTelemetry_t
     // ── Handoff latency breakdown (CME_LATENCY) ───────────────────
     // Raw TSC cycles + sample count per segment of release->next-acquire, indexed by
     // trace::LatencyStage and charged to whichever peer ran the segment.
-    static constexpr std::size_t LatCount = static_cast<std::size_t>(trace::LatencyStage::Count);
+    static constexpr std::uint32_t LatCount = static_cast<std::uint32_t>(trace::LatencyStage::Count);
     struct
     {
         std::atomic<std::uint64_t> cycles[LatCount]{};

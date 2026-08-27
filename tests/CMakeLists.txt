@@ -209,6 +209,8 @@ cme_test_exe(cme-api-reject-test test_api_reject.cpp)
 cme_test_exe(cme-region-corrupt-test test_region_corrupt.cpp)
 cme_test_exe(cme-lease-steal-test test_lease_steal.cpp)
 cme_test_exe(cme-memory-reject-test test_memory_reject.cpp)
+# A measurement, not a case: it holds no cme header and locks a process-shared
+# pthread_mutex, so nothing in it can fail for a reason about this library.
 cme_test_exe(cme-mutex-baseline-test test_mutex_baseline.cpp)
 cme_test_exe(cme-shadow-authority-test test_shadow_authority.cpp)
 cme_test_exe(cme-coherency-modes-test test_coherency_modes.cpp)
@@ -245,17 +247,12 @@ set_tests_properties(slot_codegen PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 # ── CASES ───────────────────────────────────────────────────────────────
 
 # No backend axis at all, so these sit outside the shm/dax/uc matrix rather than
-# showing up as shm with two excluded cells. mutex_baseline is a process-shared
-# pthread_mutex (the coherent-DRAM floor, not a cme region); util_test drives
-# util/endian.hpp + util/coherency.hpp over an anonymous mapping and never opens a
-# Geometry; region_smoke asserts POSIX-shm name lifecycle (shm_unlink, then a joiner
+# showing up as shm with two excluded cells. util_test drives util/endian.hpp +
+# util/coherency.hpp over an anonymous mapping and never opens a Geometry;
+# region_smoke asserts POSIX-shm name lifecycle (shm_unlink, then a joiner
 # must fail), a property neither devdax nor a uc mount has.
 cme_case(region_smoke TARGET cme-region-smoke-test BACKENDS shm SHM_TIMEOUT 60 LABELS common)
 cme_case(util_test TARGET cme-util-test BACKENDS shm SHM_TIMEOUT 60 LABELS common)
-# --verify is the correctness soak (lost-update check); the latency sweep itself has no
-# pass/fail and is not a ctest concern. See run_mutex_sweep.sh for the comparison.
-cme_case(mutex_baseline TARGET cme-mutex-baseline-test BACKENDS shm SHM_TIMEOUT 60 LABELS common
-    ARGS --verify -n 4 -d 2 -i 200 --warmup 20)
 
 # Header rejection: the one case that hands the library a region it did not format. shm because
 # the mappedSize-below-area check needs a mapping sized to the region, which neither a fixed
@@ -471,8 +468,8 @@ foreach(entry IN LISTS CME_STRATEGY_MAP)
     # the ring must still give every peer its turn under skewed holds.
     cme_case(fairness_${infix}_asym TARGET cme-fairness-test SHM_TIMEOUT 90
         ARGS --${policy} -n 8 -d 4 -i 600 --warmup 50 --asymmetric --bound 0.15)
-    # Uncontended sequential acquire latency. The bench prints latency; ctest only
-    # checks that it runs. Run it standalone with a larger -i for real numbers.
+    # Uncontended sequential acquire latency. The bench prints the distribution; ctest gates
+    # only on every acquire arriving. Run it standalone with a larger -i for real numbers.
     #
     # --trace-jsonl is passed so the dump path runs at all: without it nothing in the suite
     # reaches trace::writeJsonl or the TSC read that sizes its output, and both read as dead.

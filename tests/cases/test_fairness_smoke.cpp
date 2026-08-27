@@ -4,8 +4,11 @@
 // test_fairness_smoke.cpp -- multi-peer ORDER + REQUEST round-trip check.
 //
 // N peer threads share one ShmMemory, each doing M acquire/release cycles on one domain.
-// Every cycle must complete without throwing, and per-peer totals must stay within the
-// fairness bound. Light -- ~1s at N=4 / M=500; the full sweep is test_fairness.cpp.
+// A liveness check: every cycle must complete without throwing and every peer must finish all
+// M of them. Light by design; the full parameter sweep lives in test_fairness.cpp.
+//
+// The per-peer spread is printed, not gated. Every peer gets the same fixed M, so the spread is
+// zero whenever those two hold, and starvation surfaces through lock()'s own deadline instead.
 
 #include <algorithm>
 #include <atomic>
@@ -36,16 +39,15 @@ struct Scenario_t
     cme::Strategy strategy;     // successor policy the region is formatted with
     std::uint32_t numPeers;     // contending threads, one cme::Peer each
     std::uint32_t iterPerPeer;  // acquire/release cycles every thread runs
-    double bound;               // largest per-peer spread accepted, as a fraction of the mean
 };
 
 // Both policies at two sizes. The small pair runs first so a break shows up in the cheap
 // scenario before the expensive one spends 2000 cycles per peer reaching the same verdict.
 constexpr Scenario_t Scenarios[] = {
-    {cme::Strategy::Order, 4, 500, 0.15},
-    {cme::Strategy::Request, 4, 500, 0.15},
-    {cme::Strategy::Order, 8, 2000, 0.15},
-    {cme::Strategy::Request, 8, 2000, 0.15},
+    {cme::Strategy::Order, 4, 500},
+    {cme::Strategy::Request, 4, 500},
+    {cme::Strategy::Order, 8, 2000},
+    {cme::Strategy::Request, 8, 2000},
 };
 
 struct WorkerResult_t
@@ -151,14 +153,12 @@ void runOne(harness::TestContext& ctx, const Scenario_t& scenario)
     const auto mean = static_cast<double>(total) / numPeers;
     const auto dev = mean > 0 ? static_cast<double>(maxv - minv) / mean : 0.0;
 
-    std::printf("  %s : total=%" PRIu64 " max=%" PRIu64 " min=%" PRIu64
-                " mean=%.1f dev=%.3f bound=%.2f\n",
-                title.c_str(), total, maxv, minv, mean, dev, scenario.bound);
+    std::printf("  %s : total=%" PRIu64 " max=%" PRIu64 " min=%" PRIu64 " mean=%.1f dev=%.3f\n",
+                title.c_str(), total, maxv, minv, mean, dev);
 
     ctx.check(allOk, (title + ": every peer completed without exception").c_str());
     ctx.check(total == static_cast<std::uint64_t>(numPeers) * scenario.iterPerPeer,
               (title + ": total acquires == N*M").c_str());
-    ctx.check(dev <= scenario.bound, (title + ": fairness bound satisfied").c_str());
 }
 
 }  // namespace

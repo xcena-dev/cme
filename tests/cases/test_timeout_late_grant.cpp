@@ -216,7 +216,7 @@ void runBody(harness::TestContext& ctx)
 
     ctx.check(timedOutUnderGrip > 0, "the window produced at least one timeout inside a grip");
     ctx.check(acquiredUnderGrip == 0, "the waiter took the domain while the holder still held it");
-    ctx.check(heldNothing, "a timed-out lock left the record naming somebody else");
+    ctx.check(heldNothing, "a timed-out lock left the record naming the peer that gave up");
     ctx.check(reclaimedEvery, "the domain was acquirable again after every round");
 }
 

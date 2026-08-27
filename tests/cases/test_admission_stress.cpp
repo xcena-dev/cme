@@ -4,8 +4,8 @@
 // test_admission_stress.cpp -- peer-slot claim under sustained contention.
 //
 // claimPeerSlot is the only genuinely multi-writer race in cme -- every other mutation is
-// serialised by a control- or domain-ME lock. test_claim_race covers one exact-fit round;
-// this stresses it over many, with a spin barrier so claims land in the narrowest window.
+// serialised by a control- or domain-ME lock. This drives it over many rounds, with a spin
+// barrier so the claims of one round land in the narrowest window.
 //   Part 1 (exact fit): N claimers vs N slots. All N win distinct in-range slots.
 //   Part 2 (over-subscription): M > N claimers. Exactly N win, the surplus get
 //     NoFreeSlotError, and no two winners share a slot.

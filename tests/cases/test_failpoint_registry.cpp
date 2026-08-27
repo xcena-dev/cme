@@ -80,7 +80,7 @@ void checkCreate(harness::TestContext& ctx)
     {
         return;
     }
-    std::printf("  %s\n", cme::failpoint::nameOf(BeforeActivate));
+    std::printf("  %s\n", cme::failpoint::readName(BeforeActivate));
     auto watcher = harness::openSession();
     ctx.check(stillUsable(watcher, "after_create"),
               "a domain published but never activated leaves the registry usable");
@@ -104,7 +104,7 @@ void checkDelete(harness::TestContext& ctx, cme::failpoint::Boundary boundary, c
     {
         return;
     }
-    std::printf("  %s\n", cme::failpoint::nameOf(boundary));
+    std::printf("  %s\n", cme::failpoint::readName(boundary));
     auto watcher = harness::openSession();
     ctx.check(stillUsable(watcher, name), what);
 }
@@ -135,7 +135,7 @@ void checkReclaim(harness::TestContext& ctx)
             harness::sleepMs(RecoveryDeadlineMs);
             static_cast<void>(session);
         });
-    std::printf("  %s: the sweeper %s\n", cme::failpoint::nameOf(MidReclaim),
+    std::printf("  %s: the sweeper %s\n", cme::failpoint::readName(MidReclaim),
                 died ? "died mid-loop" : "never reached the loop");
     if (!ctx.check(died, "the sweeper died partway through the reclaim"))
     {

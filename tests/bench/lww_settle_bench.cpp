@@ -74,7 +74,12 @@ void pinTo(std::uint32_t cpu)
 {
     cpu_set_t set;
     CPU_ZERO(&set);
+
+    // The sign conversion is glibc's own: CPU_SET takes an int and indexes an unsigned mask with it.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
     CPU_SET(static_cast<int>(cpu), &set);
+#pragma GCC diagnostic pop
     static_cast<void>(::sched_setaffinity(0, sizeof(set), &set));
 }
 

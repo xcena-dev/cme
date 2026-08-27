@@ -83,7 +83,7 @@ public:
     // ── participation ──────────────────────────────────────────────
     // Join before locking, as with Session. Not safe to call concurrently with lock() on the
     // same name: it is the call that creates that domain's local mutex.
-    void joinDomain(std::string_view name);
+    DomainHandle_t joinDomain(std::string_view name);
 
     // PRECONDITION for leaveDomain and deleteDomain: this thread holds no Guard for @name.
     // Both take that domain's local mutex to hand ownership back first, and a Guard holds the
@@ -92,7 +92,7 @@ public:
     void leaveDomain(std::string_view name);
 
     // ── dynamic domains ────────────────────────────────────────────
-    void createDomain(std::string_view name);
+    DomainHandle_t createDomain(std::string_view name);
     void deleteDomain(std::string_view name);
 
     // ── tuning ─────────────────────────────────────────────────────

@@ -29,6 +29,20 @@ namespace test
 namespace
 {
 
+// The three data domains this case creates, in the order it creates them. getDomainNames is asked
+// for membership, so the order here is only the order of the creates.
+constexpr const char* DataDomains[] = {"inv", "orders", "cache"};
+
+// The one withLock runs on, named because the rival has to join it and probe it by the same name.
+constexpr const char* WithLockDomain = "cache";
+
+// What the rival waits while the guard is meant to be excluding it, and what it waits once the
+// guard is gone. The second is the grant path's budget rather than a refusal window.
+constexpr timing::Millis ProbeWindow{50};
+constexpr timing::Millis GrantWindow{3'000};
+
+}  // namespace
+
 void runBody(harness::TestContext& ctx)
 {
     const std::string& uri = ctx.uri();
@@ -39,29 +53,31 @@ void runBody(harness::TestContext& ctx)
 
     // ── open ──────────────────────────────────────────────────────
     auto first = harness::openSession();
-    // Data domains are created at runtime (slots fill in ascending order).
-    // Opt-in: create does not participate, so join each before locking.
-    for (const char* name : {"inv", "orders", "cache"})
+    // Data domains are created at runtime, and createDomain joins its creator, so nothing here
+    // joins them again.
+    for (const char* name : DataDomains)
     {
         first.createDomain(name);
-        first.joinDomain(name);
     }
     if (!ctx.check(first.getDomainNames().size() == 3, "domain count"))
     {
         return;
     }
-    if (!ctx.check(first.getDomainNames()[0] == "inv", "domain[0] name"))
+    // Membership and count, not position. getDomainNames promises the live data domains and
+    // promises nothing about their order, so a change in how the slots are scanned is free to
+    // reorder them.
+    for (const char* name : DataDomains)
     {
-        return;
+        if (!ctx.checkf(harness::listsDomain(first, name), "getDomainNames lists %s", name))
+        {
+            return;
+        }
     }
-    if (!ctx.check(first.getDomainNames()[1] == "orders", "domain[1] name"))
-    {
-        return;
-    }
-    if (!ctx.check(first.getDomainNames()[2] == "cache", "domain[2] name"))
-    {
-        return;
-    }
+
+    // A second peer, for the two questions this session cannot answer about its own lock: whether
+    // a live guard excludes anyone, and whether withLock gave the domain back.
+    auto rival = harness::openSession();
+    rival.joinDomain(WithLockDomain);
 
     // ── lock / unlock cycle ───────────────────────────────────────
     {
@@ -92,12 +108,26 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── withLock lambda ───────────────────────────────────────────
+    // The body's own flag says only that the callback ran. What withLock owes its caller is the
+    // release afterwards, and only another peer's acquire can see that, so the rival probes from
+    // inside the body and again once withLock has returned.
     bool ran = false;
-    first.withLock("cache", [&](cme::Guard& guard)
+    bool intruded = false;
+    first.withLock(WithLockDomain, [&](cme::Guard& guard)
                    {
                        ran = static_cast<bool>(guard);
+                       intruded = harness::canLock(rival, WithLockDomain, ProbeWindow);
                    });
     if (!ctx.check(ran, "withLock body must observe live guard"))
+    {
+        return;
+    }
+    if (!ctx.check(!intruded, "no second peer takes the domain inside the withLock body"))
+    {
+        return;
+    }
+    if (!ctx.check(harness::canLock(rival, WithLockDomain, GrantWindow),
+                   "withLock gives the domain back, so the rival takes it afterwards"))
     {
         return;
     }
@@ -152,8 +182,6 @@ void runBody(harness::TestContext& ctx)
         auto guardB = second.lock("orders");
     }  // both release
 }
-
-}  // namespace
 
 }  // namespace test
 

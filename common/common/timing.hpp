@@ -17,7 +17,7 @@
 // The aliases below are this header's surface, and a caller naming Millis is not naming
 // std::chrono::milliseconds. Exported so include-cleaner attributes them here rather than sending
 // every consumer to <chrono> for a type it never spells.
-// timespec and timeval are here for the same reason countIn is: a kernel interface takes a duration
+// timespec and timeval are here for the same reason getTicks is: a kernel interface takes a duration
 // as its own shape, and every caller converting by hand is every caller getting the remainder wrong.
 #include <sys/time.h>  // IWYU pragma: export
 
@@ -57,10 +57,10 @@ using SecsF = std::chrono::duration<double>;
 // A floating target is refused rather than counted: the count is an integer, so the fraction the
 // caller asked for by naming SecsF would be floored away without a word. Construct that type instead.
 template <typename T_Duration, typename Rep, typename Period>
-[[nodiscard]] constexpr std::uint64_t countIn(std::chrono::duration<Rep, Period> value) noexcept
+[[nodiscard]] constexpr std::uint64_t getTicks(std::chrono::duration<Rep, Period> value) noexcept
 {
     static_assert(std::is_integral_v<typename T_Duration::rep>,
-                  "countIn answers an integer count; construct a floating duration instead");
+                  "getTicks answers an integer count; construct a floating duration instead");
     return static_cast<std::uint64_t>(std::chrono::duration_cast<T_Duration>(value).count());
 }
 
@@ -79,7 +79,7 @@ template <typename Rep, typename Period>
     const Secs seconds = std::chrono::duration_cast<Secs>(span);
     ::timespec value = {};
     value.tv_sec = static_cast<decltype(value.tv_sec)>(seconds.count());
-    value.tv_nsec = static_cast<decltype(value.tv_nsec)>(countIn<Nanos>(span - seconds));
+    value.tv_nsec = static_cast<decltype(value.tv_nsec)>(getTicks<Nanos>(span - seconds));
     return value;
 }
 
@@ -89,7 +89,7 @@ template <typename Rep, typename Period>
     const Secs seconds = std::chrono::duration_cast<Secs>(span);
     ::timeval value = {};
     value.tv_sec = static_cast<decltype(value.tv_sec)>(seconds.count());
-    value.tv_usec = static_cast<decltype(value.tv_usec)>(countIn<Micros>(span - seconds));
+    value.tv_usec = static_cast<decltype(value.tv_usec)>(getTicks<Micros>(span - seconds));
     return value;
 }
 
@@ -104,7 +104,7 @@ template <typename Rep, typename Period>
 template <typename T_Duration>
 [[nodiscard]] inline std::uint64_t monotonic() noexcept
 {
-    return countIn<T_Duration>(now().time_since_epoch());
+    return getTicks<T_Duration>(now().time_since_epoch());
 }
 
 // The other clock, and the only one a stamp another node wrote can be compared against: its origin
@@ -113,7 +113,7 @@ template <typename T_Duration>
 template <typename T_Duration>
 [[nodiscard]] inline std::uint64_t wall() noexcept
 {
-    return countIn<T_Duration>(std::chrono::system_clock::now().time_since_epoch());
+    return getTicks<T_Duration>(std::chrono::system_clock::now().time_since_epoch());
 }
 
 // A wall-clock instant somebody else stamped, and the two questions worth asking of one.

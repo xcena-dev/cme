@@ -5,17 +5,13 @@
 // (C4: no RA targets a None slot and no delete path accepts a foreign holder, so the domain
 // is lost for good).
 //
-// The race is microseconds wide, so this does not wait for it: one thread destroys the peer
-// while another publishes the record naming it, which IS what a landed grant leaves behind.
-// ~Peer publishes Leaving and drains with its poll thread still running, so a grant arriving
-// in that window should be forwarded; one arriving after the poll thread stops cannot be.
-// Each iteration spins a different number of times before publishing, sweeping where in the
-// departure the grant lands.
+// ~Peer publishes Leaving and drains with its poll thread still running, so a grant arriving in
+// that window has to be forwarded. The LeaveInDrain failpoint holds the departure inside that
+// window until the grant is published, so the window is entered rather than aimed at.
 //
 // --iters sets the iteration count (default DefaultIters); raise it for a long run.
 
 #include <atomic>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -27,9 +23,9 @@
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
+#include "observe/failpoint.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
-#include "util/cpu.hpp"
 
 namespace test
 {
@@ -37,6 +33,15 @@ namespace
 {
 
 constexpr int DefaultIters = 200;
+
+// How long the granter waits for the departure to reach the drain. Generous, since what it waits on
+// is one thread getting scheduled rather than any work.
+constexpr timing::Millis HoldWait{2000};
+
+// The gap between the join and the departure, so the keeper's poll thread has granted at least once
+// and the record is live rather than untouched when the departure starts.
+constexpr timing::Millis SettleGap{1};
+
 constexpr cme::PeerId Keeper = 0;
 constexpr cme::PeerId Leaver = 1;
 constexpr cme::PeerId MaxPeers = 2;
@@ -48,6 +53,12 @@ void runBody(harness::TestContext& ctx)
 {
     using Status = cme::Geometry::Member_t::Status;
 
+    if (!cme::failpoint::Compiled)
+    {
+        harness::TestContext::skip(
+            "built without CME_FAILPOINT, so the grant cannot be placed inside the drain");
+    }
+
     const int iters = static_cast<int>(cliargs::argU64("--iters", DefaultIters));
 
     cme::Geometry region = harness::createRegion(Ceiling, MaxPeers);
@@ -56,63 +67,67 @@ void runBody(harness::TestContext& ctx)
                 ctx.strategySuffix(), ctx.backendName());
 
     auto keeper = harness::makePeerPtr(region, Keeper);
-    const cme::DomainId domainId = keeper->createDomain("churn");
+    const cme::DomainId domainId = keeper->createDomain("churn").id;
     keeper->joinDomain(domainId);
 
     auto* recordSlot = region.getDomainRecord(domainId);
     auto* leaverSlot = region.getMemberSlot(Leaver);
 
     int stranded = 0;
-    int landedLate = 0;
+    int forwarded = 0;
+    int unsettled = 0;
+    int missed = 0;
     for (int iter = 0; iter < iters; ++iter)
     {
         auto leaver = harness::makePeerPtr(region, Leaver);
         leaver->joinDomain(domainId);
-        std::this_thread::sleep_for(timing::Millis{1});
+        std::this_thread::sleep_for(SettleGap);
 
-        // Publish the grant from another thread, sweeping how deep into the departure it lands.
-        std::atomic<bool> barrier{false};
-        const std::uint32_t spins = static_cast<std::uint32_t>(iter % 400) * 8;
+        // Armed before the departure starts, so the reach cannot beat the arm.
+        cme::failpoint::hold(cme::failpoint::Boundary::LeaveInDrain);
+
+        // Publishes the record naming the leaver while the departure waits inside the drain, which
+        // is what a landed grant leaves behind. Releases either way, so a miss costs the hold cap.
+        std::atomic<bool> placed{false};
         std::thread granter(
             [&]
             {
-                while (!barrier.load(std::memory_order_acquire))
+                if (cme::failpoint::awaitHeld(HoldWait))
                 {
+                    auto record = cme::coherency::get(recordSlot, ctx.coherency());
+                    record.holder = Leaver;
+                    record.epoch = record.epoch + 1;
+                    cme::coherency::set(recordSlot, record, ctx.coherency());
+                    placed.store(true, std::memory_order_release);
                 }
-                for (std::uint32_t i = 0; i < spins; ++i)
-                {
-                    cme::cpu::relaxCpu(1);
-                }
-                auto record = cme::coherency::get(recordSlot, ctx.coherency());
-                record.holder = Leaver;
-                record.epoch = record.epoch + 1;
-                cme::coherency::set(recordSlot, record, ctx.coherency());
+                cme::failpoint::release();
             });
 
-        barrier.store(true, std::memory_order_release);
         leaver.reset();  // ~Peer: Leaving -> drain -> stop poll -> hand off -> None
         granter.join();
 
-        // Only judge once the departure is complete: the slot reads None, so the record
-        // naming this peer can never be recovered by anything.
+        // Only judge once the departure is complete: the slot reads None, so the record naming this
+        // peer can never be recovered by anything.
         const auto member = cme::coherency::get(leaverSlot, ctx.coherency());
-        if (!member.hasStatus(Status::None))
+        if (!placed.load(std::memory_order_acquire))
         {
-            continue;
+            ++missed;
         }
-        const auto record = cme::coherency::get(recordSlot, ctx.coherency());
-        if (record.getHolder() == Leaver)
+        else if (!member.hasStatus(Status::None))
+        {
+            ++unsettled;
+        }
+        else if (cme::coherency::get(recordSlot, ctx.coherency()).getHolder() == Leaver)
         {
             ++stranded;
             if (stranded <= 5)
             {
-                std::printf("  iter %d (spins=%u): domain stranded on the departed peer\n", iter,
-                            spins);
+                std::printf("  iter %d: domain stranded on the departed peer\n", iter);
             }
         }
         else
         {
-            ++landedLate;
+            ++forwarded;
         }
 
         // Put the record back on the keeper so the next iteration starts clean.
@@ -124,7 +139,11 @@ void runBody(harness::TestContext& ctx)
         }
     }
 
-    std::printf("  %d/%d grants forwarded, %d stranded\n", landedLate, iters, stranded);
+    std::printf("  %d/%d grants forwarded, %d stranded, %d departures unsettled, %d never held\n",
+                forwarded, iters, stranded, unsettled, missed);
+
+    ctx.check(missed == 0, "every departure reached the drain and took the grant");
+    ctx.check(unsettled == 0, "every departure settled to None");
     ctx.check(stranded == 0, "no forced grant left the domain on the departed peer");
 
     keeper.reset();  // membership leaves before the mapping it was made against goes

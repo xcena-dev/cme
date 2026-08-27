@@ -13,8 +13,13 @@
 //   concurrent multi-freeze (peers 3, 5; permanent) -> verify survivor takeover
 //   10 s random churn (permanent freezes, survivor cap >=2)
 //   clean shutdown + final acq counts
+//
+// What a crash phase asserts is read from the region: the dead peer's slot reaches None and no
+// domain record still names it. A survivor's acquire counter is a per-domain figure here for the
+// same reason -- a total across domains keeps rising on the ones the survivor always reached.
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cinttypes>
 #include <cmath>
@@ -28,6 +33,7 @@
 #include <memory>
 #include <random>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "cme/errors.hpp"
@@ -43,6 +49,17 @@ namespace test
 namespace
 {
 
+using Status = cme::Geometry::Member_t::Status;
+
+constexpr cme::DomainId NumDomains = 4;
+// Slot ceiling = control(0) + NumDomains data domains.
+constexpr cme::DomainId DomainCeiling = NumDomains + 1;
+
+// One deadline for a whole phase rather than one per check. Recovery is wall-clock-timed, so the
+// post-conditions have to be polled; charging the deadline once per dead peer and once per domain
+// would let a single broken phase spend the run's whole time budget before it named what failed.
+constexpr std::uint32_t PhaseDeadlineMs = 15000;
+
 enum class PState
 {
     Running,
@@ -51,12 +68,13 @@ enum class PState
     Dead,
 };
 
-// The shared slot plus the state this case drives its workers with. `state` replaces the base's
-// `stop`: this timeline pauses a peer as well as stopping it, and it reads back whether a worker has
-// actually gone, which one flag cannot say.
+// The shared slot plus what this case drives its workers with. `state` adds a Paused step to the
+// base's `stop`, and perDomain answers what the base's single counter cannot: which domain an
+// acquire landed on.
 struct TimelineSlot_t : harness::PeerSlot_t
 {
     std::atomic<PState> state{PState::Running};
+    std::array<std::atomic<std::uint64_t>, DomainCeiling> perDomain{};
 };
 
 void worker(TimelineSlot_t* slot)
@@ -107,6 +125,7 @@ void worker(TimelineSlot_t* slot)
         {
             auto guard = slot->peer->lock(domainId);
             slot->acquires.fetch_add(1, std::memory_order_relaxed);
+            slot->perDomain[domainId].fetch_add(1, std::memory_order_relaxed);
         }
         catch (const cme::LockTimeoutError&)
         {
@@ -128,6 +147,10 @@ void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry& regi
     peerSlot.state.store(PState::Running);
     peerSlot.frozen.store(false);
     peerSlot.acquires.store(0);
+    for (std::atomic<std::uint64_t>& counter : peerSlot.perDomain)
+    {
+        counter.store(0);
+    }
     peerSlot.failed.store(false);
     peerSlot.runner = std::thread{worker, &peerSlot};
 }
@@ -177,7 +200,22 @@ struct SurvivorBaseline_t
     cme::PeerId count;
 };
 
-// Every peer outside @baseline.skip must have acquired at least once more since @baseline.before.
+// Whether every peer outside @baseline.skip has acquired at least once more since
+// @baseline.before.
+[[nodiscard]] bool survivorsAdvanced(const SurvivorBaseline_t& baseline)
+{
+    for (cme::PeerId peerId = 0; peerId < baseline.count; ++peerId)
+    {
+        if (!baseline.skip[peerId] &&
+            baseline.peers[peerId].acquires.load() <= baseline.before[peerId])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The same, reported one peer at a time.
 void expectSurvivorsAdvanced(harness::TestContext& ctx, const SurvivorBaseline_t& baseline,
                              const char* phase)
 {
@@ -201,15 +239,108 @@ void freezePeer(TimelineSlot_t& slot)
     slot.frozen.store(true);
 }
 
-// A frozen peer's counter may still tick a few times before its worker notices.
-void expectFlat(harness::TestContext& ctx, const TimelineSlot_t& slot, std::uint64_t before,
-                cme::PeerId peerId)
+// Whether any record still hands @peerId the domain. takeoverDomainsHeldByDeadPeer walks every
+// domain and moves the ones a dead peer is named in, so one left behind is a takeover that ran short.
+[[nodiscard]] bool anyDomainNames(const cme::Geometry& region, cme::PeerId peerId)
 {
-    constexpr std::uint64_t Slop = 4;
-    const auto cur = slot.acquires.load();
-    ctx.checkf(cur - before <= Slop,
-               "frozen peer %u flat (%" PRIu64 " -> %" PRIu64 ", slop<=%" PRIu64 ")", peerId, before,
-               cur, Slop);
+    for (cme::DomainId domainId = 0; domainId < region.getDomainCount(); ++domainId)
+    {
+        if (harness::readDomainRecord(region, domainId).isHeldBy(peerId))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Acquires on @domainId by every peer outside @skip.
+[[nodiscard]] std::uint64_t domainTotal(const std::vector<TimelineSlot_t>& peers, cme::PeerId count,
+                                        const std::vector<bool>& skip, cme::DomainId domainId)
+{
+    std::uint64_t total = 0;
+    for (cme::PeerId peerId = 0; peerId < count; ++peerId)
+    {
+        if (!skip[peerId])
+        {
+            total += peers[peerId].perDomain[domainId].load();
+        }
+    }
+    return total;
+}
+
+// Per-domain totals at a phase boundary, over the peers the phase leaves running. Taken once the
+// phase's departures have all been applied, so `skip` is the same set here and at the check.
+[[nodiscard]] std::array<std::uint64_t, DomainCeiling>
+snapshotDomains(const std::vector<TimelineSlot_t>& peers, cme::PeerId count,
+                const std::vector<bool>& skip)
+{
+    std::array<std::uint64_t, DomainCeiling> snap{};
+    for (cme::DomainId domainId = 0; domainId < DomainCeiling; ++domainId)
+    {
+        snap[domainId] = domainTotal(peers, count, skip, domainId);
+    }
+    return snap;
+}
+
+// What one phase owes once the peers it stopped are gone: each of them reclaimed, every data
+// domain acquired again by a survivor, and every survivor past its own mark.
+struct PhaseCheck_t
+{
+    const cme::Geometry& region;
+    const SurvivorBaseline_t& baseline;
+    const std::array<std::uint64_t, DomainCeiling>& before;
+    std::vector<cme::PeerId> departed;
+    const char* phase;
+};
+
+[[nodiscard]] bool phaseSettled(const PhaseCheck_t& want)
+{
+    for (const cme::PeerId peerId : want.departed)
+    {
+        if (!harness::hasMemberStatus(want.region, peerId, Status::None) ||
+            anyDomainNames(want.region, peerId))
+        {
+            return false;
+        }
+    }
+    for (cme::DomainId domainId = 1; domainId <= NumDomains; ++domainId)
+    {
+        if (domainTotal(want.baseline.peers, want.baseline.count, want.baseline.skip, domainId) <=
+            want.before[domainId])
+        {
+            return false;
+        }
+    }
+    return survivorsAdvanced(want.baseline);
+}
+
+// Poll all of it on one deadline, then report each part on its own.
+void expectPhaseSettled(harness::TestContext& ctx, const PhaseCheck_t& want)
+{
+    static_cast<void>(harness::waitUntil([&want]
+                                         {
+                                             return phaseSettled(want);
+                                         },
+                                         PhaseDeadlineMs));
+
+    for (const cme::PeerId peerId : want.departed)
+    {
+        ctx.checkf(harness::hasMemberStatus(want.region, peerId, Status::None),
+                   "peer %u's slot came back to None past %s", peerId, want.phase);
+        ctx.checkf(!anyDomainNames(want.region, peerId),
+                   "no domain record still names departed peer %u", peerId);
+    }
+    // The takeover assertion. A domain stranded on the departed holder times every survivor out
+    // for good, and only that domain's own counter shows it: the others keep a total moving.
+    for (cme::DomainId domainId = 1; domainId <= NumDomains; ++domainId)
+    {
+        const auto current =
+            domainTotal(want.baseline.peers, want.baseline.count, want.baseline.skip, domainId);
+        ctx.checkf(current > want.before[domainId],
+                   "a survivor acquired domain %u past %s (%" PRIu64 " -> %" PRIu64 ")", domainId,
+                   want.phase, want.before[domainId], current);
+    }
+    expectSurvivorsAdvanced(ctx, want.baseline, want.phase);
 }
 
 // Freeze a random live peer every 800 ms until @duration elapses, never dropping below two
@@ -260,7 +391,6 @@ void runBody(harness::TestContext& ctx)
 {
     harness::startLogClock();
 
-    constexpr cme::DomainId NumDomains = 4;
     constexpr cme::PeerId MaxPeers = 8;
     constexpr cme::PeerId InitialPeers = 6;
     constexpr cme::PeerId FreezeTarget = 1;
@@ -268,8 +398,6 @@ void runBody(harness::TestContext& ctx)
     constexpr cme::PeerId MultiA = 3;
     constexpr cme::PeerId MultiB = 5;
 
-    // Slot ceiling = control(0) + NumDomains data domains.
-    constexpr cme::DomainId DomainCeiling = NumDomains + 1;
     auto region = harness::createRegion(DomainCeiling, MaxPeers);
 
     // Create the NumDomains data domains (slots 1..NumDomains) before peers start.
@@ -290,29 +418,38 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── Phase B: freeze peer ───────────────────────────────────────
-    // FreezeTarget stays frozen for good (permanent-crash model); the survivor-progress
-    // check is what confirms recovery reclaimed its domains.
+    // FreezeTarget stays frozen for good (permanent-crash model). The slot going None and no record
+    // naming it any more are recovery's writes; the per-domain counters are where a domain left
+    // stranded on it would show.
     harness::log("freezing peer %u (simulated crash)", FreezeTarget);
-    const auto bFreeze = peers[FreezeTarget].acquires.load();
+    const auto freezeSkip = skipSet(InitialPeers, {FreezeTarget});
     freezePeer(peers[FreezeTarget]);
+    const auto freezeDomains = snapshotDomains(peers, InitialPeers, freezeSkip);
 
-    harness::sleepMs(7500);  // > AcquireTimeout (config.hpp) so survivors take over
-    expectFlat(ctx, peers[FreezeTarget], bFreeze, FreezeTarget);
-    expectSurvivorsAdvanced(
-        ctx, {peers, acqSnapshot, skipSet(InitialPeers, {FreezeTarget}), InitialPeers}, "freeze");
+    const SurvivorBaseline_t freezeBase{peers, acqSnapshot, freezeSkip, InitialPeers};
+    expectPhaseSettled(ctx, {region, freezeBase, freezeDomains, {FreezeTarget}, "freeze"});
 
     // ── Phase D: graceful leave ────────────────────────────────────
+    // The dtor's leave is what gives the slot back, and the region is where it lands. A worker
+    // thread that joined out says only that the thread ran, whatever the leave wrote.
     harness::log("graceful leave: peer %u stop + destroy", LeaveTarget);
-    const auto dPre = snapshotAcq(peers, InitialPeers);
+    const auto leavePre = snapshotAcq(peers, InitialPeers);
+    const auto leaveSkip = skipSet(InitialPeers, {LeaveTarget, FreezeTarget});
     peers[LeaveTarget].state.store(PState::Stop);
     peers[LeaveTarget].runner.join();
-    ctx.checkf(peers[LeaveTarget].state.load() == PState::Dead,
-               "peer %u joined out as Dead", LeaveTarget);
+    const auto leaveDomains = snapshotDomains(peers, InitialPeers, leaveSkip);
 
-    harness::sleepMs(1500);
-    expectSurvivorsAdvanced(
-        ctx, {peers, dPre, skipSet(InitialPeers, {LeaveTarget, FreezeTarget}), InitialPeers},
-        "leave");
+    bool leftParticipating = false;
+    for (cme::DomainId domainId = 1; domainId <= NumDomains; ++domainId)
+    {
+        leftParticipating =
+            leftParticipating || harness::participatesIn(region, LeaveTarget, domainId);
+    }
+    ctx.checkf(!leftParticipating, "peer %u's leave cleared every participation bit it held",
+               LeaveTarget);
+
+    const SurvivorBaseline_t leaveBase{peers, leavePre, leaveSkip, InitialPeers};
+    expectPhaseSettled(ctx, {region, leaveBase, leaveDomains, {LeaveTarget}, "leave"});
 
     // ── Phase E: rejoin same slot ──────────────────────────────────
     harness::log("rejoin slot %u", LeaveTarget);
@@ -322,25 +459,38 @@ void runBody(harness::TestContext& ctx)
                LeaveTarget);
 
     // ── Phase F: concurrent multi-freeze ───────────────────────────
+    // Two crashes at once, so the two recoveries overlap. Each dead slot is asked for separately:
+    // one of the two finishing is not the same answer as both.
     harness::log("concurrent freeze: peers %u and %u", MultiA, MultiB);
-    const auto fPre = snapshotAcq(peers, InitialPeers);
+    const auto multiPre = snapshotAcq(peers, InitialPeers);
+    const auto multiSkip = skipSet(InitialPeers, {MultiA, MultiB, FreezeTarget});
     freezePeer(peers[MultiA]);
     freezePeer(peers[MultiB]);
-    harness::sleepMs(7500);
-    expectFlat(ctx, peers[MultiA], fPre[MultiA], MultiA);
-    expectFlat(ctx, peers[MultiB], fPre[MultiB], MultiB);
-    expectSurvivorsAdvanced(
-        ctx, {peers, fPre, skipSet(InitialPeers, {MultiA, MultiB, FreezeTarget}), InitialPeers},
-        "multi-freeze");
+    const auto multiDomains = snapshotDomains(peers, InitialPeers, multiSkip);
+
+    const SurvivorBaseline_t multiBase{peers, multiPre, multiSkip, InitialPeers};
+    expectPhaseSettled(ctx, {region, multiBase, multiDomains, {MultiA, MultiB}, "multi-freeze"});
 
     // ── Phase G: random churn for 10 s ─────────────────────────────
     // Seed frozen[] with the peers already frozen in B/F so the survivor cap counts them.
     harness::log("random churn for 10 s (events every 800 ms)");
     auto frozen = skipSet(InitialPeers, {FreezeTarget, MultiA, MultiB});
-    const auto gPre = snapshotAcq(peers, InitialPeers);
+    const auto churnPre = snapshotAcq(peers, InitialPeers);
     runChurn(peers, InitialPeers, frozen, timing::Secs{10});
-    harness::sleepMs(4000);
-    expectSurvivorsAdvanced(ctx, {peers, gPre, frozen, InitialPeers}, "churn");
+    const auto churnDomains = snapshotDomains(peers, InitialPeers, frozen);
+
+    // Every peer churn took, not only the ones it took last: a sweep that recovers the newest crash
+    // and forgets an earlier one leaves exactly one slot behind.
+    std::vector<cme::PeerId> departed;
+    for (cme::PeerId peerId = 0; peerId < InitialPeers; ++peerId)
+    {
+        if (frozen[peerId])
+        {
+            departed.push_back(peerId);
+        }
+    }
+    const SurvivorBaseline_t churnBase{peers, churnPre, frozen, InitialPeers};
+    expectPhaseSettled(ctx, {region, churnBase, churnDomains, std::move(departed), "churn"});
 
     // ── Phase H: shutdown ──────────────────────────────────────────
     harness::log("clean shutdown");

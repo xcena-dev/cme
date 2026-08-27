@@ -298,8 +298,10 @@ LeaveResult leaveDomain(LocalPeerState& peerState, DomainId domainId)
 }
 
 CreateResult createDomainLocked(LocalPeerState& peerState, std::string_view name,
-                                DomainId& outDomainId)
+                                DomainId& outDomainId, std::uint64_t& outIncarnation)
 {
+    outIncarnation = 0;
+
     if (name.empty() || name.size() >= Geometry::DomainRecord_t::MaxNameLen)
     {
         return CreateResult::CorruptRegion;  // API layer validates; defensive
@@ -327,6 +329,10 @@ CreateResult createDomainLocked(LocalPeerState& peerState, std::string_view name
     // Build the new incarnation in the snapshot. epoch is monotonic across incarnations
     // (NOT reset): prior holders still distinguish a newer transfer.
     record.generation = record.generation + 1;  // reuse ABA guard
+
+    // From the snapshot this create writes, not a later read of the slot: a second visit could find
+    // the incarnation of whatever took the slot after this one.
+    outIncarnation = record.generation;
     std::memset(record.name, 0, Geometry::DomainRecord_t::MaxNameLen);
     std::memcpy(record.name, name.data(), name.size());
     record.holder = peerState.getPeerId();  // genesis holder = creator

@@ -48,7 +48,7 @@ void runBody(harness::TestContext& ctx)
                "one truth copy and one shadow per domain");
 
     auto solo = harness::makePeer(region, SoloId);
-    const cme::DomainId lane = solo.createDomain(Domain);
+    const cme::DomainId lane = solo.createDomain(Domain).id;
     if (!ctx.check(!cme::isNoDomain(lane), "the sole peer creates a domain"))
     {
         return;

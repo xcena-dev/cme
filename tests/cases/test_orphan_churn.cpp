@@ -13,14 +13,18 @@
 // only raises a freeze flag; the worker applies it, so nothing races on the Peer pointer.
 //
 // Tolerant by design -- ops racing recovery legitimately throw. The teeth are the
-// end-state invariants: every peer made progress, no unexpected fatal, and no slot leak
+// end-state invariants: every peer completed an op, no unexpected fatal, and no slot leak
 // (a fresh peer can still create slots - workers domains).
+//
+// That leak bound is exact, not slack: at quiesce each live worker may hold one private
+// domain of its own, so all of the allowance is already spent and one missed reclaim fails it.
 //
 // Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
 // --strategy selects the successor policy (order|request|request-agg|peterson).
 
 #include <array>
 #include <atomic>
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +55,9 @@ struct ChurnSlot_t : harness::PeerSlot_t
 {
     std::atomic<bool> ready{false};   // the worker has spawned, so churn may start on it
     std::atomic<bool> paused{false};  // worker idles its op loop while quiescing
+    // Ops that finished, where the inherited acquires counts ops that were attempted. A
+    // churn race legitimately throws, so only this one separates progress from spinning.
+    std::atomic<std::uint64_t> progressed{0};
 };
 
 constexpr cme::PeerId Workers = 4;  // concurrent worker threads
@@ -117,21 +124,29 @@ void worker(ChurnSlot_t* peerSlot)
                 privateId = cme::NoDomain;  // reclaimed while we were away
             }
 
+            bool completed = false;
             if (privateId == cme::NoDomain)
             {
                 privateName = "p" + std::to_string(peerSlot->peerId) + "_" + std::to_string(seq++);
-                privateId = peerSlot->peer->createDomain(privateName);  // creator auto-joins
+                privateId = peerSlot->peer->createDomain(privateName).id;  // creator auto-joins
+                completed = true;
             }
             else if (rng() % 10u < 7u)
             {
                 auto guard = peerSlot->peer->tryLock(privateId, timing::Millis{2});
+                completed = guard.has_value();
             }
             else
             {
                 peerSlot->peer->deleteDomain(privateId);
                 privateId = cme::NoDomain;
+                completed = true;
             }
             peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
+            if (completed)
+            {
+                peerSlot->progressed.fetch_add(1, std::memory_order_relaxed);
+            }
             // Think-time: without it the soak degenerates into a control-lock contention
             // storm rather than the moderate churn recovery is meant to see.
             harness::sleepMs(2);
@@ -254,7 +269,9 @@ void runBody(harness::TestContext& ctx)
 
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
-        ctx.check(peers[i].acquires.load() > 0, "worker made forward progress");
+        harness::log("worker %u: %" PRIu64 " ops attempted, %" PRIu64 " completed", i,
+                     peers[i].acquires.load(), peers[i].progressed.load());
+        ctx.check(peers[i].progressed.load() > 0, "worker completed at least one op");
         ctx.check(!peers[i].failed.load(), "worker hit no unexpected fatal");
     }
     ctx.check(auditCreated >= DataSlots - Workers,

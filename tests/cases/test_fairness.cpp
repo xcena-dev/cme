@@ -4,8 +4,12 @@
 // test_fairness.cpp -- N peers x T threads x D domains contended workload.
 //
 // Each peer runs one Peer instance; its T threads contend on the per-domain local mutex
-// (intra-node) plus the CXL ownership (inter-node). Passes if the spread between max and
-// min per-peer acquires stays within --bound * mean.
+// (intra-node) plus the CXL ownership (inter-node). Passes when every worker returned, every
+// peer completed its whole acquire budget, and no acquire hit its deadline.
+//
+// The per-peer spread is reported against --bound rather than gated. Every peer gets the same
+// fixed budget here, so the spread is zero whenever those gates hold; an equity bound worth
+// gating needs a time-boxed window and a stated sample count.
 //
 //   -n N           peers (default 8, max 64)
 //   -d D           domains (default 4, max 64)
@@ -16,7 +20,7 @@
 //   --cs-sleep MS  hold the lock for MS ms (default 0)
 //   --asymmetric   peer 0 short CS, others long CS
 //   --order|--request|--request-agg   strategy (default request)
-//   --bound F      max (max-min)/mean (default 0.15)
+//   --bound F      reference line the reported (max-min)/mean is printed against (default 0.15)
 
 // getopt_long is attributed to <bits/getopt_ext.h>, which .clang-tidy ignores, so the
 // include-cleaner fixer reads this header as unused and deletes it. The NOLINT stops that.
@@ -228,7 +232,7 @@ void csWork(std::uint32_t iters) noexcept
 struct PeerResult_t
 {
     std::uint64_t totalAcq{0};
-    // Acquires in the measured (post-warmup) section only -- the fairness gate.
+    // Acquires in the measured (post-warmup) section only -- what the budget gate reads.
     // Bench-owned, not telemetry, so warm-up never counts toward the spread.
     std::atomic<std::uint64_t> measuredAcq{0};
     std::uint64_t waitCount{0};
@@ -474,7 +478,8 @@ void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t
     }
 }
 
-// The fairness gate: acquire spread across peers, plus the deadline-hit total.
+// What the gates read: the acquire extremes, the deadline-hit total, and how many workers
+// left through their catch block instead of finishing.
 struct Spread_t
 {
     std::uint64_t maxAcq{0};
@@ -482,6 +487,7 @@ struct Spread_t
     double mean{0.0};
     double dev{0.0};
     std::uint32_t deadlineHits{0};
+    std::uint32_t workerFailures{0};
 };
 
 Spread_t computeSpread(const std::vector<PeerResult_t>& results)
@@ -494,6 +500,7 @@ Spread_t computeSpread(const std::vector<PeerResult_t>& results)
         spread.minAcq = std::min(spread.minAcq, result.totalAcq);
         sumAcq += result.totalAcq;
         spread.deadlineHits += result.deadlineHits.load();
+        spread.workerFailures += result.returnCode != 0 ? 1u : 0u;
     }
     spread.mean = static_cast<double>(sumAcq) / static_cast<double>(results.size());
     spread.dev = spread.mean > 0 ? static_cast<double>(spread.maxAcq - spread.minAcq) / spread.mean : 0.0;
@@ -665,7 +672,7 @@ void runBody(harness::TestContext& ctx)
     printHandoffBreakdown(results);
 #endif
 
-    std::printf("\nbound check:\n");
+    std::printf("\nspread report:\n");
     std::printf("  max=%" PRIu64 "  min=%" PRIu64 "  mean=%.1f  (max-min)/mean=%.3f  bound=%.3f\n",
                 spread.maxAcq, spread.minAcq, spread.mean, spread.dev, opt.bound);
 
@@ -673,7 +680,12 @@ void runBody(harness::TestContext& ctx)
     {
         std::printf("  deadline hits: %u\n", spread.deadlineHits);
     }
-    ctx.check(spread.dev <= opt.bound, "spread stayed inside the fairness bound");
+    // Budget per peer: every thread of it sweeps every domain, iterPerThread times.
+    const std::uint64_t budgetPerPeer = static_cast<std::uint64_t>(opt.iterPerThread) *
+                                        opt.numDomains * opt.threadsPerPeer;
+    ctx.check(spread.workerFailures == 0, "every peer worker returned without an exception");
+    ctx.check(spread.minAcq == budgetPerPeer && spread.maxAcq == budgetPerPeer,
+              "every peer completed its whole acquire budget");
     ctx.check(spread.deadlineHits == 0, "no acquire hit its deadline");
 }
 

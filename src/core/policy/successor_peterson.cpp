@@ -14,12 +14,12 @@
 
 #include "core/policy/successor_peterson.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/spin.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
@@ -28,7 +28,6 @@
 #include "core/types.hpp"
 #include "observe/latency.hpp"
 #include "util/coherency.hpp"
-#include "util/cpu.hpp"
 
 namespace cme
 {
@@ -68,7 +67,7 @@ using peterson_tree::roundUpPow2;
     OBSERVE_LATENCY_END(ClimbAnnounce, peerState, domainId);
 
     OBSERVE_LATENCY_BEGIN(ClimbSpin);
-    cpu::SpinBackoff backoff{SpinPausesMin, SpinPausesMax};
+    spin::Backoff backoff{SpinPausesMin, SpinPausesMax};
     bool won = false;
     while (true)
     {
@@ -84,7 +83,7 @@ using peterson_tree::roundUpPow2;
         {
             break;  // deadline; back out below
         }
-        cpu::relaxCpu(backoff.next());
+        backoff.pause();
     }
     OBSERVE_LATENCY_END(ClimbSpin, peerState, domainId);
 
@@ -126,7 +125,7 @@ struct PetersonState_t
                                const timing::Deadline& deadline) noexcept
     {
         const std::uint32_t base = domain * nodesPerDomain_;
-        for (std::size_t won = 0; won < path_.size(); ++won)
+        for (std::uint32_t won = 0; won < path_.size(); ++won)
         {
             const ClimbStep_t& step = path_[won];
             if (lockNode(nodes_[base + step.node], step.role, deadline, peerState, domain))
@@ -134,9 +133,9 @@ struct PetersonState_t
                 continue;
             }
             // Level @won timed out (already cleared its own interest); back out [0, won).
-            for (std::size_t i = won; i-- > 0;)
+            for (std::uint32_t level = won; level-- > 0;)
             {
-                unlockNode(nodes_[base + path_[i].node], path_[i].role, mode_);
+                unlockNode(nodes_[base + path_[level].node], path_[level].role, mode_);
             }
             return false;
         }

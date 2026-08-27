@@ -9,6 +9,7 @@
 // does: the residue of the first would decide the second.
 
 #include <chrono>
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -77,10 +78,8 @@ void checkKilledHoldingLease(harness::TestContext& ctx)
     }
     const auto waited = joining.elapsed<timing::Millis>();
 
-    std::printf("%s: the next joiner got in after %lld ms (LeaseTimeout %lld ms)\n",
-                cme::failpoint::nameOf(BeforeCommit),
-                static_cast<long long>(waited.count()),
-                static_cast<long long>(LeaseTimeoutMs.count()));
+    std::printf("%s: the next joiner got in after %" PRId64 " ms (LeaseTimeout %" PRId64 " ms)\n",
+                cme::failpoint::readName(BeforeCommit), waited.count(), LeaseTimeoutMs.count());
 
     ctx.check(joined, "a later joiner got past the lease the crash left behind");
     ctx.check(waited >= LeaseTimeoutMs,
@@ -99,7 +98,7 @@ void checkKilledHoldingSlot(harness::TestContext& ctx)
         return;
     }
     std::printf("%s: the slot is committed and the lease is still on it\n",
-                cme::failpoint::nameOf(AfterCommit));
+                cme::failpoint::readName(AfterCommit));
 
     auto region = harness::openBoundRegion();
     ctx.check(harness::hasMemberStatus(region, 0, Status::Active),

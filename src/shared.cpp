@@ -245,7 +245,7 @@ std::optional<Guard> Session::tryLock(std::string_view name,
     return Guard{std::move(guardImpl)};
 }
 
-void Session::joinDomain(std::string_view name)
+DomainHandle_t Session::joinDomain(std::string_view name)
 {
     if (!impl_)
     {
@@ -253,6 +253,7 @@ void Session::joinDomain(std::string_view name)
     }
     const DomainHandle_t handle = impl_->resolveHandle(name);
     impl_->peer->joinDomain(handle.id, handle.incarnation);
+    return handle;
 }
 
 void Session::leaveDomain(std::string_view name)
@@ -265,13 +266,23 @@ void Session::leaveDomain(std::string_view name)
     impl_->peer->leaveDomain(handle.id, handle.incarnation);
 }
 
-void Session::createDomain(std::string_view name)
+void Session::leaveDomain(DomainHandle_t handle)
+{
+    if (!impl_)
+    {
+        throw JoinError{"cme::Session::leaveDomain: session not joined"};
+    }
+    impl_->peer->leaveDomain(handle.id, handle.incarnation);
+}
+
+DomainHandle_t Session::createDomain(std::string_view name)
 {
     if (!impl_)
     {
         throw JoinError{"cme::Session::createDomain: session not joined"};
     }
-    static_cast<void>(impl_->peer->createDomain(name));
+
+    return impl_->peer->createDomain(name);
 }
 
 void Session::deleteDomain(std::string_view name)
@@ -284,12 +295,12 @@ void Session::deleteDomain(std::string_view name)
     impl_->peer->deleteDomain(handle.id, handle.incarnation);
 }
 
-std::vector<std::string> Session::getDomainNames() const
+std::vector<DomainEntry_t> Session::getDomainEntries() const
 {
-    std::vector<std::string> names;
+    std::vector<DomainEntry_t> entries;
     if (!impl_)
     {
-        return names;
+        return entries;
     }
     // Scan Active data slots (skip control slot 0).
     const std::uint32_t numDomains = impl_->geometry.getDomainCount();
@@ -297,11 +308,25 @@ std::vector<std::string> Session::getDomainNames() const
     {
         const auto record = coherency::get(impl_->geometry.getDomainRecord(domainId),
                                            impl_->peer->getCoherencyMode());  // rmb + 64B read
-        if (record.isValidMagic() &&
-            record.hasState(Geometry::DomainRecord_t::State::Active))
+        if (record.isValidMagic() && record.hasState(Geometry::DomainRecord_t::State::Active))
         {
-            names.emplace_back(record.getName());
+            // Both from this snapshot. A second read of the slot could answer for whatever took it.
+            entries.push_back(DomainEntry_t{std::string{record.getName()},
+                                            DomainHandle_t{domainId, record.generation}});
         }
+    }
+    return entries;
+}
+
+std::vector<std::string> Session::getDomainNames() const
+{
+    const std::vector<DomainEntry_t> entries = getDomainEntries();
+
+    std::vector<std::string> names;
+    names.reserve(entries.size());
+    for (const DomainEntry_t& entry : entries)
+    {
+        names.push_back(entry.name);
     }
     return names;
 }

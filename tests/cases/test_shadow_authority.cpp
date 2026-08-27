@@ -21,9 +21,12 @@
 // getDomainRecordShadow takes a peer index. Admission picks the slot a Session lands on and
 // reports it nowhere, so the id has to be named by the case.
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 
 #include "common/timing.hpp"
+#include "config.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -50,8 +53,13 @@ constexpr const char* Domain = "lane0";
 constexpr std::uint64_t EpochLead = 16;
 
 // The window the waiter is given while the shadow lies. A shadow-trusting build adopts on its
-// first poll, so this only has to outlast the poll interval.
-constexpr timing::Millis ForgedWindow{400};
+// first poll, so the floor is stated in poll cycles: a slower cadence widens the window rather
+// than leaving a refusal nobody had time to break.
+constexpr std::uint32_t ForgedPollCycles = 100;
+constexpr timing::Millis ForgedWindow =
+    std::max(timing::Millis{400},
+             std::chrono::duration_cast<timing::Millis>(cme::DefaultPollInterval*
+                                                            ForgedPollCycles));
 
 // The window for the real handoff once the holder unpins. Wide enough for one poll cycle to
 // carry the grant across.
@@ -66,7 +74,7 @@ void runBody(harness::TestContext& ctx)
 
     auto holder = harness::makePeer(region, HolderId);
     auto waiter = harness::makePeer(region, WaiterId);
-    const cme::DomainId lane = holder.createDomain(Domain);
+    const cme::DomainId lane = holder.createDomain(Domain).id;
     waiter.joinDomain(lane);
 
     auto held = holder.lock(lane);

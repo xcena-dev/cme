@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright XCENA Inc.
 //
-// failpoint.hpp -- named points where a test build can make the process die.
+// failpoint.hpp -- named points where a test build can stop the process at a write boundary.
 //
-// A test that waits for a crash between two FAM writes to happen by chance never gets the boundary
+// A test that waits for the gap between two FAM writes to happen by chance never gets the boundary
 // it wanted, so the boundaries are named here and a run arms one. CME_FAILPOINT off compiles every
-// call to nothing. SIGKILL rather than exit: a destructor that ran would make it a departure.
-// A fifth axis on the same rule as the other four, but it does not ride OBSERVE_EVENT, since a
-// boundary is a place rather than an event.
+// call to nothing. A fifth axis on the same rule as the other four, but it does not ride
+// OBSERVE_EVENT, since a boundary is a place rather than an event.
+//
+// Dying asks what a survivor makes of the state left behind. Holding asks what this process does
+// with a write that landed while the window was open, which needs the process alive to answer.
 
 #pragma once
 
 #include <cstdint>
+
+#include "common/timing.hpp"
 
 namespace cme::failpoint
 {
@@ -33,7 +37,7 @@ enum class Category : std::uint32_t
     Mechanism = 2,   // in machinery the spec abstracts away; only the implementation answers
 };
 
-// The category is the high byte, so categoryOf reads it off the value rather than from a second
+// The category is the high byte, so readCategory reads it off the value rather than from a second
 // table that would drift from this one.
 inline constexpr std::uint32_t CategoryShift = 8U;
 inline constexpr std::uint32_t SpecBase =
@@ -62,19 +66,23 @@ enum class Boundary : std::uint32_t
     DeleteBeforeFree = MechBase | 8,        // participation retracted, the record not yet Free
     DeleteBeforeDeactivate = MechBase | 9,  // the record is Free, the bitmap bit is not cleared
     ReclaimMidLoop = MechBase | 10,         // some of a dead peer's orphans reclaimed, some not
+
+    // Leaving published and the poll thread still up, which is the only stretch where a grant that
+    // arrives anyway is still forwarded. LeaveBeforeHandoff is past the poll stop, so it is not this.
+    LeaveInDrain = MechBase | 11,
 };
 
-[[nodiscard]] constexpr Category categoryOf(Boundary boundary) noexcept
+[[nodiscard]] constexpr Category readCategory(Boundary boundary) noexcept
 {
     return static_cast<Category>(static_cast<std::uint32_t>(boundary) >> CategoryShift);
 }
 
 // For a case's own output: a failure that names the boundary is one a reader can re-run.
 //
-// Outside the CME_FAILPOINT gate with categoryOf, and not for want of trying to hide it. An
+// Outside the CME_FAILPOINT gate with readCategory, and not for want of trying to hide it. An
 // uncalled constexpr function emits nothing, so gating buys no bytes, and it would cost the
 // -Wswitch below: with no default case, every build catches an enumerator that gained no name.
-[[nodiscard]] constexpr const char* nameOf(Boundary boundary) noexcept
+[[nodiscard]] constexpr const char* readName(Boundary boundary) noexcept
 {
     switch (boundary)
     {
@@ -110,23 +118,36 @@ enum class Boundary : std::uint32_t
             return "delete.before_deactivate";
         case Boundary::ReclaimMidLoop:
             return "reclaim.mid_loop";
+        case Boundary::LeaveInDrain:
+            return "leave.in_drain";
         case Boundary::None:
             return "none";
     }
     return "unknown";
 }
 
-// Compiled is what a case asks before it arms anything: without it the arm is a no-op and the
-// crash it is waiting for never comes.
+// Compiled is what a case asks before it arms anything: without it the arm is a no-op and neither
+// the crash nor the hold it is waiting for ever comes.
 #if defined(CME_FAILPOINT)
 
 inline constexpr bool Compiled = true;
 
-// Arm @boundary for this process. A forked child inherits whatever was armed at fork, so a case
+// Arm @boundary to kill this process. A forked child inherits whatever was armed at fork, so a case
 // may arm before the fork or inside the child body.
 void arm(Boundary boundary) noexcept;
 
-// Die if @boundary is the armed one.
+// Arm @boundary to stop the thread that reaches it until release(), clearing the last hold. Waiter
+// and holder are threads of one process, so nothing here crosses a process and no shared word does.
+void hold(Boundary boundary) noexcept;
+
+// Whether a thread reached the held boundary and is waiting there, within @within.
+[[nodiscard]] bool awaitHeld(timing::Nanos within) noexcept;
+
+// Let the held thread continue. Safe before anything reaches the boundary: the word it reads is
+// stored either way.
+void release() noexcept;
+
+// Die or wait, whichever @boundary was armed for, and nothing if it was not the armed one.
 void reach(Boundary boundary) noexcept;
 
 #define CME_FAILPOINT_REACH(boundary) ::cme::failpoint::reach(boundary)
@@ -136,6 +157,19 @@ void reach(Boundary boundary) noexcept;
 inline constexpr bool Compiled = false;
 
 inline void arm(Boundary) noexcept
+{
+}
+
+inline void hold(Boundary) noexcept
+{
+}
+
+[[nodiscard]] inline bool awaitHeld(timing::Nanos) noexcept
+{
+    return false;
+}
+
+inline void release() noexcept
 {
 }
 

@@ -9,7 +9,7 @@
 // whose claim names A is neither treated as stranded nor stakeable, and stays Recovering
 // until member slots exhaust.
 //
-// Scenario 1 isolates retractClaimsBy: freeze A after seeding a ghost word authored by A on
+// The case isolates retractClaimsBy: freeze A after seeding a ghost word authored by A on
 // a spare None slot G, then let a survivor recover A. word[G] must return to NoPeer before
 // A's slot commits to None -- G is never selected and nothing else touches its word, so
 // only the hook can have wiped it.
@@ -38,11 +38,6 @@ namespace
 using Status = cme::Geometry::Member_t::Status;
 
 constexpr std::uint32_t RecoveryDeadlineMs = 15000;
-constexpr std::uint32_t FineStepMs = 1;  // fast poll: catch the stake inside the 20 ms settle
-
-// A thaw has to take effect inside the 20 ms settle window scenario 2 measures, so the frozen
-// worker idles far shorter than the default.
-constexpr std::uint32_t ThawSleepMs = 2;
 
 }  // namespace
 
@@ -63,10 +58,6 @@ void runBody(harness::TestContext& ctx)
     // Workers of the MaxPeers slots; the rest stay unadmitted, which is what the ghost claim below
     // needs a slot for.
     std::array<harness::PeerSlot_t, MaxPeers> peers{};
-    for (harness::PeerSlot_t& slot : peers)
-    {
-        slot.idleMs = ThawSleepMs;
-    }
     harness::spawnPeerWorkers(peers, Workers, region, NumDomains);
     harness::sleepMs(1000);  // memberships go Active; ownership spreads
 

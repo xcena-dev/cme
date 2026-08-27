@@ -22,6 +22,7 @@
 // state beyond that one line.
 
 #include <atomic>
+#include <cinttypes>
 #include <cstdint>
 #include <thread>
 
@@ -134,8 +135,8 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     const std::uint64_t expected =
         static_cast<std::uint64_t>(cme::LeaseAcquireDeadline / ChurnPeriod) / 2;
     ctx.checkf(stamps.load() >= expected,
-               "contended lease: the nonce kept moving (%llu stamps)",
-               static_cast<unsigned long long>(stamps.load()));
+               "contended lease: the nonce kept moving (%" PRIu64 " stamps)",
+               stamps.load());
 
     storeNonce(control, 0, coherency);  // leave the region joinable for whatever runs next
 }
