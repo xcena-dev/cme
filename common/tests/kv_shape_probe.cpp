@@ -9,6 +9,7 @@
 // has a wrong answer that looks like a correct one, because a path built one letter off and a value
 // carrying an invisible \r both read as a setting that is simply absent.
 
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <vector>

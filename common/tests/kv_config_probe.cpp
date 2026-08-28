@@ -7,6 +7,7 @@
 // says something else: a hash inside a value, a colon inside a value, a key whose blank value is a
 // setting rather than a section, and a number that is not one.
 
+#include <cstdint>
 #include <cstdio>
 #include <sstream>
 #include <string>
