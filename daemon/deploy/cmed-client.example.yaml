@@ -1,0 +1,24 @@
+# cmed requester configuration.
+#
+# For a process that links cmed_client. Its own file rather than a section of the daemon's, because
+# every key below is that application's own: two programs on one node can want a 50 ms acquire and a
+# 30 s one, and a node-wide file cannot say both.
+#
+# Where this file lives is the application's choice, and the library has no default path. Every key is
+# optional and falls back to the value shown, so an application that reads no file still runs. It is
+# refused when anyone but its owner can write it.
+#
+# The socket path is not here. The daemon bound it, so the library builds it from the daemon's own file
+# rather than from a second copy that could disagree. That file therefore has to be readable and has to
+# name socket.dir and area.name; without them the load is refused rather than guessed.
+
+# ── This process's own pace and deadlines ───────────────────────────────
+# None of these is something the daemon has to agree with. A daemon that has not finished starting
+# refuses the connection, and the first two are how long that is tolerated.
+#
+# lock_timeout_ms is a deadline on waiting for the daemon, not on holding a domain. A caller that holds
+# a domain for a minute is not late; a daemon that has not answered in one is. A caller that wants its
+# own for a single acquire passes a deadline to tryLock instead of changing this file.
+client:
+  setup_timeout_ms: 5000         # how long connect() waits for the Welcome once accepted
+  lock_timeout_ms: 5000           # wait for LockHeld before lock() gives up

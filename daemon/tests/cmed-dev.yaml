@@ -1,0 +1,29 @@
+# cmed daemon configuration for a run out of the build tree.
+#
+# The same reader as deploy/cmed.example.yaml, with the two values that need root taken out. Every
+# other key is left at its default, so what this file says is exactly what a development run differs by.
+#
+#   mkdir -p /tmp/cmed
+#   build/tools/cme-format --uri shm:/cme-region
+#   chmod 0600 daemon/tests/cmed-dev.yaml
+#   build/daemon/cmed --config daemon/tests/cmed-dev.yaml
+#
+# The chmod is not tidiness. The reader refuses a file group or other can write, and a checkout under
+# a 0002 umask leaves this 0664.
+#
+# Not for a host. /tmp is world-writable, so the directory this binds in is one any account can put a
+# name in. deploy/cmed.example.yaml is the file a host installs.
+
+area:
+  name: cmed
+
+# Under /tmp because a run out of the build tree has no root to make /run/cmed with. The socket file's
+# own mode is what admits a requester, and 0600 is this account alone.
+socket:
+  dir: /tmp/cmed
+  mode: "0600"
+
+# A named shm object, so this needs no devdax node and no mounted filesystem. cme-format lays it out,
+# and cmed never formats one itself.
+region:
+  uri: shm:/cme-region

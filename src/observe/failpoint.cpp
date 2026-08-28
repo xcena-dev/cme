@@ -25,28 +25,28 @@ namespace
 
 // Relaxed both ways: the arm happens before the work that reaches the boundary, and no other state
 // is being published through this.
-std::atomic<Boundary> armedBoundary{Boundary::None};
-std::atomic<bool> holdRather{false};
+std::atomic<Boundary> g_armedBoundary{Boundary::None};
+std::atomic<bool> g_holdRather{false};
 
 // The two halves of the handshake. Release ordering on each store, since what the other thread has
 // to see with the word is the record write that went with it.
-std::atomic<bool> reachedHold{false};
-std::atomic<bool> letGo{false};
+std::atomic<bool> g_reachedHold{false};
+std::atomic<bool> g_letGo{false};
 
 }  // namespace
 
 void arm(Boundary boundary) noexcept
 {
-    holdRather.store(false, std::memory_order_relaxed);
-    armedBoundary.store(boundary, std::memory_order_relaxed);
+    g_holdRather.store(false, std::memory_order_relaxed);
+    g_armedBoundary.store(boundary, std::memory_order_relaxed);
 }
 
 void hold(Boundary boundary) noexcept
 {
-    reachedHold.store(false, std::memory_order_relaxed);
-    letGo.store(false, std::memory_order_relaxed);
-    holdRather.store(true, std::memory_order_relaxed);
-    armedBoundary.store(boundary, std::memory_order_relaxed);
+    g_reachedHold.store(false, std::memory_order_relaxed);
+    g_letGo.store(false, std::memory_order_relaxed);
+    g_holdRather.store(true, std::memory_order_relaxed);
+    g_armedBoundary.store(boundary, std::memory_order_relaxed);
 }
 
 bool awaitHeld(timing::Nanos within) noexcept
@@ -54,32 +54,33 @@ bool awaitHeld(timing::Nanos within) noexcept
     // Short: what this waits out is one store by the thread entering the boundary, not any work.
     constexpr timing::Micros LookGap{10};
 
-    return poll::waitUntil([]
-                           {
-                               return reachedHold.load(std::memory_order_acquire);
-                           },
-                           within, LookGap);
+    return poll::waitUntil(
+        []
+        {
+            return g_reachedHold.load(std::memory_order_acquire);
+        },
+        within, LookGap);
 }
 
 void release() noexcept
 {
-    letGo.store(true, std::memory_order_release);
+    g_letGo.store(true, std::memory_order_release);
 }
 
 void reach(Boundary boundary) noexcept
 {
-    if (armedBoundary.load(std::memory_order_relaxed) != boundary)
+    if (g_armedBoundary.load(std::memory_order_relaxed) != boundary)
     {
         return;
     }
 
-    if (!holdRather.load(std::memory_order_relaxed))
+    if (!g_holdRather.load(std::memory_order_relaxed))
     {
         // Said before the raise, on unbuffered stderr: SIGKILL is uncatchable, so a case that sees
         // no line here knows the boundary went unvisited rather than guessing it from the signal.
         std::fprintf(stderr, "  [failpoint] pid %d reached %s\n",
                      static_cast<int>(::getpid()), readName(boundary));
-        std::raise(SIGKILL);
+        std::raise(SIGKILL);  // NOLINT(misc-include-cleaner) POSIX, via <csignal>
         return;
     }
 
@@ -88,12 +89,13 @@ void reach(Boundary boundary) noexcept
     constexpr timing::Millis HeldCap{5000};
     constexpr timing::Micros LookGap{10};
 
-    reachedHold.store(true, std::memory_order_release);
-    const bool freed = poll::waitUntil([]
-                                       {
-                                           return letGo.load(std::memory_order_acquire);
-                                       },
-                                       HeldCap, LookGap);
+    g_reachedHold.store(true, std::memory_order_release);
+    const bool freed = poll::waitUntil(
+        []
+        {
+            return g_letGo.load(std::memory_order_acquire);
+        },
+        HeldCap, LookGap);
     if (!freed)
     {
         // The cap, not a release. Said out loud because the case that armed this is the one that

@@ -85,11 +85,10 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.StructSuffix
     value: '_t'
-  # Impl is the pimpl idiom's own name, and _t means a record: a struct whose fields are the
-  # point. An Impl is the opposite -- the type a header refuses to show. Renaming it would spend
-  # the suffix's meaning on the one struct that is not a record.
+  # _t means a record, a struct whose fields are the point. Impl is the type a header refuses to
+  # show, and the other two are constant groups standing in for an enum class that cannot hold a mask.
   - key: readability-identifier-naming.StructIgnoredRegexp
-    value: '^Impl$'
+    value: '^(Impl|EpollFlag|ConnectionEvents)$'
   - key: readability-identifier-naming.UnionCase
     value: CamelCase
   - key: readability-identifier-naming.UnionSuffix
@@ -133,6 +132,13 @@ CheckOptions:
     value: '_'
   - key: readability-identifier-naming.PublicMemberCase
     value: camelBack
+
+  # A static data member is a member too, so the suffix above reaches it rather than the g_ prefix
+  # a namespace-scope variable takes.
+  - key: readability-identifier-naming.ClassMemberCase
+    value: camelBack
+  - key: readability-identifier-naming.ClassMemberSuffix
+    value: '_'
 
   # Functions are camelCase verbs.
   - key: readability-identifier-naming.FunctionCase

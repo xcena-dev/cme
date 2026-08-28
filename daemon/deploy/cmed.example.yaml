@@ -1,0 +1,132 @@
+# cmed daemon configuration.
+#
+# Copy to /etc/cme/cmed.yaml, or pass --config <path>. Every key is optional and falls back to the
+# value shown, so a deployment with no file at all still runs. An unreadable line is refused with its
+# number rather than ignored, and so is a file anyone but its owner can write.
+#
+# Copy with `install -m 0644`, not `cp`, which takes the umask.
+#
+# The requester's keys are not here. They are per application rather than per node, so they live in a
+# file the application owns; cmed-client.example.yaml is the example for that one.
+#
+# The region's own shape is not here either. maxDomains, maxPeers and the strategy are fixed when the
+# region is formatted and read back by every joiner, so they belong to cme-format.
+
+# ── What this daemon serves ─────────────────────────────────────────────
+# One name per daemon. It names the socket and the lock below, so two daemons on one host each get
+# their own and cannot take each other's. The area itself is an anonymous file handed over the socket.
+#
+# For two daemons on one host: copy this file and change this name only. `region.uri` stays identical,
+# since that is the region they are peers of. The region must already exist with two peer slots.
+area:
+  name: cmed
+
+# ── Where requesters arrive ─────────────────────────────────────────────
+# The socket is bound at <dir>/<area.name>.sock and one daemon per area is held on <dir>/<name>.lock.
+# Under systemd the directory is RuntimeDirectory, fresh per start and owned by the daemon's uid.
+#
+# mode is applied after the bind, because the umask would narrow it. World-writable is refused: a
+# requester that connects receives a writable mapping.
+socket:
+  dir: /run/cmed
+  mode: "0660"
+
+# ── Who may connect ─────────────────────────────────────────────────────
+# Empty admits this daemon's uid alone. An entry is an account name or a numeric id, and a name that
+# resolves to no account is refused rather than dropped.
+#
+# gids match the connecting process's primary group only, because that is all the kernel stamps at
+# connect.
+admit:
+  uids: []
+  gids: []
+
+# ── The region this daemon is one peer of ───────────────────────────────
+# Every local requester shares this single peer slot, which is why it is one daemon per node per
+# region. Opened and never formatted: a format zeroes the region and the other nodes are using it.
+region:
+  uri: shm:/cme-region            # dax:, shm:, or file:
+  coherency: cache_coherent       # cache_coherent | uncached | flush
+  format_timeout_ms: 5000         # wait for a format already in flight before giving up
+
+# ── Keeping CXL ownership across requesters ─────────────────────────────
+# hold_ms bounds how long one run keeps the turn, which is what bounds another node's wait. A count of
+# grants would not, since a grant is a critical section and a section has no length.
+#
+# grant_validity_ms is how long a grant is worth acting on, counted from the acquire behind it. It has
+# to sit under the region's failure-detector window, or the region can hand the domain to another node
+# while a requester here still believes it holds one. It also has to stay above hold_ms, or a run would
+# outlive the grants it issued. The daemon refuses to start otherwise.
+cohort:
+  hold_ms: 150
+  grant_validity_ms: 400
+
+# ── The pool that takes a domain's turn ─────────────────────────────────
+# count has no automatic value: what the pool bounds is how many region acquires can be outstanding at
+# once, so the number belongs to the deployment. Zero is refused at startup.
+#
+# spin_us is how long an idle worker reads its own word before sleeping. Its worth is the wake it saves
+# the dispatcher, not the sleep: a hand-over to a worker that has not parked costs no syscall.
+workers:
+  count: 4
+  spin_us: 10
+
+# ── The dispatcher ──────────────────────────────────────────────────────
+# spin_us is its own, apart from the pool's above, because one thread spinning holds one core while the
+# pool spinning holds one per worker.
+#
+# idle_interval_ms bounds one doorbell wait, and a request arriving cuts it short. What it buys is a
+# pass reaching its top with nothing ringing, which is where work no requester announces gets seen: a
+# peer that died rings nothing.
+serve:
+  spin_us: 200
+  idle_interval_ms: 200
+
+# ── The control loop ────────────────────────────────────────────────────
+# The same bound on one epoll wait, and a connection arriving cuts it short. Its own key because the two
+# loops answer different questions with it, and a deployment may want one slower than the other.
+control:
+  idle_interval_ms: 200
+
+  # How many requesters this daemon holds at once. admit.uids and admit.gids already turn away the
+  # accounts this host does not serve, so what this bounds is one permitted account spending the fds.
+  max_connections: 256
+
+# ── The maintenance pass ────────────────────────────────────────────────
+# One pass is the registry refresh and the expired-turn sweep together, on a thread that never blocks on
+# a region acquire.
+#
+# A period rather than an idle bound: this pass has no arrival to wait for, so nothing cuts it short and
+# it does its work every time round.
+maintenance:
+  interval_ms: 20
+
+# ── Keeping the local registry level with the region ────────────────────
+# A requester cannot see the region, so the daemon copies the domain names into the area it hands out.
+# refresh_interval_ms is how long a domain another node created can go unseen by this node's
+# requesters, and a shorter gap buys that freshness with region traffic.
+#
+# delete_wait_timeout_ms is how long a delete waits for the domain to fall idle before answering EBUSY.
+# The name is cleared first, so what it waits out is a requester that resolved the id before that. Short,
+# because this wait holds the control thread and a requester inside its critical section is not late.
+registry:
+  refresh_interval_ms: 1000
+  delete_wait_timeout_ms: 100
+
+# ── Not read yet ────────────────────────────────────────────────────────
+# Written down because the daemon is being built against it. Unknown keys are parsed and dropped, so
+# leaving them here costs nothing and keeps the intent in one place.
+
+# The other starvation direction: consecutive grants to one requester while another waits.
+# cohort.hold_ms alone bounds only the remote side.
+# cohort:
+#   requester_run_cap: 4
+
+# A requester that dies inside its critical section leaves its domain mutex EOWNERDEAD, which the next
+# locker sees at once. This would cover the domain nobody is waiting on, where the daemon has to go
+# looking.
+# reclaim:
+#   interval_ms: 250
+
+# log:
+#   level: info                   # error | warn | info | debug

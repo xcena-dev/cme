@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright XCENA Inc.
+#
+# cmed.example.service -- one cme peer slot serving every requester on this node.
+#
+# An example, like the two yaml files beside it. Copy it, edit the two decisions below for the host,
+# and test the copy. Nothing in this directory is installed by a build.
+#
+#   sudo daemon/deploy/install.sh --build build
+#   systemctl start cmed && systemctl status cmed
+#
+# install.sh beside this file does the account, the modes and the daemon-reload. It never
+# overwrites a config an operator edited.
+#
+# Type=notify makes that last line the test: the daemon announces itself only once it can answer a
+# requester, so `systemctl start` blocking or failing is the answer, not a lagging indicator.
+#
+# Two settings have to agree with the config file, and getting either wrong is silent until a
+# requester cannot attach:
+#
+#   User= below, socket.mode and admit in the config are one decision. The socket file's mode draws
+#   the first boundary and admit judges the connecting process's credentials behind it. An empty
+#   admit takes this unit's uid alone, so every requester must run as `cme` until it names others.
+#
+#   The region backend decides what this unit must be allowed to open. dax: needs a DeviceAllow
+#   line, file: needs a ReadWritePaths line, shm: needs neither. All three are at the bottom,
+#   commented, because a default guess for one would be wrong for the others.
+
+[Unit]
+Description=CXL memory engine daemon (cmed)
+
+[Service]
+# The daemon says READY=1 once the area is published and it holds the liveness mutex. Opening the
+# region and formatting the area both come first and both can fail, so exec alone is not readiness.
+Type=notify
+ExecStart=/usr/local/bin/cmed --config /etc/cme/cmed.yaml
+
+# The manager kills and restarts this daemon if it hears no WATCHDOG=1 inside this window. The two
+# halves go together: the daemon pings from its maintenance thread and only while the dispatcher's
+# heartbeat is fresh, so a wedged dispatcher stops the pings while the process is still up.
+WatchdogSec=5s
+
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=5s
+# Exit 3 is another daemon already serving this area. That is a deployment mistake, and restarting
+# only repeats it.
+RestartPreventExitStatus=3
+
+User=cme
+Group=cme
+
+# ── What this unit may reach ────────────────────────────────────────────
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cme
+
+# The socket and the lock go here, and socket.dir in the config has to name it. ProtectSystem=strict
+# leaves /run read-only, so without this line the daemon has nowhere to bind.
+RuntimeDirectory=cmed
+
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ProcSubset=pid
+
+# No PrivateDevices=. region.uri names either a /dev/shm object or a /dev/dax node, so a private /dev
+# would hide the region this daemon is a peer of.
+
+# RemoveIPC would delete every shm object owned by this uid on stop, and with a shm: region that is
+# the region itself. The area needs no such sweep: it is anonymous and goes with its last reference.
+RemoveIPC=false
+
+# Nothing here speaks to the network. The one socket is the AF_UNIX datagram carrying READY=1.
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @swap @reboot @raw-io @cpu-emulation @obsolete
+SystemCallErrorNumber=EPERM
+
+# @resources stays allowed, unlike the rest: placing a region on the right NUMA node is set_mempolicy
+# and mbind, and libcme is the caller.
+
+UMask=0077
+
+# ── Fill in for the region backend ──────────────────────────────────────
+# region.uri = dax:/dev/dax0.0
+# DevicePolicy=closed
+# DeviceAllow=/dev/dax0.0 rw
+#
+# region.uri = file:/var/lib/cme/region
+# ReadWritePaths=/var/lib/cme
+#
+# region.uri = shm:/cme-region needs neither line: the object lives on the host's /dev/shm, which the
+# absence of PrivateDevices= above already leaves reachable.
+
+[Install]
+WantedBy=multi-user.target

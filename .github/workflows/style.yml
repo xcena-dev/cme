@@ -44,12 +44,12 @@ jobs:
 
       - name: Check formatting
         run: |
-          mapfile -t files < <(find include common src tests tools examples -name '*.cpp' -o -name '*.hpp')
+          mapfile -t files < <(find include common src tests tools examples daemon -name '*.cpp' -o -name '*.hpp')
           echo "checking ${#files[@]} files"
           if ! clang-format-18 --dry-run -Werror "${files[@]}"; then
             echo
             echo "Run this, then commit the result:"
-            echo "  find include common src tests tools examples -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 -i"
+            echo "  find include common src tests tools examples daemon -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 -i"
             exit 1
           fi
 
@@ -69,8 +69,12 @@ jobs:
       # tree generates no headers, so nothing has to be built first. A missing config.yaml is
       # not an error: cme_site_config_load returns early and every consumer falls back to a
       # value that disables the feature.
+      # Both failpoint axes on, so the halves they gate reach the database. Without them the analyzer
+      # sees an empty file where each mechanism lives, and every finding in one goes unreported.
       - name: Generate the compile database
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DCME_FAILPOINT=ON -DCMED_FAILPOINT=ON
 
       # Every translation unit the database carries.
       #
@@ -97,14 +101,18 @@ jobs:
       # a step that dropped the Release flags would diagnose code nothing compiles that way.
       - name: Check every header
         run: |
-          mapfile -t headers < <(find include common src tests tools examples -name '*.hpp')
+          mapfile -t headers < <(find include common src tests tools examples daemon -name '*.hpp')
           echo "checking ${#headers[@]} headers"
           clang-tidy-18 -p build --quiet -use-color "${headers[@]}" -- \
               -std=c++17 -O2 -DNDEBUG \
               -I"$PWD/include" \
               -I"$PWD/common" \
               -I"$PWD/src" \
-              -I"$PWD/tests/harness" 2>&1 | tee headers.log
+              -I"$PWD/tests/harness" \
+              -I"$PWD/daemon" \
+              -I"$PWD/daemon/shared/include" \
+              -I"$PWD/daemon/client/include" \
+              -I"$PWD/daemon/tests" 2>&1 | tee headers.log
           if grep -q 'warning:' headers.log; then
             echo
             echo "A header must satisfy /.clang-tidy on its own, not only where it is included."

@@ -129,6 +129,31 @@ A policy never writes the ownership record, which is why the invariants can live
 Skim the diagram for the shape.
 Section 5 of the [design record](docs/design/technical_report.md) names each part.
 
+## cmed: one peer slot per node
+
+A peer is a process, and a region lays out its 64 peer slots for the whole fabric rather than per node.
+Eight nodes running eight region-opening processes each would fill that table, and the ninth process anywhere would find no slot.
+Those processes would also cross CXL for turns they could have settled between themselves.
+
+`cmed` takes one slot and serves the local processes behind it.
+A domain then crosses the interconnect once per cohort rather than once per requester, where a cohort is the run of local acquires served on one held turn.
+
+A requester links `cmed_client` and never `cmed_daemon`, so the calls that would zero the shared area are absent at link time.
+The daemon opens the region itself, so a requester names no medium and no URI.
+
+```cpp
+#include "cmed/session.hpp"
+
+cmed::CmedSession session = cmed::CmedSession::connect("/run/cmed/cmed.sock");
+session.joinDomain("inventory");
+{
+    const cmed::CmedGuard guard = session.lock("inventory");
+    // The turn is this process's here. The destructor gives it back.
+}
+```
+
+[`daemon/README.md`](daemon/README.md) carries the rest.
+
 ## Failure model
 
 CME assumes crash-stop: a peer declared dead is assumed to have stopped.
@@ -165,6 +190,7 @@ cp config.example.yaml config.yaml
 | The API, with the usage model in its header doc | [`include/cme/shared.hpp`](include/cme/shared.hpp) |
 | Build, test, benchmark, devdax setup | [`BUILD.md`](BUILD.md) |
 | Runnable examples | [`examples/`](examples/) |
+| The node-local daemon, and what a requester links against it | [`daemon/`](daemon/) |
 
 **Understanding CME**
 

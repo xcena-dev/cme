@@ -36,19 +36,25 @@ jobs:
       # No config.yaml: it is per-machine and gitignored, and a missing one is not an error.
       # cme_site_config_load returns early, so the dax device and the uncacheable mount both
       # read as absent -- which on this runner is the truth.
-      # CME_FAILPOINT=ON: without it the failpoint cases register as skipped, and a skip on the
-      # gate proves nothing about a crash boundary.
+      # Both failpoint axes on: without them the boundary cases register as skipped, and a skip on
+      # the gate proves nothing about a crash boundary. Off by default, since neither is a shipping
+      # feature and every reach() they compile in is dead weight to a deployment.
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCME_FAILPOINT=ON
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DCME_FAILPOINT=ON -DCMED_FAILPOINT=ON
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
 
       # Serial. A gate that flakes is not a gate, and these cases contend on purpose: several
       # of them assert a fairness bound or a bounded wait that a loaded box can miss.
-      - name: Run the shm suite
-        run: ctest --test-dir build -L shm --output-on-failure
+      #
+      # Named by what this runner cannot reach rather than by what it can: a case with no medium
+      # carries no label at all, and a selector that lists media drops it.
+      - name: Run everything but dax and uc
+        run: ctest --test-dir build -LE 'dax|uc' --output-on-failure
 
       - name: Report what ran
         if: always()
-        run: ctest --test-dir build -N -L shm | tail -1
+        run: ctest --test-dir build -N -LE 'dax|uc' | tail -1

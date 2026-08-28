@@ -209,6 +209,7 @@ target_link_libraries(cme_harness INTERFACE cme_common)
 
 enable_testing()
 add_subdirectory(common)  # the YAML subset the harness and cmed both read
+add_subdirectory(daemon)  # cmed: the node-local daemon and the ABI its requesters share
 add_subdirectory(tools)
 add_subdirectory(tests)   # cases, and the bench/baseline subtrees it owns
 add_subdirectory(examples)

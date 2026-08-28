@@ -1,0 +1,5 @@
+# An example is written the way a caller writes one, and a caller includes the headers the API
+# documents. misc-include-cleaner asks instead for the header behind each name, which here would
+# mean reaching past the public API in the files whose job is to demonstrate the public API.
+InheritParentConfig: true
+Checks: '-misc-include-cleaner'
