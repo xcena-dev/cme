@@ -22,15 +22,18 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <istream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -46,6 +49,13 @@ class ParseError : public std::runtime_error
 public:
     using std::runtime_error::runtime_error;
 };
+
+// True for std::chrono::duration and nothing else, so get() below can tell a count of units from a
+// plain number without asking the caller which it wrote.
+template <typename T>
+inline constexpr bool IsDuration = false;
+template <typename T_Rep, typename T_Period>
+inline constexpr bool IsDuration<std::chrono::duration<T_Rep, T_Period>> = true;
 
 class KeyValueConfig
 {
@@ -80,20 +90,19 @@ public:
         return found->second;
     }
 
-    // Refuses a value that is not a number rather than reading as zero, which would be
-    // indistinguishable from a deliberate 0 in the file.
-    [[nodiscard]] std::uint64_t getU64(const std::string& key, std::uint64_t fallback) const;
-
-    // getU64 in the units the caller keeps. The fallback is the caller's own current value, so a key
-    // the file leaves out keeps the default its struct was built with.
-    [[nodiscard]] timing::Millis getMillis(const std::string& key, timing::Millis fallback) const;
-    [[nodiscard]] timing::Micros getMicros(const std::string& key, timing::Micros fallback) const;
+    // One read for every value a file spells one way. What it parses comes from the fallback, which is
+    // the field being filled, so a key and its destination cannot disagree about the type or the unit.
+    // A whole number past what that field holds is refused rather than truncated, and so is a duration
+    // past what its rep counts.
+    //
+    // Absent from it on purpose: a mode shares its type with ordinary numbers, and a sequence has no
+    // single fallback to read a type from. Both keep their own names below.
+    template <typename T_Value>
+    [[nodiscard]] T_Value get(const std::string& key, T_Value fallback) const;
 
     // Octal, because a mode written 0660 in a file means what `chmod 660` means and reading it as six
     // hundred and sixty would silently grant something else.
     [[nodiscard]] std::uint32_t getMode(const std::string& key, std::uint32_t fallback) const;
-
-    [[nodiscard]] bool getBool(const std::string& key, bool fallback) const;
 
     // Empty when the key is absent. `[]` and a key with no value both give an empty list.
     [[nodiscard]] std::vector<std::string> getList(const std::string& key) const;
@@ -132,6 +141,11 @@ private:
     // nullopt for a digit outside base 8 or a value above 0777. Apart from getMode(), so the one
     // refusal it turns into is worded once and outside the loop that finds the fault.
     [[nodiscard]] static std::optional<std::uint32_t> readOctal(const std::string& written) noexcept;
+
+    // The three shapes get() dispatches to. Whole is the widest a file can hold, so each caller
+    // narrows to its own field and says so in its own refusal.
+    [[nodiscard]] std::uint64_t readWhole(const std::string& key, std::uint64_t fallback) const;
+    [[nodiscard]] bool readBool(const std::string& key, bool fallback) const;
 
     std::map<std::string, std::string> entries_;
     std::string origin_;
@@ -365,7 +379,7 @@ inline const std::string& KeyValueConfig::require(const std::string& key) const
     return entries_.at(key);
 }
 
-inline std::uint64_t KeyValueConfig::getU64(const std::string& key, std::uint64_t fallback) const
+inline std::uint64_t KeyValueConfig::readWhole(const std::string& key, std::uint64_t fallback) const
 {
     if (!has(key) || require(key).empty())
     {
@@ -383,14 +397,43 @@ inline std::uint64_t KeyValueConfig::getU64(const std::string& key, std::uint64_
     return value;
 }
 
-inline timing::Millis KeyValueConfig::getMillis(const std::string& key, timing::Millis fallback) const
+template <typename T_Value>
+inline T_Value KeyValueConfig::get(const std::string& key, T_Value fallback) const
 {
-    return timing::Millis{getU64(key, static_cast<std::uint64_t>(fallback.count()))};
-}
+    if constexpr (std::is_same_v<T_Value, bool>)
+    {
+        return readBool(key, fallback);
+    }
+    else if constexpr (std::is_same_v<T_Value, std::string>)
+    {
+        return getString(key, fallback);
+    }
+    else if constexpr (IsDuration<T_Value>)
+    {
+        // The count, not the unit: the key names the unit and this fallback carries it, so what is
+        // read is how many of them.
+        using Count = typename T_Value::rep;
+        static_assert(std::numeric_limits<Count>::is_integer, "a duration in a file counts whole units");
 
-inline timing::Micros KeyValueConfig::getMicros(const std::string& key, timing::Micros fallback) const
-{
-    return timing::Micros{getU64(key, static_cast<std::uint64_t>(fallback.count()))};
+        const std::uint64_t read = readWhole(key, static_cast<std::uint64_t>(fallback.count()));
+        if (read > static_cast<std::uint64_t>(std::numeric_limits<Count>::max()))
+        {
+            throw ParseError{origin_ + ": " + key + ": `" + require(key) + "` is more of them than fit"};
+        }
+        return T_Value{static_cast<Count>(read)};
+    }
+    else
+    {
+        static_assert(std::is_unsigned_v<T_Value>, "a number in one of these files is never negative");
+
+        const std::uint64_t read = readWhole(key, fallback);
+        if (read > std::uint64_t{std::numeric_limits<T_Value>::max()})
+        {
+            throw ParseError{origin_ + ": " + key + ": `" + require(key) + "` does not fit " +
+                             std::to_string(std::numeric_limits<T_Value>::digits) + " bits"};
+        }
+        return static_cast<T_Value>(read);
+    }
 }
 
 // Base 8 by hand, since a permission is the one number in these files that is not decimal.
@@ -428,7 +471,7 @@ inline std::uint32_t KeyValueConfig::getMode(const std::string& key, std::uint32
     return *parsed;
 }
 
-inline bool KeyValueConfig::getBool(const std::string& key, bool fallback) const
+inline bool KeyValueConfig::readBool(const std::string& key, bool fallback) const
 {
     if (!has(key) || require(key).empty())
     {

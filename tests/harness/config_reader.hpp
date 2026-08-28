@@ -139,8 +139,8 @@ private:
             site_.fileBackendDir = dir;
         }
 
-        site_.daxSlotReserve = values_.getU64("dax_slot_reserve", DefaultSlotReserve);
-        site_.daxSlotBase = values_.getU64("dax_slot_base", 0);
+        site_.daxSlotReserve = values_.get("dax_slot_reserve", DefaultSlotReserve);
+        site_.daxSlotBase = values_.get("dax_slot_base", std::uint64_t{0});
     }
 
     // A devdax node is a character device. A regular file with the same path would take

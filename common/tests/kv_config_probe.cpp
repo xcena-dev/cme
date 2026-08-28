@@ -45,7 +45,7 @@ bool dedentClosesTheSection()
         "  uri: shm:/one\n"
         "workers: 4\n");
 
-    return config.getU64("workers", 0) == 4 && !config.has("region.workers");
+    return config.get("workers", std::uint64_t{0}) == 4 && !config.has("region.workers");
 }
 
 // A blank value is a section only when deeper lines follow. Both readings have to work, and which
@@ -91,7 +91,7 @@ bool inlineSequencesSplit()
 bool boolsTakeTheirSpellings()
 {
     const auto config = read("one: yes\ntwo: off\n");
-    return config.getBool("one", false) && !config.getBool("two", true) && config.getBool("absent", true);
+    return config.get("one", false) && !config.get("two", true) && config.get("absent", true);
 }
 
 template <typename T>
@@ -127,22 +127,34 @@ bool refusesWhatItCannotRead()
                    }) &&  // empty key
            refuses([]
                    {
-                       static_cast<void>(read("count: many\n").getU64("count", 0));
+                       static_cast<void>(read("count: many\n").get("count", std::uint64_t{0}));
                    }) &&  // not a number
            refuses([]
                    {
-                       static_cast<void>(read("on: maybe\n").getBool("on", false));
+                       static_cast<void>(read("on: maybe\n").get("on", false));
                    }) &&  // not a boolean
            refuses([]
                    {
                        static_cast<void>(read("hosts: alpha, beta\n").getList("hosts"));
-                   });  // not a sequence
+                   }) &&  // not a sequence
+           refuses([]
+                   {
+                       static_cast<void>(read("count: 4294967296\n").get("count", std::uint32_t{0}));
+                   });  // one past what 32 bits hold
+}
+
+// The width is the point: a value that fits is read, and one that does not is refused rather than
+// wrapped to a number the file never wrote.
+bool aThirtyTwoBitReadKeepsItsWidth()
+{
+    return read("count: 4294967295\n").get("count", std::uint32_t{0}) == 4294967295U &&
+           read("nothing: 1\n").get("count", std::uint32_t{7}) == 7U;
 }
 
 bool anAbsentFileIsAllFallbacks()
 {
     const auto config = kvconfig::KeyValueConfig::loadIfPresent("/nonexistent/cme/probe.yaml");
-    return config.getU64("workers", 7) == 7 && config.getString("area.path", "none") == "none" &&
+    return config.get("workers", std::uint64_t{7}) == 7 && config.getString("area.path", "none") == "none" &&
            refuses([]
                    {
                        return kvconfig::KeyValueConfig::load("/nonexistent/cme/probe.yaml");
@@ -158,7 +170,8 @@ int main()
     {
         passed = nestingBecomesAPath() && dedentClosesTheSection() && aBlankValueIsBothShapes() &&
                  commentsStopAtTheValue() && aValueKeepsItsOwnColons() && inlineSequencesSplit() &&
-                 boolsTakeTheirSpellings() && refusesWhatItCannotRead() && anAbsentFileIsAllFallbacks();
+                 boolsTakeTheirSpellings() && refusesWhatItCannotRead() && anAbsentFileIsAllFallbacks() &&
+                 aThirtyTwoBitReadKeepsItsWidth();
     }
     catch (const kvconfig::ParseError& refusal)
     {
