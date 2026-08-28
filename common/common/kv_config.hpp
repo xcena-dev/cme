@@ -252,7 +252,7 @@ inline KeyValueConfig KeyValueConfig::parse(std::istream& input, std::string ori
 }
 
 // An absent file is not untrusted: it carries no values, so there is nothing to be misled by. What is
-// refused is a file that exists and that someone other than its owner can rewrite.
+// refused is a file that exists and that anyone but this process or root can rewrite.
 inline std::optional<std::string> KeyValueConfig::readIfTrusted(const std::string& path)
 {
     // Closed however this returns, including through the throw below.
@@ -302,6 +302,13 @@ inline std::optional<std::string> KeyValueConfig::readIfTrusted(const std::strin
     if ((found.st_mode & (S_IWGRP | S_IWOTH)) != 0)
     {
         throw ParseError{path + ": writable by group or other, so it is not trustworthy"};
+    }
+
+    // The owner too. A mode this reader cannot fault still lets a third account rewrite the file it
+    // owns, so the only writers taken on trust are this process and root.
+    if (found.st_uid != ::geteuid() && found.st_uid != 0)
+    {
+        throw ParseError{path + ": owned by neither this process nor root, so it is not trustworthy"};
     }
 
     std::string text;

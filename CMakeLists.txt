@@ -198,7 +198,7 @@ target_compile_options(cme_app_warnings INTERFACE
 
 # Harness support: the headers that read config.yaml, and where that file lives.
 # Not part of the shipped library -- libcme reads no configuration of its own.
-# The path is a compile definition rather than a lookup, because ctest runs from
+# The harness finds the file by walking up from the binary, because ctest runs from
 # the build tree and a relative "config.yaml" would resolve to nothing there.
 # --config overrides it at run time.
 add_library(cme_harness INTERFACE)
@@ -206,8 +206,6 @@ target_include_directories(cme_harness INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tes
 # config_reader.hpp reads the file through the shared parser; cmed reads its own file with the same
 # one, so the subset cannot drift between them.
 target_link_libraries(cme_harness INTERFACE cme_common)
-target_compile_definitions(cme_harness INTERFACE
-    CME_SITE_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config.yaml")
 
 enable_testing()
 add_subdirectory(common)  # the YAML subset the harness and cmed both read

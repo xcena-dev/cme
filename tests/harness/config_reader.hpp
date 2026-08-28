@@ -22,7 +22,9 @@
 #pragma once
 
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
@@ -31,12 +33,37 @@
 
 #include "common/kv_config.hpp"
 
-#ifndef CME_SITE_CONFIG_PATH
-#define CME_SITE_CONFIG_PATH ""
-#endif
-
 namespace harness
 {
+
+// The tree's own config, found by walking up from this binary. A path fixed at build time would
+// name the account that built it inside every binary, and this repository is published.
+[[nodiscard]] inline std::string findSiteConfig()
+{
+    char self[4096] = {};
+    const ::ssize_t taken = ::readlink("/proc/self/exe", self, sizeof(self) - 1);
+    if (taken <= 0)
+    {
+        return {};
+    }
+
+    std::string walked{self, static_cast<std::size_t>(taken)};
+    while (true)
+    {
+        const std::size_t cut = walked.find_last_of('/');
+        if (cut == std::string::npos || cut == 0)
+        {
+            return {};
+        }
+
+        walked.resize(cut);
+        const std::string candidate = walked + "/config.yaml";
+        if (::access(candidate.c_str(), R_OK) == 0)
+        {
+            return candidate;
+        }
+    }
+}
 
 // IEC byte units, so a size below reads as the size it is rather than as a shift.
 inline constexpr std::uint64_t KiB = 1024;
@@ -58,7 +85,7 @@ public:
 
     // A missing file is not an error: every fact then reads as absent, and a run that
     // wanted one of them fails when it asks, not here.
-    explicit ConfigReader(std::string path = CME_SITE_CONFIG_PATH)
+    explicit ConfigReader(std::string path = findSiteConfig())
         : values_{readOwnStream(path)},
           path_{std::move(path)}
     {

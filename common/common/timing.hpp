@@ -116,6 +116,17 @@ template <typename T_Duration>
     return getTicks<T_Duration>(std::chrono::system_clock::now().time_since_epoch());
 }
 
+// The stamp to write for an instant @ahead from now, in the nanoseconds a shared layout fixes. The one
+// place the widening happens, and a span already past stamps now rather than underflowing into 2^64.
+template <typename T_Duration>
+[[nodiscard]] inline std::uint64_t wallAfter(T_Duration ahead) noexcept
+{
+    const auto span = std::chrono::duration_cast<Nanos>(ahead);
+    const std::uint64_t stamped = wall<Nanos>();
+
+    return span <= Nanos::zero() ? stamped : stamped + static_cast<std::uint64_t>(span.count());
+}
+
 // A wall-clock instant somebody else stamped, and the two questions worth asking of one.
 //
 // Not a Deadline. A Deadline is anchored at the moment this process built it, and this anchor was

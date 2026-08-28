@@ -61,7 +61,7 @@ struct Options_t
     std::uint64_t slot = 0;
     std::string caseName = "cme_test";
     std::string strategy = "request";
-    std::string configPath = CME_SITE_CONFIG_PATH;
+    std::string configPath = findSiteConfig();
     bool cleanup = false;
 
     // Takes these flags out of argv and returns the count that is left, so a run's own
