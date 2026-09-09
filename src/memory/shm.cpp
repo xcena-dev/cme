@@ -92,9 +92,10 @@ struct MappedRegion_t
     return {mapped, areaSize};
 }
 
-[[nodiscard]] MappedRegion_t openJoiner(const std::string& normalised)
+// @writable false reads the header off a region this caller may not write.
+[[nodiscard]] MappedRegion_t openJoiner(const std::string& normalised, bool writable)
 {
-    const int file = ::shm_open(normalised.c_str(), O_RDWR, 0);
+    const std::int32_t file = ::shm_open(normalised.c_str(), writable ? O_RDWR : O_RDONLY, 0);
     if (file < 0)
     {
         const auto failure = lastSystemError();
@@ -117,7 +118,8 @@ struct MappedRegion_t
             throw BackendError{"cme::ShmMemory: shm size invalid"};
         }
         mapSize = static_cast<std::uint64_t>(fileStat.st_size);
-        mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
+        const std::int32_t protection = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
+        mapped = ::mmap(nullptr, mapSize, protection, MAP_SHARED, file, 0);
         if (mapped == MAP_FAILED)
         {
             const auto failure = lastSystemError();
@@ -138,7 +140,15 @@ struct MappedRegion_t
 ShmMemory::ShmMemory(std::string_view name)
     : Memory{nullptr, 0}
 {
-    const auto mapping = openJoiner(normaliseShmName(name));
+    const auto mapping = openJoiner(normaliseShmName(name), /*writable=*/true);
+    base_ = mapping.base;
+    mappedSize_ = mapping.size;
+}
+
+ShmMemory::ShmMemory(std::string_view name, ReadOnlyTag)
+    : Memory{nullptr, 0}
+{
+    const auto mapping = openJoiner(normaliseShmName(name), /*writable=*/false);
     base_ = mapping.base;
     mappedSize_ = mapping.size;
 }

@@ -49,10 +49,11 @@ struct Mapping_t
 };
 
 // O_CLOEXEC required: marufs_mmap rejects non-cloexec fds (-EACCES).
-[[nodiscard]] int openFile(const std::string& path, bool create)
+[[nodiscard]] std::int32_t openFile(const std::string& path, bool create, bool writable)
 {
-    const int flags = (create ? (O_CREAT | O_RDWR) : O_RDWR) | O_CLOEXEC;
-    const int file = ::open(path.c_str(), flags, 0644);
+    const std::int32_t access = writable ? O_RDWR : O_RDONLY;
+    const std::int32_t flags = (create ? (O_CREAT | access) : access) | O_CLOEXEC;
+    const auto file = ::open(path.c_str(), flags, 0644);
     if (file < 0)
     {
         const auto failure = lastSystemError();
@@ -64,8 +65,8 @@ struct Mapping_t
 // marufs authorizes mmap per process, and a freshly created file's RAT entry has
 // default_perms=0, so every peer other than the creator is denied (kernel/src/acl.c). cme
 // peers are separate processes, so the creator opens the default up once. Mirrors
-// marufs_uapi.h: MARUFS_IOC_PERM_SET_DEFAULT / MARUFS_PERM_ALL. node_id and pid are for
-// per-target PERM_GRANT and unread here.
+// marufs_uapi.h: MARUFS_IOC_PERM_SET_DEFAULT / MARUFS_PERM_READ / MARUFS_PERM_WRITE. node_id and
+// pid are for per-target PERM_GRANT and unread here.
 struct MarufsPermReq_t
 {
     std::uint32_t nodeId;
@@ -73,16 +74,22 @@ struct MarufsPermReq_t
     std::uint32_t perms;
     std::uint32_t reserved;
 };
-constexpr std::uint32_t MarufsPermAll = 0x003FU;
+constexpr std::uint32_t MarufsPermRead = 0x0001U;
+constexpr std::uint32_t MarufsPermWrite = 0x0002U;
 
+// @wanted is what the mapping below asks for and no more: DELETE, ADMIN or GRANT in a default
+// would hand every process on the host what one mapping never uses.
 // ENOTTY/EINVAL means the mount does not know the ioctl (tmpfs and friends), which is fine.
+// EACCES means this entry is not ours to configure: a file another process created, or one the
+// filesystem itself made and left ownerless. Its defaults are already whatever they are, and the
+// mmap below is what decides whether they suffice.
 // Anything else would surface later as an unexplained mmap EACCES in another process.
-void grantDefaultPerms(int file, const std::string& path)
+void grantDefaultPerms(std::int32_t file, const std::string& path, std::uint32_t wanted)
 {
     MarufsPermReq_t req{};
-    req.perms = MarufsPermAll;
+    req.perms = wanted;
     if (::ioctl(file, _IOW('X', 11, MarufsPermReq_t), &req) == 0 || errno == ENOTTY ||
-        errno == EINVAL)
+        errno == EINVAL || errno == EACCES)
     {
         return;
     }
@@ -92,9 +99,10 @@ void grantDefaultPerms(int file, const std::string& path)
 }
 
 // Consumes @file either way.
-[[nodiscard]] void* mapFd(int file, const std::string& path, std::uint64_t mapSize)
+[[nodiscard]] void* mapFd(std::int32_t file, const std::string& path, std::uint64_t mapSize, bool writable)
 {
-    void* mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file, 0);
+    const std::int32_t protection = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
+    void* mapped = ::mmap(nullptr, mapSize, protection, MAP_SHARED, file, 0);
     // Before the close, which is allowed to leave its own value in errno.
     const auto failure = (mapped == MAP_FAILED) ? lastSystemError() : std::error_code{};
     ::close(file);
@@ -109,7 +117,7 @@ void grantDefaultPerms(int file, const std::string& path)
 {
     const std::string path{pathView};
     const std::uint64_t mapSize = roundUp(areaSize, PmdAlign);
-    const int file = openFile(path, /*create=*/true);
+    const auto file = openFile(path, /*create=*/true, /*writable=*/true);
     // WORM: ftruncate only grows a fresh file. A pre-sized file (created and held by another
     // process) is already finalized and rejects re-truncation, so skip when it is big enough.
     struct stat info = {};
@@ -121,16 +129,17 @@ void grantDefaultPerms(int file, const std::string& path)
         ::close(file);
         throw BackendError{"cme::FileMemory ftruncate(" + path + ")", failure};
     }
-    grantDefaultPerms(file, path);
-    return {mapFd(file, path, mapSize), mapSize};
+    grantDefaultPerms(file, path, MarufsPermRead | MarufsPermWrite);
+    return {mapFd(file, path, mapSize, /*writable=*/true), mapSize};
 }
 
 // Map what the file actually holds. The creator sized it to the region, which may be more
 // than one PMD, and a joiner that guessed PmdAlign would under-map and fail to bind.
-[[nodiscard]] Mapping_t openJoiner(std::string_view pathView)
+// @writable false reads the header off a region that grants read and nothing else.
+[[nodiscard]] Mapping_t openJoiner(std::string_view pathView, bool writable)
 {
     const std::string path{pathView};
-    const int file = openFile(path, /*create=*/false);
+    const auto file = openFile(path, /*create=*/false, writable);
     struct stat info = {};
     if (::fstat(file, &info) != 0)
     {
@@ -147,7 +156,7 @@ void grantDefaultPerms(int file, const std::string& path)
         throw BackendError{"cme::FileMemory: file size invalid (" + path + ")"};
     }
     const std::uint64_t mapSize = roundUp(static_cast<std::uint64_t>(info.st_size), PmdAlign);
-    return {mapFd(file, path, mapSize), mapSize};
+    return {mapFd(file, path, mapSize, writable), mapSize};
 }
 
 }  // namespace
@@ -155,7 +164,15 @@ void grantDefaultPerms(int file, const std::string& path)
 FileMemory::FileMemory(std::string_view path)
     : Memory{nullptr, 0}
 {
-    const auto mapping = openJoiner(path);
+    const auto mapping = openJoiner(path, /*writable=*/true);
+    base_ = mapping.base;
+    mappedSize_ = mapping.size;
+}
+
+FileMemory::FileMemory(std::string_view path, ReadOnlyTag)
+    : Memory{nullptr, 0}
+{
+    const auto mapping = openJoiner(path, /*writable=*/false);
     base_ = mapping.base;
     mappedSize_ = mapping.size;
 }

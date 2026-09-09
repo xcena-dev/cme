@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace cliargs
@@ -41,8 +42,8 @@ inline int takeArgs(int argc, char** argv)
     return argc;
 }
 
-// Value of `--flag <value>`, or @fallback when the flag is absent or has no value.
-inline std::string argStr(const char* flag, const std::string& fallback)
+// The word after `--flag`, or empty when the flag is absent or ends the arguments.
+inline std::string readArg(const char* flag)
 {
     const std::vector<std::string>& args = extraArgs();
     for (std::uint64_t index = 0; index + 1 < args.size(); ++index)
@@ -52,20 +53,38 @@ inline std::string argStr(const char* flag, const std::string& fallback)
             return args[index + 1];
         }
     }
-    return fallback;
+    return {};
 }
 
-// Same, parsed as an unsigned decimal. A value that does not parse, or parses to zero, yields
-// @fallback: a benchmark given --iters 0 wants the default, not an empty run.
-inline std::uint64_t argU64(const char* flag, std::uint64_t fallback)
+// What it parses comes from the fallback, which is the variable being filled, so a flag and its
+// destination cannot disagree about the type. An integral that does not parse, or parses to zero,
+// yields @fallback: a benchmark given --iters 0 wants the default, not an empty run.
+template <typename T_Value>
+[[nodiscard]] T_Value get(const char* flag, const T_Value& fallback)
 {
-    const std::string raw = argStr(flag, std::string{});
+    const std::string raw = readArg(flag);
     if (raw.empty())
     {
         return fallback;
     }
-    const std::uint64_t parsed = std::strtoull(raw.c_str(), nullptr, 10);
-    return (parsed > 0) ? parsed : fallback;
+
+    if constexpr (std::is_same_v<T_Value, std::string>)
+    {
+        return raw;
+    }
+    else
+    {
+        static_assert(std::is_integral_v<T_Value>, "cliargs::get reads a string or a whole number");
+        const std::uint64_t parsed = std::strtoull(raw.c_str(), nullptr, 10);
+        return (parsed > 0) ? static_cast<T_Value>(parsed) : fallback;
+    }
+}
+
+// A literal fallback answers with a string rather than with the pointer it was written as.
+[[nodiscard]] inline std::string get(const char* flag, const char* fallback)
+{
+    const std::string raw = readArg(flag);
+    return raw.empty() ? std::string{fallback} : raw;
 }
 
 // True when @flag is present at all, for options that carry no value.

@@ -301,6 +301,7 @@ public:
     // ── factories ───────────────────────────────────────────────────
 
     [[nodiscard]] static Geometry open(std::string_view uri);
+    [[nodiscard]] static Geometry openReadOnly(std::string_view uri);
     [[nodiscard]] static Geometry create(std::string_view uri, std::uint32_t domainCount,
                                          std::uint32_t peerCount, const FormatOpts_t& opts);
 

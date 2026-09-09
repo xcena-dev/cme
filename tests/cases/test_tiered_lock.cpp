@@ -40,13 +40,6 @@ namespace test
 namespace
 {
 
-// Sizes default to a modest ctest load; override on the command line to sweep
-// performance: --peers, --threads, --iters, --domains, --cohort-cap, --shuffle.
-std::uint32_t readOptU32(const char* flag, std::uint32_t fallback)
-{
-    return static_cast<std::uint32_t>(cliargs::argU64(flag, fallback));
-}
-
 // Per data domain [1..D] counter; non-atomic on purpose (the two-tier lock must
 // serialize each domain's RMW). Sized in main. Threads holding DIFFERENT domains touch
 // different elements, so a lost update only appears if a domain has two holders at once.
@@ -72,18 +65,21 @@ struct Config_t
     bool shuffle{false};
 };
 
+// --peers, --threads, --iters, --domains, --cohort-cap and --shuffle sweep this case past the
+// modest load it defaults to. Each fallback is the field itself, so the default lives in Config_t
+// alone and a flag cannot land in a field as another type.
 Config_t readConfig()
 {
     Config_t cfg;
-    cfg.numPeers = static_cast<std::uint32_t>(readOptU32("--peers", 8));
-    cfg.threadsPerPeer = readOptU32("--threads", 4);
-    cfg.itersPerThread = readOptU32("--iters", 1000);
+    cfg.numPeers = cliargs::get("--peers", cfg.numPeers);
+    cfg.threadsPerPeer = cliargs::get("--threads", cfg.threadsPerPeer);
+    cfg.itersPerThread = cliargs::get("--iters", cfg.itersPerThread);
     // An over-large D is not clamped here: Session::format rejects it with FormatError, which
     // is the library's own ceiling rather than a copy of it.
-    cfg.numDomains = readOptU32("--domains", 1);
+    cfg.numDomains = cliargs::get("--domains", cfg.numDomains);
     cfg.domainCeiling = cfg.numDomains + 1;  // control(0) + D data domains
-    cfg.cohortCap = readOptU32("--cohort-cap", 4);
-    cfg.shuffle = readOptU32("--shuffle", 0) != 0;
+    cfg.cohortCap = cliargs::get("--cohort-cap", cfg.cohortCap);
+    cfg.shuffle = cliargs::get("--shuffle", std::uint32_t{0}) != 0;
     return cfg;
 }
 
@@ -222,7 +218,7 @@ void reportLatency(const Config_t& cfg, std::vector<std::uint64_t>& acqLatNs)
                 harness::percentile(acqLatNs, 0.99), harness::percentile(acqLatNs, 1.0));
 
     // --csv <path>: append one sweep row (us). Columns: peers,threads,domains + latency.
-    const std::string csv = cliargs::argStr("--csv", std::string{});
+    const auto csv = cliargs::get("--csv", std::string{});
     if (csv.empty())
     {
         return;

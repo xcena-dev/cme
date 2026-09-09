@@ -12,6 +12,7 @@
 // --iters sets the iteration count (default DefaultIters); raise it for a long run.
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -32,7 +33,7 @@ namespace test
 namespace
 {
 
-constexpr int DefaultIters = 200;
+constexpr std::uint32_t DefaultIters = 200;
 
 // How long the granter waits for the departure to reach the drain. Generous, since what it waits on
 // is one thread getting scheduled rather than any work.
@@ -59,11 +60,11 @@ void runBody(harness::TestContext& ctx)
             "built without CME_FAILPOINT, so the grant cannot be placed inside the drain");
     }
 
-    const int iters = static_cast<int>(cliargs::argU64("--iters", DefaultIters));
+    const auto iters = cliargs::get("--iters", DefaultIters);
 
     cme::Geometry region = harness::createRegion(Ceiling, MaxPeers);
 
-    std::printf("departure strand: %d forced grants at departure (%s, backend=%s)\n", iters,
+    std::printf("departure strand: %u forced grants at departure (%s, backend=%s)\n", iters,
                 ctx.strategySuffix(), ctx.backendName());
 
     auto keeper = harness::makePeerPtr(region, Keeper);
@@ -73,11 +74,11 @@ void runBody(harness::TestContext& ctx)
     auto* recordSlot = region.getDomainRecord(domainId);
     auto* leaverSlot = region.getMemberSlot(Leaver);
 
-    int stranded = 0;
-    int forwarded = 0;
-    int unsettled = 0;
-    int missed = 0;
-    for (int iter = 0; iter < iters; ++iter)
+    std::uint32_t stranded = 0;
+    std::uint32_t forwarded = 0;
+    std::uint32_t unsettled = 0;
+    std::uint32_t missed = 0;
+    for (std::uint32_t iter = 0; iter < iters; ++iter)
     {
         auto leaver = harness::makePeerPtr(region, Leaver);
         leaver->joinDomain(domainId);
@@ -122,7 +123,7 @@ void runBody(harness::TestContext& ctx)
             ++stranded;
             if (stranded <= 5)
             {
-                std::printf("  iter %d: domain stranded on the departed peer\n", iter);
+                std::printf("  iter %u: domain stranded on the departed peer\n", iter);
             }
         }
         else
@@ -139,7 +140,7 @@ void runBody(harness::TestContext& ctx)
         }
     }
 
-    std::printf("  %d/%d grants forwarded, %d stranded, %d departures unsettled, %d never held\n",
+    std::printf("  %u/%u grants forwarded, %u stranded, %u departures unsettled, %u never held\n",
                 forwarded, iters, stranded, unsettled, missed);
 
     ctx.check(missed == 0, "every departure reached the drain and took the grant");

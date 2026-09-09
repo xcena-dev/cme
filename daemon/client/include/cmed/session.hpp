@@ -9,13 +9,13 @@
 
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string_view>
 
 #include "cmed/config.hpp"
 #include "cmed/guard.hpp"
-#include "common/timing.hpp"
 
 namespace cmed
 {
@@ -58,8 +58,11 @@ public:
     [[nodiscard]] CmedGuard lock(std::string_view domainName);
 
     // Bounded acquire. nullopt on deadline only; an unknown name still throws.
-    [[nodiscard]] std::optional<CmedGuard> tryLock(std::string_view domainName,
-                                                   timing::Nanos timeout);
+    //
+    // std::chrono and not timing::Nanos, which is that same type: an installed header naming it
+    // would put common/timing.hpp in front of every consumer for one alias.
+    [[nodiscard]] std::optional<CmedGuard>
+    tryLock(std::string_view domainName, std::chrono::nanoseconds timeout);
 
 private:
     struct Impl;

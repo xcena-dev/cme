@@ -18,6 +18,7 @@
 // What that leaves untested is the plain run on a medium nobody has touched. The daemon probe
 // covers it, on an shm name it unlinks first.
 
+#include <cstdint>
 #include <string>
 
 #include "common/args.hpp"
@@ -35,20 +36,15 @@ constexpr const char* SecondDomain = "after";
 
 // Refused because the region already answers. A code of its own, so a deployment script can tell
 // "someone is using this" from "the arguments were wrong".
-constexpr int Refused = 3;
-constexpr int Rejected = 1;
-constexpr int NoUri = 2;
-
-[[nodiscard]] std::string toolPath()
-{
-    return cliargs::argStr("--format-tool", std::string{});
-}
+constexpr std::int32_t Refused = 3;
+constexpr std::int32_t Rejected = 1;
+constexpr std::int32_t NoUri = 2;
 
 }  // namespace
 
 void runBody(harness::TestContext& ctx)
 {
-    const std::string tool = toolPath();
+    const auto tool = cliargs::get("--format-tool", std::string{});
     if (!ctx.check(!tool.empty(), "the case was told where cme-format is"))
     {
         return;
@@ -65,7 +61,7 @@ void runBody(harness::TestContext& ctx)
         ctx.check(harness::listsDomain(session, FirstDomain), "and that domain is on it afterwards");
     }
 
-    const int refused = harness::runProgram({tool, "--uri", uri});
+    const auto refused = harness::runProgram({tool, "--uri", uri});
     ctx.checkf(refused == Refused, "a second run is refused with a code of its own, at %d", refused);
 
     {
@@ -87,10 +83,10 @@ void runBody(harness::TestContext& ctx)
         ctx.check(!harness::listsDomain(session, FirstDomain), "and the one from before it is not");
     }
 
-    const int rejected = harness::runProgram({tool, "--uri", uri, "--strategy", "nonsense", "--force"});
+    const auto rejected = harness::runProgram({tool, "--uri", uri, "--strategy", "nonsense", "--force"});
     ctx.checkf(rejected == Rejected, "a strategy that is not one is rejected, at %d", rejected);
 
-    const int missing = harness::runProgram({tool});
+    const auto missing = harness::runProgram({tool});
     ctx.checkf(missing == NoUri, "and no --uri at all is a usage error, at %d", missing);
 }
 

@@ -48,7 +48,7 @@ Inspector::Inspector(Geometry geometry, CoherencyMode coherency) noexcept
 
 Inspector Inspector::open(std::string_view uri, CoherencyMode coherency)
 {
-    return Inspector{Geometry::open(uri), coherency};
+    return Inspector{Geometry::openReadOnly(uri), coherency};
 }
 
 std::optional<Inspector::HeaderSnapshot_t> Inspector::readHeader() const

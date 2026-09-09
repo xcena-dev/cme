@@ -85,10 +85,11 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.StructSuffix
     value: '_t'
-  # _t means a record, a struct whose fields are the point. Impl is the type a header refuses to
-  # show, and the other two are constant groups standing in for an enum class that cannot hold a mask.
+  # _t means a record, a struct whose fields are the point. None of these has fields that are: Impl
+  # is hidden from the header, two stand in for an enum class that cannot hold a mask, and the tag
+  # exists only to tell two constructors apart.
   - key: readability-identifier-naming.StructIgnoredRegexp
-    value: '^(Impl|EpollFlag|ConnectionEvents)$'
+    value: '^(Impl|EpollFlag|ConnectionEvents|ReadOnlyTag)$'
   - key: readability-identifier-naming.UnionCase
     value: CamelCase
   - key: readability-identifier-naming.UnionSuffix

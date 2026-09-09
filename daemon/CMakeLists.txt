@@ -85,5 +85,24 @@ set(CMED_DAEMON_EXAMPLE ${CMAKE_CURRENT_SOURCE_DIR}/deploy/cmed.example.yaml)
 set(CMED_CLIENT_EXAMPLE ${CMAKE_CURRENT_SOURCE_DIR}/deploy/cmed-client.example.yaml)
 set(CMED_DEV_EXAMPLE ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmed-dev.yaml)
 
+# ── Install ─────────────────────────────────────────────────────────────
+# A requester compiled elsewhere needs the two archives and the headers its
+# public ones name. libcme is absent on purpose: cmed does not link it, and the
+# constants it borrows arrive with include/cme, installed by the parent.
+#
+# The daemon binary ships beside them because a requester is not the only caller:
+# a mount helper that has to bring cmed up needs it on PATH.
+install(TARGETS cmed_client cmed_shared ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS cmed RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY client/include/cmed DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY shared/include/cmed DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/libcmed-client.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/libcmed-client.pc
+    @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libcmed-client.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
 add_subdirectory(examples)
 add_subdirectory(tests)

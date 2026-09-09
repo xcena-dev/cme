@@ -61,6 +61,40 @@ struct ChurnSlot_t : harness::PeerSlot_t
 };
 
 constexpr cme::PeerId Workers = 4;  // concurrent worker threads
+
+// Stops and joins whatever still runs when the body leaves, however it leaves. A
+// throw reaching a joinable std::thread's destructor ends the case in terminate,
+// where the harness can report nothing.
+template <typename T_Slots>
+class WorkerJoiner
+{
+public:
+    explicit WorkerJoiner(T_Slots& slots) noexcept
+        : slots_{slots}
+    {
+    }
+
+    WorkerJoiner(const WorkerJoiner&) = delete;
+    WorkerJoiner& operator=(const WorkerJoiner&) = delete;
+
+    ~WorkerJoiner()
+    {
+        for (auto& slot : slots_)
+        {
+            slot.stop.store(true);
+        }
+        for (auto& slot : slots_)
+        {
+            if (slot.runner.joinable())
+            {
+                slot.runner.join();
+            }
+        }
+    }
+
+private:
+    T_Slots& slots_;
+};
 // Each (re-)admit claims a fresh slot (claimPeerSlot, like a real service), so a
 // dead peer's slot stays Recovering until its RA finalizes it -- spares cover the slots
 // in flight (workers + auditor + a few recovering at once).
@@ -186,6 +220,7 @@ void runBody(harness::TestContext& ctx)
                  ctx.strategySuffix(), ctx.backendName());
 
     std::array<ChurnSlot_t, Workers> peers{};
+    const WorkerJoiner joining{peers};
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
         peers[i].peerId = i;

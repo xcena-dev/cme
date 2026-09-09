@@ -63,6 +63,11 @@ Geometry Geometry::open(std::string_view uri)
     return Geometry{Memory::open(uri)};
 }
 
+Geometry Geometry::openReadOnly(std::string_view uri)
+{
+    return Geometry{Memory::openReadOnly(uri)};
+}
+
 Geometry Geometry::create(std::string_view uri, std::uint32_t domainCount,
                           std::uint32_t peerCount, const FormatOpts_t& opts)
 {

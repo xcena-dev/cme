@@ -60,6 +60,9 @@ option(CME_FAILPOINT "Compile the test-only failpoint boundaries (see observe/fa
 # A coverage run answers reachability. Timing shifts at -O0, so a fairness or
 # latency verdict from this tree is not comparable to one from a Release build.
 option(CME_COVERAGE "Instrument for gcov line/branch coverage (see note above)" OFF)
+# Off by default: it is the one target needing pybind11 and the Python headers, and it forces PIC
+# on libcme so the archive can be linked into a shared object.
+option(CME_PYBIND "Build cme_py, the peer session as a CPython extension" OFF)
 if(CME_COVERAGE)
     add_compile_options(-O0 -g --coverage -fprofile-update=atomic)
     add_link_options(--coverage)
@@ -213,6 +216,9 @@ add_subdirectory(daemon)  # cmed: the node-local daemon and the ABI its requeste
 add_subdirectory(tools)
 add_subdirectory(tests)   # cases, and the bench/baseline subtrees it owns
 add_subdirectory(examples)
+if(CME_PYBIND)
+    add_subdirectory(pybind11)
+endif()
 
 # ── Install ─────────────────────────────────────────────────────────────
 set_target_properties(cme PROPERTIES
@@ -231,6 +237,16 @@ configure_file(
     @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libcme.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
+# ── Uninstall ───────────────────────────────────────────────────────────
+# cmake has no uninstall of its own, so this reads the manifest the install wrote
+# and removes those files. Available once this tree has installed at least once.
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Uninstall.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/Uninstall.cmake
+    @ONLY)
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/Uninstall.cmake)
 
 # ── Configuration summary ───────────────────────────────────────────────
 # Printed so a build's knobs are visible in the log, not only in the cache.

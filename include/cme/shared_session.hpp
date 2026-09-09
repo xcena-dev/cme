@@ -6,14 +6,16 @@
 // cme's ownership token is per PEER, not per thread: a second thread of this peer passes the
 // domain lock immediately on the resident fast path, so plain Session::lock does not serialise
 // this process's own threads. SharedSession adds the missing intra-node tier -- a per-domain
-// std::mutex over the inter-node CXL ownership -- and cohorts it: ownership is acquired once and
-// reused by a batch of local waiters before being handed back, capped so remote peers cannot
-// starve. Use this whenever more than one thread locks the same domain.
+// std::timed_mutex over the inter-node CXL ownership -- and cohorts it: ownership is acquired
+// once and reused by a batch of local waiters before being handed back, capped so remote peers
+// cannot starve. Use this whenever more than one thread locks the same domain.
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "cme/shared.hpp"
@@ -80,6 +82,12 @@ public:
     // inter-node acquire too -- there is no separate local deadline.
     [[nodiscard]] Guard lock(std::string_view name);
 
+    // Bounded acquire, for a caller that must answer someone else before its own deadline. One
+    // @timeout covers both tiers: what the local mutex takes is deducted from what is left for
+    // the inter-node acquire. nullopt is the deadline alone, and an unknown name still throws.
+    [[nodiscard]] std::optional<Guard>
+    tryLock(std::string_view name, std::chrono::nanoseconds timeout = std::chrono::seconds{5});
+
     // ── participation ──────────────────────────────────────────────
     // Join before locking, as with Session. Not safe to call concurrently with lock() on the
     // same name: it is the call that creates that domain's local mutex.
@@ -88,7 +96,7 @@ public:
     // PRECONDITION for leaveDomain and deleteDomain: this thread holds no Guard for @name.
     // Both take that domain's local mutex to hand ownership back first, and a Guard holds the
     // same mutex for its whole lifetime -- calling either inside a locked scope self-deadlocks
-    // on a non-recursive std::mutex. Let the Guard go out of scope first.
+    // on a non-recursive mutex. Let the Guard go out of scope first.
     void leaveDomain(std::string_view name);
 
     // ── dynamic domains ────────────────────────────────────────────

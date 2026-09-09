@@ -22,6 +22,7 @@
 // six C signals, so include-cleaner cannot see them there and would send us to the deprecated
 // signal.h.
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -88,7 +89,7 @@ public:
     // ── public methods ─────────────────────────────────────────────
     // Send @signalNumber and wait for the exit. Returns the code, or -1 if it left another way.
     // Once this returns the destructor has nothing to do.
-    [[nodiscard]] int stopWith(int signalNumber) noexcept
+    [[nodiscard]] std::int32_t stopWith(std::int32_t signalNumber) noexcept
     {
         if (child_ <= 0)
         {
@@ -118,7 +119,7 @@ private:
 };
 
 // Run to completion and hand back the code it left with, or -1 if it left another way.
-[[nodiscard]] inline int runProgram(const std::vector<std::string>& words)
+[[nodiscard]] inline std::int32_t runProgram(const std::vector<std::string>& words)
 {
     RunningProgram running{words};
 

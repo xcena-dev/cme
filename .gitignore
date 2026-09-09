@@ -22,3 +22,6 @@ config.yaml
 
 # Personal, per-clone ignores (untracked; wired via core.excludesFile)
 .gitignore.local
+
+# Test bytecode from the pybind11 cases.
+__pycache__/

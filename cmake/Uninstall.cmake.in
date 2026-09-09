@@ -1,0 +1,38 @@
+# Removes exactly what this build tree installed, by reading the manifest cmake
+# wrote at install time. A hand-kept list would drift from the install rules; the
+# manifest cannot.
+#
+# Run with: cmake --build <build> --target uninstall
+
+set(MANIFEST "@CMAKE_BINARY_DIR@/install_manifest.txt")
+
+if(NOT EXISTS "${MANIFEST}")
+    message(FATAL_ERROR "no install manifest at ${MANIFEST}: this tree installed nothing")
+endif()
+
+file(STRINGS "${MANIFEST}" INSTALLED_FILES)
+
+foreach(ONE_FILE ${INSTALLED_FILES})
+    if(EXISTS "$ENV{DESTDIR}${ONE_FILE}" OR IS_SYMLINK "$ENV{DESTDIR}${ONE_FILE}")
+        message(STATUS "removing $ENV{DESTDIR}${ONE_FILE}")
+        file(REMOVE "$ENV{DESTDIR}${ONE_FILE}")
+        if(EXISTS "$ENV{DESTDIR}${ONE_FILE}")
+            message(SEND_ERROR "could not remove $ENV{DESTDIR}${ONE_FILE}")
+        endif()
+    else()
+        message(STATUS "already gone: $ENV{DESTDIR}${ONE_FILE}")
+    endif()
+endforeach()
+
+# The include trees are ours, so their directories go too once emptied. Only if
+# empty: a shared prefix like /usr/local/include belongs to whoever else is in it.
+foreach(ONE_DIR "@CMAKE_INSTALL_FULL_INCLUDEDIR@/cme" "@CMAKE_INSTALL_FULL_INCLUDEDIR@/cmed"
+                "@CMAKE_INSTALL_FULL_INCLUDEDIR@/common")
+    if(IS_DIRECTORY "$ENV{DESTDIR}${ONE_DIR}")
+        file(GLOB LEFTOVER "$ENV{DESTDIR}${ONE_DIR}/*")
+        if(NOT LEFTOVER)
+            message(STATUS "removing empty ${ONE_DIR}")
+            file(REMOVE_RECURSE "$ENV{DESTDIR}${ONE_DIR}")
+        endif()
+    endif()
+endforeach()

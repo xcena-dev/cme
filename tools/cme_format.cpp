@@ -13,8 +13,11 @@
 //
 // Creating domains is not part of formatting. The flag is here because a region is provisioned once
 // and its domains are usually known then, and any peer can do the same at run time.
+//
+// --config reads the same file cmed does, under region.*, so one file describes one region: where it
+// is, and the shape this program lays into it. A flag on the command line wins over the file, which
+// is what lets an operator override one value without editing a deployment's own config.
 
-#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string>
@@ -23,13 +26,11 @@
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
 #include "common/args.hpp"
-#include "common/timing.hpp"
+#include "common/kv_config.hpp"
+#include "observe/inspector.hpp"
 
 namespace
 {
-
-// Short, because this is asking whether anyone is there and not waiting for them to arrive.
-constexpr timing::Millis AskIfLive{200};
 
 [[nodiscard]] cme::Strategy strategyFromName(const std::string& name)
 {
@@ -53,30 +54,39 @@ constexpr timing::Millis AskIfLive{200};
     throw cme::InvalidArgumentError{"--strategy is not a strategy: " + name};
 }
 
-// True when the region answers, so formatting would take it from whoever is on it.
-[[nodiscard]] bool alreadyLive(const std::string& uri)
+// The name config carries, as the mode libcme takes. Throws rather than guessing: the wrong mode
+// reads a stale header on a region no cache keeps in sync.
+[[nodiscard]] cme::CoherencyMode coherencyFromName(const std::string& name)
+{
+    if (name == "cache_coherent")
+    {
+        return cme::CoherencyMode::CacheCoherent;
+    }
+    if (name == "uncached")
+    {
+        return cme::CoherencyMode::Uncached;
+    }
+    if (name == "flush")
+    {
+        return cme::CoherencyMode::Flush;
+    }
+
+    throw cme::InvalidArgumentError{"region.coherency is not a mode: " + name};
+}
+
+// True when the region answers, so formatting would take it from whoever is on it. Reads the header
+// and joins nothing: whoever mounts asks this, and a region may grant that caller read alone.
+[[nodiscard]] bool alreadyLive(const std::string& uri, cme::CoherencyMode coherency)
 {
     try
     {
-        cme::Session::OpenOpts_t opts;
-        opts.formatTimeout = AskIfLive;
-        const cme::Session probing = cme::Session::open(uri, opts);
-        return true;
-    }
-    catch (const cme::RegionNotFormattedError&)
-    {
-        // Nothing has been laid out here, which is what this tool is for.
-        return false;
+        const cme::Inspector probing = cme::Inspector::open(uri, coherency);
+        return probing.readHeader().has_value();
     }
     catch (const cme::BackendError&)
     {
         // No object under that name yet. format creates it for shm: and file:.
         return false;
-    }
-    catch (const cme::NoFreeSlotError&)
-    {
-        // Formatted, and every slot taken. The busiest possible region is still a live one.
-        return true;
     }
 }
 
@@ -104,11 +114,13 @@ constexpr timing::Millis AskIfLive{200};
 void reportUsage()
 {
     std::fprintf(stderr,
-                 "usage: cme-format --uri <uri> [--max-domains N] [--max-peers N]\n"
-                 "                  [--strategy order|request|request_agg|peterson]\n"
+                 "usage: cme-format [--config <path>] [--uri <uri>] [--max-domains N]\n"
+                 "                  [--max-peers N] [--strategy order|request|request_agg|peterson]\n"
                  "                  [--domains a,b,c] [--force]\n"
                  "\n"
                  "  --uri          dax:<path>[@offset], shm:/<name>, or file:<path>\n"
+                 "  --config       a file to read region.uri, region.max_domains,\n"
+                 "                 region.max_peers, region.strategy and region.domains from\n"
                  "  --force        format even though the region already answers\n");
 }
 
@@ -116,18 +128,23 @@ void reportUsage()
 
 int main(int argc, char** argv)
 {
-    cliargs::takeArgs(argc, argv);
-
-    const std::string uri = cliargs::argStr("--uri", std::string{});
-    if (uri.empty())
-    {
-        reportUsage();
-        return 2;
-    }
-
+    // Everything inside, because a malformed config throws out of the load below and main is the
+    // one frame with nothing above it to catch.
     try
     {
-        if (!cliargs::argFlag("--force") && alreadyLive(uri))
+        cliargs::takeArgs(argc, argv);
+
+        // Absent path: an empty config, so every value below falls through to its own default.
+        const auto deployed = kvconfig::KeyValueConfig::loadIfPresent(cliargs::get("--config", std::string{}));
+        const auto uri = cliargs::get("--uri", deployed.getString("region.uri"));
+        if (uri.empty())
+        {
+            reportUsage();
+            return 2;
+        }
+
+        const auto coherency = coherencyFromName(deployed.getString("region.coherency", "cache_coherent"));
+        if (!cliargs::argFlag("--force") && alreadyLive(uri, coherency))
         {
             std::fprintf(stderr,
                          "cme-format: %s already answers. Formatting it would discard the domains "
@@ -137,19 +154,22 @@ int main(int argc, char** argv)
         }
 
         cme::Session::FormatOpts_t opts;
-        opts.maxDomains = static_cast<std::uint32_t>(cliargs::argU64("--max-domains", opts.maxDomains));
-        opts.maxPeers = static_cast<std::uint32_t>(cliargs::argU64("--max-peers", opts.maxPeers));
-        opts.strategy = strategyFromName(cliargs::argStr("--strategy", "peterson"));
+        opts.maxDomains =
+            cliargs::get("--max-domains", deployed.get("region.max_domains", opts.maxDomains));
+        opts.maxPeers = cliargs::get("--max-peers", deployed.get("region.max_peers", opts.maxPeers));
+        opts.strategy = strategyFromName(
+            cliargs::get("--strategy", deployed.getString("region.strategy", "peterson")));
         cme::Session::format(uri, opts);
 
         std::printf("formatted %s: %u domain slots, %u peer slots\n", uri.c_str(), opts.maxDomains,
                     opts.maxPeers);
 
-        const std::vector<std::string> domains = splitOnCommas(cliargs::argStr("--domains", std::string{}));
+        const auto listed = cliargs::get("--domains", std::string{});
+        const auto domains = listed.empty() ? deployed.getList("region.domains") : splitOnCommas(listed);
         if (!domains.empty())
         {
-            cme::Session session = cme::Session::open(uri);
-            for (const std::string& name : domains)
+            auto session = cme::Session::open(uri);
+            for (const auto& name : domains)
             {
                 session.createDomain(name);
                 std::printf("created domain %s\n", name.c_str());

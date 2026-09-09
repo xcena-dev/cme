@@ -300,7 +300,7 @@ int main(int argc, char** argv)
     static_cast<void>(cliargs::takeArgs(argc, argv));
 
     // No backend is the heap WB baseline, so an absent one is not an error.
-    const std::string backend = cliargs::argStr("--backend", std::string{});
+    const std::string backend = cliargs::get("--backend", std::string{});
     if (!backend.empty() && backend != "uc")
     {
         std::fprintf(stderr, "%s: unknown backend '%s' (only uc; omit for the heap baseline)\n%s",
@@ -308,14 +308,14 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const std::vector<std::uint32_t> contenders = parseCounts(cliargs::argStr("--contenders", "1 2 3 4"));
+    const std::vector<std::uint32_t> contenders = parseCounts(cliargs::get("--contenders", "1 2 3 4"));
     if (contenders.empty())
     {
         std::fprintf(stderr, "%s: --contenders parsed to nothing\n%s", argv[0], Usage);
         return 2;
     }
-    const auto repeats = static_cast<std::uint32_t>(cliargs::argU64("--repeats", DefaultRepeats));
-    const std::uint64_t slot = cliargs::argU64("--slot", 0);
+    const auto repeats = cliargs::get("--repeats", DefaultRepeats);
+    const auto slot = cliargs::get("--slot", std::uint64_t{0});
 
     // Map one cacheline: the uncacheable file when a backend was selected, else a heap line
     // as the write-back baseline.
@@ -328,7 +328,7 @@ int main(int argc, char** argv)
         {
             memory = harness::TestMemory::open(harness::ConfigReader{},
                                                harness::backendFromName(backend), "lww_probe",
-                                               slot, cliargs::argStr("--target", ""));
+                                               slot, cliargs::get("--target", ""));
         }
         catch (const harness::MediumUnavailable& why)
         {

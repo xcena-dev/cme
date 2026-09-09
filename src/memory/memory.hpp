@@ -29,6 +29,12 @@ inline constexpr std::uint64_t PmdAlign = 2ULL * 1024 * 1024;
     return std::error_code{errno, std::generic_category()};
 }
 
+// Picks a backend's read-only ctor apart from its joining one, which takes the same arguments.
+struct ReadOnlyTag
+{
+};
+inline constexpr ReadOnlyTag ReadOnly{};
+
 class Memory
 {
 public:
@@ -49,6 +55,9 @@ public:
     // dax rounds up to PMD; shm ftruncates to areaSize.
     [[nodiscard]] static std::unique_ptr<Memory>
     create(std::string_view uri, std::uint64_t areaSize);
+    // Maps what is already there for reading only, so a caller that answers a question out of the
+    // header needs no write permission on the region and takes no peer slot.
+    [[nodiscard]] static std::unique_ptr<Memory> openReadOnly(std::string_view uri);
 
     // ── accessors ──────────────────────────────────────────────────
     [[nodiscard]] void* getBase() const noexcept
@@ -78,6 +87,7 @@ class DaxMemory : public Memory
 public:
     // ── rule of five ───────────────────────────────────────────────
     explicit DaxMemory(std::string_view path, std::uint64_t offset = 0);
+    DaxMemory(std::string_view path, std::uint64_t offset, ReadOnlyTag);
     DaxMemory(std::string_view path, std::uint64_t areaSize, std::uint64_t offset);
     DaxMemory(const DaxMemory&) = delete;
     DaxMemory& operator=(const DaxMemory&) = delete;
@@ -92,6 +102,7 @@ class FileMemory : public Memory
 public:
     // ── rule of five ───────────────────────────────────────────────
     explicit FileMemory(std::string_view path);
+    FileMemory(std::string_view path, ReadOnlyTag);
     FileMemory(std::string_view path, std::uint64_t areaSize);
     FileMemory(const FileMemory&) = delete;
     FileMemory& operator=(const FileMemory&) = delete;
@@ -104,6 +115,7 @@ class ShmMemory : public Memory
 public:
     // ── rule of five ───────────────────────────────────────────────
     explicit ShmMemory(std::string_view name);
+    ShmMemory(std::string_view name, ReadOnlyTag);
     ShmMemory(std::string_view name, std::uint64_t areaSize);
     ShmMemory(const ShmMemory&) = delete;
     ShmMemory& operator=(const ShmMemory&) = delete;

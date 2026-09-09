@@ -7,9 +7,8 @@
 
 #pragma once
 
+#include <chrono>
 #include <string>
-
-#include "common/timing.hpp"
 
 namespace cmed
 {
@@ -24,16 +23,16 @@ struct CmedClientConfig_t
 
     // How long connect() waits for the Welcome once the socket has accepted. A socket nobody is
     // listening on is refused at once and spends none of this.
-    timing::Millis setupTimeout{5000};
+    std::chrono::milliseconds setupTimeout{5000};
 
     // ── waits ──────────────────────────────────────────────────────
     // Deadlines on waiting for the daemon, not on holding a domain. A caller that holds a domain
     // for a minute is not late; a daemon that has not answered in one is.
-    timing::Millis lockTimeout{5000};
+    std::chrono::milliseconds lockTimeout{5000};
 
     // How long a requester spins on the answer word before it sleeps. Past that it burns this
     // caller's own core, so it is a value a deployment picks.
-    timing::Micros spin{10};
+    std::chrono::microseconds spin{10};
 };
 
 // Missing file: every field defaults. Present but bad: kvconfig::ParseError for a malformed line,

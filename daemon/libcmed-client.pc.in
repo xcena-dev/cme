@@ -1,0 +1,10 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: libcmed-client
+Description: The requester half of cmed, one peer slot shared by a node
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lcmed_client -lcmed_shared -lpthread
+Cflags: -I${includedir}

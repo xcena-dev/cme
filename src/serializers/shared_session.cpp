@@ -6,6 +6,7 @@
 #include "cme/shared_session.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -32,7 +33,8 @@ constexpr std::uint32_t DefaultCohortCap = 16;
 // a unique_lock on `mutex` and the map grows underneath.
 struct DomainTier_t
 {
-    std::mutex mutex;
+    // Timed rather than plain: tryLock has to be able to give up on this tier.
+    std::timed_mutex mutex;
     // The peer's CXL ownership, kept alive across a whole cohort rather than per critical
     // section. Reset == ~cme::Guard == release, which lets a remote peer in.
     std::optional<cme::Guard> held;
@@ -86,7 +88,7 @@ struct SharedSession::Impl
         {
             return;
         }
-        const std::lock_guard<std::mutex> guard{tier->mutex};
+        const std::lock_guard<std::timed_mutex> guard{tier->mutex};
         tier->held.reset();
         tier->batch = 0;
     }
@@ -104,7 +106,7 @@ struct SharedSession::Impl
 struct SharedSession::Guard::Impl
 {
     DomainTier_t* tier{nullptr};
-    std::unique_lock<std::mutex> entryLock;
+    std::unique_lock<std::timed_mutex> entryLock;
 };
 
 // ── Guard ───────────────────────────────────────────────────────────
@@ -158,7 +160,7 @@ SharedSession::Guard SharedSession::lock(std::string_view name)
     // Announce intent before queuing so the thread currently in the cohort keeps the peer's
     // ownership across the handoff gap instead of releasing it to a remote peer.
     tier->waiters.fetch_add(1, std::memory_order_relaxed);
-    std::unique_lock<std::mutex> entryLock{tier->mutex};
+    std::unique_lock<std::timed_mutex> entryLock{tier->mutex};
     tier->waiters.fetch_sub(1, std::memory_order_relaxed);
 
     if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load(std::memory_order_relaxed))
@@ -166,6 +168,54 @@ SharedSession::Guard SharedSession::lock(std::string_view name)
         tier->batch = 0;
         tier->held.reset();  // release first: re-acquiring yields to remote peers
         tier->held = impl_->session.lock(name);
+    }
+    ++tier->batch;
+
+    auto guardImpl = std::make_unique<Guard::Impl>();
+    guardImpl->tier = tier;
+    guardImpl->entryLock = std::move(entryLock);
+    return Guard{std::move(guardImpl)};
+}
+
+std::optional<SharedSession::Guard> SharedSession::tryLock(std::string_view name,
+                                                           std::chrono::nanoseconds timeout)
+{
+    DomainTier_t* tier = impl_->findTier(name);
+    if (tier == nullptr)
+    {
+        throw NotParticipatingError{std::string{"cme::SharedSession::tryLock: not joined: "} +
+                                    std::string{name}};
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+
+    tier->waiters.fetch_add(1, std::memory_order_relaxed);
+    std::unique_lock<std::timed_mutex> entryLock{tier->mutex, std::defer_lock};
+    const bool entered = entryLock.try_lock_until(deadline);
+    tier->waiters.fetch_sub(1, std::memory_order_relaxed);
+    if (!entered)
+    {
+        return std::nullopt;
+    }
+
+    if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load(std::memory_order_relaxed))
+    {
+        tier->batch = 0;
+        tier->held.reset();  // release first: re-acquiring yields to remote peers
+        // What the local tier took is gone from the budget, so a caller that asked for 200ms
+        // waits 200ms in total and not once per tier.
+        const auto remaining = deadline - std::chrono::steady_clock::now();
+        if (remaining <= std::chrono::nanoseconds::zero())
+        {
+            return std::nullopt;
+        }
+        auto ownership = impl_->session.tryLock(
+            name, std::chrono::duration_cast<std::chrono::nanoseconds>(remaining));
+        if (!ownership.has_value())
+        {
+            return std::nullopt;
+        }
+        tier->held = std::move(ownership);
     }
     ++tier->batch;
 

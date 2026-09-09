@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -21,27 +22,27 @@
 namespace
 {
 
-constexpr int Children = 4;
-constexpr int RoundsEach = 3;
+constexpr std::uint32_t Children = 4;
+constexpr std::uint32_t RoundsEach = 3;
 
 // One child's whole life: its own session, its own turns. Returns what the process exits with.
-int runChild(const std::string& socketPath, int ordinal)
+std::int32_t runChild(const std::string& socketPath, std::uint32_t ordinal)
 {
     try
     {
         cmed::CmedSession session = cmed::CmedSession::connect(socketPath);
         session.joinDomain("inventory");
 
-        for (int round = 0; round < RoundsEach; ++round)
+        for (std::uint32_t round = 0; round < RoundsEach; ++round)
         {
             const cmed::CmedGuard guard = session.lock("inventory");
-            std::printf("child %d holds the turn, round %d\n", ordinal, round);
+            std::printf("child %u holds the turn, round %u\n", ordinal, round);
             std::fflush(stdout);
         }
     }
     catch (const cmed::CmedError& failure)
     {
-        std::printf("child %d: %s\n", ordinal, failure.what());
+        std::printf("child %u: %s\n", ordinal, failure.what());
         return 1;
     }
 
@@ -69,7 +70,7 @@ int main(int argc, char** argv)
 
         std::vector<::pid_t> children;
         children.reserve(Children);
-        for (int ordinal = 0; ordinal < Children; ++ordinal)
+        for (std::uint32_t ordinal = 0; ordinal < Children; ++ordinal)
         {
             const ::pid_t forked = ::fork();
             if (forked == 0)
@@ -84,7 +85,7 @@ int main(int argc, char** argv)
             }
         }
 
-        int failures = 0;
+        std::uint32_t failures = 0;
         for (const ::pid_t forked : children)
         {
             int status = 0;
@@ -92,7 +93,7 @@ int main(int argc, char** argv)
             failures += (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : 1;
         }
 
-        std::printf("%d of %d children finished cleanly\n", Children - failures, Children);
+        std::printf("%u of %u children finished cleanly\n", Children - failures, Children);
         return failures == 0 ? 0 : 1;
     }
     catch (const cmed::CmedError& failure)

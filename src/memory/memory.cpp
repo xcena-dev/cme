@@ -97,6 +97,25 @@ std::unique_ptr<Memory> Memory::open(std::string_view uri)
                                parts.scheme};
 }
 
+std::unique_ptr<Memory> Memory::openReadOnly(std::string_view uri)
+{
+    const auto parts = parseUri(uri);
+    if (parts.scheme == "dax")
+    {
+        return std::make_unique<DaxMemory>(parts.path, parts.offset, ReadOnly);
+    }
+    if (parts.scheme == "shm")
+    {
+        return std::make_unique<ShmMemory>(parts.path, ReadOnly);
+    }
+    if (parts.scheme == "file")
+    {
+        return std::make_unique<FileMemory>(parts.path, ReadOnly);
+    }
+    throw InvalidArgumentError{std::string{"cme::Memory::openReadOnly: unsupported scheme: "} +
+                               parts.scheme};
+}
+
 std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaSize)
 {
     const auto parts = parseUri(uri);

@@ -279,7 +279,7 @@ void runBench(harness::TestContext& ctx)
 {
     const cme::Strategy strategy = ctx.strategy();
     const char* const stratSuffix = ctx.strategySuffix();
-    const auto peers = static_cast<cme::PeerId>(cliargs::argU64("--peers", DefaultPeers));
+    const auto peers = cliargs::get("--peers", DefaultPeers);
 
     // One region per swept point on shm and uc; on dax the device hands out one window per
     // --slot, so the points reuse it in turn.
@@ -289,9 +289,9 @@ void runBench(harness::TestContext& ctx)
     };
 
     std::vector<cme::DomainId> domainCounts;
-    if (const std::uint64_t single = cliargs::argU64("--domains", 0); single != 0)
+    if (const auto single = cliargs::get("--domains", cme::DomainId{0}); single != 0)
     {
-        domainCounts = {static_cast<cme::DomainId>(single)};
+        domainCounts = {single};
     }
     else
     {

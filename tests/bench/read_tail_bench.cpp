@@ -232,7 +232,7 @@ int main(int argc, char** argv)
     static_cast<void>(cliargs::takeArgs(argc, argv));
 
     RunOptions_t options;
-    const std::string modeName = cliargs::argStr("--mode", "read-only");
+    const auto modeName = cliargs::get("--mode", "read-only");
     options.mode = parseMode(modeName);
     if (options.mode == Mode::Invalid)
     {
@@ -240,19 +240,21 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    options.iterations = cliargs::argU64("--iters", DefaultIterations);
-    options.pollers = static_cast<std::uint32_t>(cliargs::argU64("--pollers", 0));
-    options.stride = cliargs::argU64("--stride", 0);
-    options.slot = cliargs::argU64("--slot", 0);
+    // Each fallback is the field being filled, so a flag cannot land in it as another type.
+    options.iterations = cliargs::get("--iters", options.iterations);
+    options.pollers = cliargs::get("--pollers", options.pollers);
+    options.stride = cliargs::get("--stride", options.stride);
+    options.slot = cliargs::get("--slot", options.slot);
 
     // Naming, placement and removal come from here. The devdax window sits in the
     // reserved tail rather than at offset 0, where a filesystem sharing the node would be.
     std::unique_ptr<harness::TestMemory> memory;
     try
     {
-        memory = harness::TestMemory::open(harness::ConfigReader{}, harness::Backend::Dax,
+        memory = harness::TestMemory::open(harness::ConfigReader{},
+                                           harness::Backend::Dax,
                                            "read_tail", options.slot,
-                                           cliargs::argStr("--target", ""));
+                                           cliargs::get("--target", ""));
     }
     catch (const harness::MediumUnavailable& why)
     {

@@ -22,7 +22,8 @@ namespace cme
 namespace
 {
 
-[[nodiscard]] void* openMmap(std::string_view path, std::uint64_t mapSize, std::uint64_t offset)
+[[nodiscard]] void* openMmap(std::string_view path, std::uint64_t mapSize, std::uint64_t offset,
+                             bool writable)
 {
     const std::string pathString{path};
     // devdax refuses an unaligned mmap offset outright; reject it here so the failure
@@ -32,14 +33,14 @@ namespace
         throw InvalidArgumentError{std::string{"cme::DaxMemory("} + pathString +
                                    "): offset must be a multiple of 2 MiB"};
     }
-    const int file = ::open(pathString.c_str(), O_RDWR);
+    const auto file = ::open(pathString.c_str(), writable ? O_RDWR : O_RDONLY);
     if (file < 0)
     {
         const auto failure = lastSystemError();
         throw BackendError{std::string{"cme::DaxMemory open("} + pathString + ")", failure};
     }
-    void* mapped = ::mmap(nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, file,
-                          static_cast<::off_t>(offset));
+    const std::int32_t protection = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
+    void* mapped = ::mmap(nullptr, mapSize, protection, MAP_SHARED, file, static_cast<::off_t>(offset));
     // Before the close, which is allowed to leave its own value in errno.
     const auto failure = (mapped == MAP_FAILED) ? lastSystemError() : std::error_code{};
     ::close(file);
@@ -53,7 +54,12 @@ namespace
 }  // namespace
 
 DaxMemory::DaxMemory(std::string_view path, std::uint64_t offset)
-    : Memory{openMmap(path, PmdAlign, offset), PmdAlign}
+    : Memory{openMmap(path, PmdAlign, offset, /*writable=*/true), PmdAlign}
+{
+}
+
+DaxMemory::DaxMemory(std::string_view path, std::uint64_t offset, ReadOnlyTag)
+    : Memory{openMmap(path, PmdAlign, offset, /*writable=*/false), PmdAlign}
 {
 }
 
@@ -61,7 +67,7 @@ DaxMemory::DaxMemory(std::string_view path, std::uint64_t areaSize, std::uint64_
     : Memory{nullptr, 0}
 {
     const std::uint64_t mapSize = roundUp(areaSize, PmdAlign);
-    base_ = openMmap(path, mapSize, offset);
+    base_ = openMmap(path, mapSize, offset, /*writable=*/true);
     mappedSize_ = mapSize;
 }
 
