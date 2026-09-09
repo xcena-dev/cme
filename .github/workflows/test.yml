@@ -39,10 +39,12 @@ jobs:
       # Both failpoint axes on: without them the boundary cases register as skipped, and a skip on
       # the gate proves nothing about a crash boundary. Off by default, since neither is a shipping
       # feature and every reach() they compile in is dead weight to a deployment.
+      # CME_STATS on for the same reason: recovery_sole_executor proves one executor per death by
+      # reading the RecoveryCompleted counter, and a build without the counter leaves by skip.
       - name: Configure
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-                -DCME_FAILPOINT=ON -DCMED_FAILPOINT=ON
+                -DCME_FAILPOINT=ON -DCMED_FAILPOINT=ON -DCME_STATS=ON
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
