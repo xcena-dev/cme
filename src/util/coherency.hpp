@@ -32,9 +32,9 @@
 // Every regime now compiles into every build, so the whole file is x86-only. Kept as one
 // guard rather than spread over the call sites: a port has a single place to look.
 #if !defined(__x86_64__)
-#error "cme currently requires x86 (clflush/clflushopt/sfence/lfence)"
+#error "cme currently requires x86 (clflush/clflushopt/sfence/mfence)"
 #endif
-#include <emmintrin.h>  // _mm_clflush, _mm_lfence, _mm_sfence
+#include <emmintrin.h>  // _mm_clflush, _mm_mfence, _mm_sfence
 #include <immintrin.h>  // _mm_clflushopt, _movdir64b, _mm512_loadu_si512
 
 namespace cme
@@ -99,9 +99,9 @@ inline void rmb(const void* addr, std::size_t len, Mode mode) noexcept
                 _mm_clflush(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
             }
         }
-        // lfence is enough to keep the load behind the flush: every CPU with clflushopt, which
-        // wmb requires, orders clflush with fences, and no read passes an lfence.
-        _mm_lfence();
+        // mfence, not lfence: lfence waits only for a flush to retire, so a later load can still hit
+        // the line before the flush removes it. mfence waits for the flush to complete.
+        _mm_mfence();
     }
     std::atomic_thread_fence(std::memory_order_acquire);
 }
