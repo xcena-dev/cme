@@ -60,7 +60,7 @@ public:
             return static_cast<PeerId>(recoveryAuthority) == peer;
         }
 
-        // Drop the winner id; magic persists. Caller wmb after.
+        // Drop the winner id and keep the magic. The caller writes the line back.
         void retract() noexcept
         {
             recoveryAuthority = NoPeer;

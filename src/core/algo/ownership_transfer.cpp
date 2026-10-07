@@ -147,8 +147,8 @@ bool transferOwnershipGuarded(LocalPeerState& peerState, DomainId domainId, Peer
 // Must run before release() so a new winner self-stamping can't be clobbered.
 void vacateOwnership(LocalPeerState& peerState, DomainId domainId)
 {
-    // rmw: fresh read (rmb) so epoch advances from FAM truth, not a stale DRAM copy.
-    // Single-writer (holder) -> rmb + mutate + wmb in place.
+    // rmw: a fresh get, so epoch advances from FAM truth rather than a stale DRAM copy. The holder
+    // is the line's single writer, so setting it back whole overwrites nobody.
     coherency::rmw(peerState.getDomainRecord(domainId), peerState.getCoherencyMode(),
                    [](auto* rec)
                    {

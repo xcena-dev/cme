@@ -219,8 +219,8 @@ void RequestAggPolicy::updateDemandAndSlice(LocalPeerState& peerState, DomainId 
             // and a slice visible ahead of it costs that peer the tick's grant.
             request_demand::storePending(peerState.getSuccessorAreaBase(), peerState.getPeerId(),
                                          bits, peerState.getCoherencyMode());
-            // rmw, not a store of our own bytes: the slices are byte-disjoint, but wmb flushes a
-            // whole line, so under Flush a narrow write would rewrite a group-mate's stale copy.
+            // rmw, not a store of our own bytes: the line is written whole, so the slice goes back
+            // inside a fresh copy of the group-mates' bytes rather than a stale one.
             // A slice lost to a concurrent rmw returns on refreshAggregatedRequest's next tick.
             coherency::rmw(layout.getSlot(groupId_), peerState.getCoherencyMode(),
                            [&](RequestAggLayout::AggregatedRequest_t* slot) noexcept

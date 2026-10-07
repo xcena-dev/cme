@@ -62,7 +62,7 @@ public:
     // geometry, since it describes how this peer reaches the region rather than the region.
     void setRegionPointers(const Geometry& geometry, CoherencyMode mode) noexcept;
     // Slot accessors return a pointer only; a fresh read is the caller's
-    // coherency::get(...), an in-place update its rmw/rmwIfTrue (those barrier themselves).
+    // coherency::get(...), a read-modify-write its rmw/rmwIfTrue (those barrier themselves).
     [[nodiscard]] Geometry::DomainRecord_t* getDomainRecord(DomainId domainId) const noexcept;
     // Shadow replica of the domain record for peerId's group (fast USE-detection poll target).
     [[nodiscard]] Geometry::DomainRecord_t* getDomainRecordShadow(DomainId domainId, PeerId peerId) const noexcept;

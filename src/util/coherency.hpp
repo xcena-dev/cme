@@ -159,27 +159,27 @@ inline void set(T* slot, const T& value, Mode mode) noexcept
 #endif
 }
 
-// rmb the whole slot, run @mutate on it, wmb it back. Not for paths that branch on a magic
-// check between the barriers -- mutate cannot bail out; use rmwIfTrue.
+// get the whole slot, run @mutate on the copy, set it back whole. Not for paths that branch on
+// a magic check -- mutate cannot bail out; use rmwIfTrue.
 template <typename T, typename T_Mutate>
 inline void rmw(T* slot, Mode mode, T_Mutate&& mutate) noexcept(noexcept(mutate(slot)))
 {
-    rmb(slot, sizeof(*slot), mode);
-    mutate(slot);
-    wmb(slot, sizeof(*slot), mode);
+    T copy = get(slot, mode);
+    mutate(&copy);
+    set(slot, copy, mode);
 }
 
-// Conditional RMW for the rmb -> precondition check -> mutate -> wmb pattern. A false from
-// @mutate means the slot was left unchanged, so the wmb is skipped; that is the return value.
+// Conditional RMW for the get -> precondition check -> mutate -> set pattern. A false from
+// @mutate skips the set and leaves the slot unwritten, and the return value says which happened.
 template <typename T, typename T_Mutate>
 inline bool rmwIfTrue(T* slot, Mode mode, T_Mutate&& mutate) noexcept(noexcept(mutate(slot)))
 {
-    rmb(slot, sizeof(*slot), mode);
-    if (!mutate(slot))
+    T copy = get(slot, mode);
+    if (!mutate(&copy))
     {
         return false;
     }
-    wmb(slot, sizeof(*slot), mode);
+    set(slot, copy, mode);
     return true;
 }
 
