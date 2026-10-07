@@ -43,15 +43,17 @@ public:
     void activate() noexcept;
     void deactivate() noexcept;
     [[nodiscard]] bool isActive() const noexcept;
-    // Stamp self's liveness witness with the current wall clock; the FAM slot is a
-    // write-only mirror of this DRAM truth (self owns its slot, no FAM read-back).
-    void stampSelfSeen() noexcept;
-    // Local truth of self's member slot, seeded once by joinMembership's get (the only
-    // self FAM read). Mutate getSelfMemberState(), then publishSelfMemberState() to
-    // write-through to FAM (whole-slot set); never read the FAM slot back.
-    void seedSelfMemberState(const Geometry::Member_t& member) noexcept;
-    [[nodiscard]] Geometry::Member_t& getSelfMemberState() noexcept;
-    void publishSelfMemberState() noexcept;
+    // Stamp self's liveness witness with the current wall clock and write the slot through.
+    void publishSelfSeen() noexcept;
+    // Mutate the local truth of self's member slot, then write the whole slot through, as one step
+    // under selfMemberMutex_: an older copy from another thread can then never land after this one.
+    template <typename T_Mutate>
+    void publishSelfMember(T_Mutate&& mutate) noexcept
+    {
+        const std::lock_guard<std::mutex> guard{selfMemberMutex_};
+        mutate(selfMember_);
+        coherency::set(getMemberSlot(peerId_), selfMember_, getCoherencyMode());
+    }
 
     // ── SWPC line table pointers (set once at attach) ────────────
     // Capture every region section pointer (header, admission line, slot tables) from
@@ -270,6 +272,7 @@ public:
 private:
     PeerId peerId_{0};
     Geometry::Member_t selfMember_{};  // local truth of self's slot (incl. lastSeenNanos); FAM is a write-only mirror
+    std::mutex selfMemberMutex_;       // serialises this peer's threads changing and publishing selfMember_
     std::atomic<bool> active_{false};
 
     std::uint32_t peerScanBound_{0};  // cached AdmissionControl_t::peerScanBound; bounds peer scans

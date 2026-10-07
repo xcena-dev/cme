@@ -182,8 +182,11 @@ Peer::~Peer()
 
     // Drain before leaving: Leaving drops us from successor selection, and the poll thread
     // stays up so a grant landing anyway is forwarded, not stranded on a slot about to be None.
-    state.getSelfMemberState().setStatus(Geometry::Member_t::Status::Leaving);
-    state.publishSelfMemberState();
+    state.publishSelfMember(
+        [](auto& member)
+        {
+            member.setStatus(Geometry::Member_t::Status::Leaving);
+        });
 
     CME_FAILPOINT_REACH(failpoint::Boundary::LeaveInDrain);
     std::this_thread::sleep_for(LeaveDrainWindow);

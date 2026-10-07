@@ -175,8 +175,11 @@ JoinResult joinMembership(LocalPeerState& peerState)
     DomainBitmap participating;
     participating.set(ControlDomainId);
     selfState.storeParticipatingDomains(participating);
-    peerState.seedSelfMemberState(selfState);  // store the fully-initialised member, then write through
-    peerState.publishSelfMemberState();
+    peerState.publishSelfMember(
+        [&selfState](auto& member)
+        {
+            member = selfState;  // store the fully-initialised member, then write through
+        });
 
     CME_FAILPOINT_REACH(failpoint::Boundary::JoinBeforeBaseline);
 
@@ -192,8 +195,11 @@ JoinResult joinMembership(LocalPeerState& peerState)
 
     // Per-domain state consistent: flip to Active (TLA+ RejoinResync:
     // rejoining -> ~rejoining) so other peers may forward/target this peer.
-    peerState.getSelfMemberState().setStatus(Geometry::Member_t::Status::Active);
-    peerState.publishSelfMemberState();
+    peerState.publishSelfMember(
+        [](auto& member)
+        {
+            member.setStatus(Geometry::Member_t::Status::Active);
+        });
     return JoinResult::Ok;
 }
 
@@ -237,10 +243,12 @@ void leaveMembership(LocalPeerState& peerState) noexcept
     // write through with no rmb. The demand line went earlier, in SuccessorPolicy::leave().
     CME_FAILPOINT_REACH(failpoint::Boundary::LeaveBeforeNone);
 
-    auto& selfState = peerState.getSelfMemberState();
-    selfState.storeParticipatingDomains({});
-    selfState.setStatus(Geometry::Member_t::Status::None);
-    peerState.publishSelfMemberState();
+    peerState.publishSelfMember(
+        [](auto& member)
+        {
+            member.storeParticipatingDomains({});
+            member.setStatus(Geometry::Member_t::Status::None);
+        });
 }
 
 JoinResult joinDomain(LocalPeerState& peerState, DomainId domainId)

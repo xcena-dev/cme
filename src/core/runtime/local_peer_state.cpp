@@ -42,31 +42,19 @@ void LocalPeerState::activate() noexcept
     active_.store(true, std::memory_order_release);
 }
 
-void LocalPeerState::stampSelfSeen() noexcept
+void LocalPeerState::publishSelfSeen() noexcept
 {
     const std::uint64_t now = timing::wall<timing::Nanos>();
-    // Monotone-published guard: never publish a backward wall-clock step -- hold the
-    // prior stamp so a step becomes a stall (the safe, conservative direction).
-    if (now > static_cast<std::uint64_t>(selfMember_.lastSeenNanos))
-    {
-        selfMember_.lastSeenNanos = now;
-    }
-}
-
-void LocalPeerState::seedSelfMemberState(const Geometry::Member_t& member) noexcept
-{
-    selfMember_ = member;
-}
-
-Geometry::Member_t& LocalPeerState::getSelfMemberState() noexcept
-{
-    return selfMember_;
-}
-
-void LocalPeerState::publishSelfMemberState() noexcept
-{
-    // Write-through the local truth; self owns its slot so no rmb (whole-slot set).
-    coherency::set(getMemberSlot(getPeerId()), selfMember_, getCoherencyMode());
+    publishSelfMember(
+        [now](auto& member)
+        {
+            // Monotone-published guard: never publish a backward wall-clock step -- hold the
+            // prior stamp so a step becomes a stall (the safe, conservative direction).
+            if (now > static_cast<std::uint64_t>(member.lastSeenNanos))
+            {
+                member.lastSeenNanos = now;
+            }
+        });
 }
 
 void LocalPeerState::deactivate() noexcept
@@ -268,9 +256,8 @@ namespace
 // Atomic bit RMW on one participation word of selfMember_. DRAM-only by construction: the
 // caller is always this peer's own DRAM copy, never a region slot -- a lock-prefixed RMW is
 // not a valid primitive on FAM, which has no cross-host coherence (see coherency.hpp).
-// The control lock these run under is peer-granularity, so a second thread of this peer
-// passes it through the resident fast path; without the atomic, two workers joining domains
-// in the same word would drop one of the bits for good.
+// Writers are serialised by selfMemberMutex_. The atomic is for isParticipating, which reads the
+// word on the lock path without taking that mutex.
 void participationBitRmw(Geometry::Member_t& selfMember, DomainId domainId, bool set) noexcept
 {
     auto* word = reinterpret_cast<std::atomic<std::uint64_t>*>(
@@ -288,17 +275,21 @@ void participationBitRmw(Geometry::Member_t& selfMember, DomainId domainId, bool
 
 }  // namespace
 
-// The whole-slot publish can still carry a snapshot missing a concurrent bit; the next
-// publish (a worker's, or the 10 us heartbeat) carries both.
 void LocalPeerState::setParticipation(DomainId domainId) noexcept
 {
-    participationBitRmw(selfMember_, domainId, true);
-    publishSelfMemberState();
+    publishSelfMember(
+        [domainId](auto& member)
+        {
+            participationBitRmw(member, domainId, true);
+        });
 }
 void LocalPeerState::clearParticipation(DomainId domainId) noexcept
 {
-    participationBitRmw(selfMember_, domainId, false);
-    publishSelfMemberState();
+    publishSelfMember(
+        [domainId](auto& member)
+        {
+            participationBitRmw(member, domainId, false);
+        });
 }
 bool LocalPeerState::isPendingDomain(DomainId domainId) const noexcept
 {

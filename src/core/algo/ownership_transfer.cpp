@@ -161,8 +161,7 @@ void vacateOwnership(LocalPeerState& peerState, DomainId domainId)
 void bumpHeartbeat(LocalPeerState& peerState)
 {
     // Self owns its slot: stamp the local truth's witness, then write through (no rmb).
-    peerState.stampSelfSeen();
-    peerState.publishSelfMemberState();
+    peerState.publishSelfSeen();
 
     // publishProfile gates itself (build toggle + null + magic) and barriers its own read.
     const auto& telemetry = peerState.getTelemetry();
