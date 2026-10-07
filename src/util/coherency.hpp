@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 #include "cme/limits.hpp"  // CacheLineBytes: the unit every transaction below moves
@@ -34,7 +35,7 @@
 #error "cme currently requires x86 (clflush/clflushopt/sfence/lfence)"
 #endif
 #include <emmintrin.h>  // _mm_clflush, _mm_lfence, _mm_sfence
-#include <immintrin.h>  // _mm_clflushopt
+#include <immintrin.h>  // _mm_clflushopt, _movdir64b, _mm512_loadu_si512
 
 namespace cme
 {
@@ -98,6 +99,8 @@ inline void rmb(const void* addr, std::size_t len, Mode mode) noexcept
                 _mm_clflush(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
             }
         }
+        // lfence is enough to keep the load behind the flush: every CPU with clflushopt, which
+        // wmb requires, orders clflush with fences, and no read passes an lfence.
         _mm_lfence();
     }
     std::atomic_thread_fence(std::memory_order_acquire);
@@ -111,23 +114,49 @@ inline void mb() noexcept
     std::atomic_thread_fence(std::memory_order_seq_cst);
 }
 
-// Whole-64B slot transfer: on UC the wide load/store is one transaction, versus N
-// field-by-field round-trips. SINGLE-WRITER SLOTS ONLY -- set() stores all 64B, so on a
-// multi-writer slot it overwrites a concurrent writer's field.
+// ── Whole-line moves ──────────────────────────────────────────────
+
+// The instruction is fixed at compile time by what -march grants, so the hot path has no CPU check.
+// A build without those flags gets the byte copy, which can tear.
+
+// A zmm move is usually one transaction but promises nothing, and a byte copy is the last resort.
+inline void copyLine(void* destination, const void* source) noexcept
+{
+#if defined(__AVX512F__)
+    _mm512_storeu_si512(destination, _mm512_loadu_si512(source));
+#else
+    std::memcpy(destination, source, CacheLineBytes);
+#endif
+}
+
+// Whole-64B slot transfer. SINGLE-WRITER SLOTS ONLY -- set() stores all 64B, overwriting a
+// concurrent writer's field.
 template <typename T>
 [[nodiscard]] inline T get(const T* slot, Mode mode) noexcept
 {
-    static_assert(sizeof(T) == CacheLineBytes, "coherency::get is for one-cacheline structs");
+    static_assert(sizeof(T) == CacheLineBytes && IsRegionRecord<T>,
+                  "coherency::get is for one-cacheline structs");
     rmb(slot, sizeof(T), mode);
-    return *slot;
+    T value;
+    copyLine(&value, slot);
+    return value;
 }
 
+// MOVDIR64B is the one 64-byte store the architecture guarantees whole. It writes straight to
+// memory and leaves nothing in this host's cache, so it takes the fence and no flush.
 template <typename T>
 inline void set(T* slot, const T& value, Mode mode) noexcept
 {
-    static_assert(sizeof(T) == CacheLineBytes, "coherency::set is for one-cacheline structs");
-    *slot = value;
+    static_assert(sizeof(T) == CacheLineBytes && IsRegionRecord<T>,
+                  "coherency::set is for one-cacheline structs");
+#if defined(__MOVDIR64B__)
+    _movdir64b(slot, &value);
+    wmb(slot, sizeof(T), Mode::Uncached);
+    static_cast<void>(mode);
+#else
+    copyLine(slot, &value);
     wmb(slot, sizeof(T), mode);
+#endif
 }
 
 // rmb the whole slot, run @mutate on it, wmb it back. Not for paths that branch on a magic

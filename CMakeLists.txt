@@ -85,11 +85,8 @@ if(NOT CME_SANITIZE STREQUAL "none")
     add_link_options(-fsanitize=${CME_SANITIZE})
 endif()
 
-# -march=native widens a 64B slot get/set to one AVX-512 transaction. With
-# SSE2 the same access becomes 16B x4, and a torn 64B slot is a correctness
-# problem, not a slower one. So this is semantics, not tuning -- and it ties
-# the binary to the build host. Turn it off only for a portable release
-# build, and re-check slot atomicity on the target ISA when you do.
+# Semantics, not tuning: it is what lets coherency get/set compile to MOVDIR64B and AVX-512 moves.
+# Without those flags a slot moves as a byte copy that can tear. It ties the binary to the build host.
 if(NOT DEFINED CME_SITE_native_arch)
     set(CME_SITE_native_arch ON)
 endif()

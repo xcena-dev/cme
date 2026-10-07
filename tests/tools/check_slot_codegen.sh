@@ -57,6 +57,13 @@ for symbol in cmeProbeSlotSet cmeProbeSlotGet; do
         continue
     fi
 
+    # Its operands are addresses in general-purpose registers, and it is the one 64 B store the
+    # architecture guarantees whole, so it is checked before the register widths.
+    if printf '%s' "$body" | grep -q 'movdir64b'; then
+        echo "OK: $symbol stores the line with MOVDIR64B, one 64 B write the architecture guarantees whole"
+        continue
+    fi
+
     width=none
     if printf '%s' "$body" | grep -q 'zmm'; then
         width=64B
