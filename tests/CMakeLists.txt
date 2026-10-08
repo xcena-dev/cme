@@ -218,6 +218,7 @@ cme_test_exe(cme-slot-inherit-test test_slot_inherit.cpp)
 cme_test_exe(cme-domain-incarnation-test test_domain_incarnation.cpp)
 cme_test_exe(cme-domain-handle-test test_domain_handle.cpp)
 cme_test_exe(cme-file-presized-test test_file_presized.cpp)
+cme_test_exe(cme-peterson-delete-reuse-test test_peterson_delete_reuse.cpp)
 cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
 cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
 cme_test_exe(cme-demand-scrub-test test_demand_scrub.cpp)
@@ -269,6 +270,11 @@ cme_case(memory_reject TARGET cme-memory-reject-test BACKENDS shm SHM_TIMEOUT 60
 # pre-sized one is left alone, which is what a WORM mount requires. shm for the same reason as
 # memory_reject -- the case seals its own memfd and never opens the medium it was handed.
 cme_case(file_presized TARGET cme-file-presized-test BACKENDS shm SHM_TIMEOUT 60)
+
+# Peterson's tournament is per slot, so a delete must leave the slot's tree clear for the next domain
+# there. shm alone: the question is what the release path writes, not how a medium carries it.
+cme_case(peterson_delete_reuse TARGET cme-peterson-delete-reuse-test STRATEGY peterson BACKENDS shm
+    SHM_TIMEOUT 60)
 
 # Smoke and lifecycle: no policy axis, every backend.
 cme_case(fairness_smoke TARGET cme-fairness-smoke-test SHM_TIMEOUT 60)

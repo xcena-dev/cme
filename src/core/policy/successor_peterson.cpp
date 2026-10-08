@@ -234,17 +234,17 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 {
     OBSERVE_LATENCY_BEGIN(Unlock);
     auto& domain = peerState.getDomain(domainId);
+    const auto pins = domain.getOwnershipPinCount();
 
-    // Vacate and release while the pin is still held, unpin LAST: the pin is what stops
-    // pollCycle collecting this domain and racing the worker on the shared tournament.
-    const bool outermost = domain.getOwnershipPinCount() == 1;
-
-    // Vacate the record BEFORE release so a new winner's self-stamp isn't clobbered.
-    // Unconditional here -- "unlock always vacates" is what lets pollCycle stay empty.
-    if (outermost)
+    // The outermost unlock, or one after a delete cleared the pins: the climb leaves the slot's tournament
+    // either way. Only a live record is vacated, before the release, so a new winner's stamp survives.
+    if (pins <= 1)
     {
         OBSERVE_LATENCY_BEGIN(Release);
-        ownership_transfer::vacateOwnership(peerState, domainId);
+        if (pins == 1)
+        {
+            ownership_transfer::vacateOwnership(peerState, domainId);
+        }
         if (state_)
         {
             state_->release(domainId);
@@ -252,6 +252,7 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
         OBSERVE_LATENCY_END(Release, peerState, domainId);
     }
 
+    // Unpin last: the pin stops pollCycle collecting this domain and racing the worker on the tournament.
     domain.unpinOwnership();
     OBSERVE_LATENCY_END(Unlock, peerState, domainId);
 }
