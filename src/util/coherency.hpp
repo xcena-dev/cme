@@ -116,6 +116,9 @@ inline void mb() noexcept
 
 // ── Whole-line moves ──────────────────────────────────────────────
 
+// A record moves as one 64B line, not as 8B atomics that would split it into per-word accesses.
+// This races a same-process reader under the C++ model and relies on rmb/wmb being compiler barriers.
+
 // The instruction is fixed at compile time by what -march grants, so the hot path has no CPU check.
 // A build without those flags gets the byte copy, which can tear.
 
