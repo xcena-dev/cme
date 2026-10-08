@@ -77,6 +77,16 @@ stage()
 
 # ── preflight ───────────────────────────────────────────────────────────
 
+# A devdax node outlives an unbind from device_dax, and opening it then fails with ENXIO, so
+# the dax cases would fail rather than skip. No sysfs entry means nothing to check against.
+dax_bound()
+{
+	local sysfs
+	sysfs="/sys/bus/dax/devices/$(basename "$1")"
+	[ -d "$sysfs" ] || return 0
+	[ "$(basename "$(readlink -f "$sysfs/driver" 2>/dev/null)")" = device_dax ]
+}
+
 preflight()
 {
 	local tool
@@ -96,6 +106,10 @@ preflight()
 		want "dax_device is empty in config.yaml"
 	elif [ ! -c "$device" ]; then
 		want "dax_device '$device' is not a character device"
+	elif [ ! -r "$device" ] || [ ! -w "$device" ]; then
+		want "dax_device '$device' is not readable and writable by $(id -un)"
+	elif ! dax_bound "$device"; then
+		want "dax_device '$device' is not bound to device_dax"
 	fi
 
 	mount="$(site_get file_backend_dir)"
@@ -154,6 +168,19 @@ do_suite()
 	ctest --test-dir "$CME/$BUILD" -j "$JOBS" --output-on-failure
 }
 
+# A bench that measures dax_device alone exits non-zero without it, where the others skip a
+# missing medium themselves. Under --allow-missing the preflight has already reported it.
+run_dax_bench()
+{
+	local dax
+	dax="$(site_get dax_device)"
+	if [ ! -c "$dax" ]; then
+		echo ">>> skipping $(basename "$1"): '${dax:-<dax_device unset>}' is not a character device"
+		return 0
+	fi
+	"$@"
+}
+
 # The scripts, not the numbers. Three of the four benchmarks link no cme target at all --
 # they measure the medium with mmap and intrinsics -- so no change to this library can move
 # what they report. What can break is the plumbing: which target they resolve, which slot
@@ -167,18 +194,18 @@ do_scripts()
 	local failed=0
 	if [ "$FULL" = 1 ]; then
 		"$HERE/bench/cacheline_bench.sh" --build "$BUILD" || failed=1
-		"$HERE/bench/read_tail_bench.sh" --build "$BUILD" || failed=1
+		run_dax_bench "$HERE/bench/read_tail_bench.sh" --build "$BUILD" || failed=1
 		"$HERE/bench/lww_settle_bench.sh" --build "$BUILD" || failed=1
-		"$HERE/bench/recovery_latency_bench.sh" --build "$BUILD" --backend dax || failed=1
+		run_dax_bench "$HERE/bench/recovery_latency_bench.sh" --build "$BUILD" --backend dax || failed=1
 		"$HERE/sweep/run_sweep.sh" --build "$BUILD" --python "$PYTHON" || failed=1
 		"$HERE/sweep/stress_recovery.sh" --bin "$CME/$BUILD/tests/cme-recovery-test" \
 			--runs 50 || failed=1
 	else
 		"$HERE/bench/cacheline_bench.sh" --build "$BUILD" --iters 50000 --slot 3 || failed=1
-		"$HERE/bench/read_tail_bench.sh" --build "$BUILD" --iters 100000 --slot 3 || failed=1
+		run_dax_bench "$HERE/bench/read_tail_bench.sh" --build "$BUILD" --iters 100000 --slot 3 || failed=1
 		"$HERE/bench/lww_settle_bench.sh" --build "$BUILD" --contenders "2 4" \
 			--repeats 50 --slot 3 || failed=1
-		"$HERE/bench/recovery_latency_bench.sh" --build "$BUILD" --backend dax \
+		run_dax_bench "$HERE/bench/recovery_latency_bench.sh" --build "$BUILD" --backend dax \
 			--strategies request --peers 4 --domains 1 || failed=1
 		"$HERE/sweep/run_sweep.sh" --build "$BUILD" --python "$PYTHON" \
 			--no-seqlat --no-tierlat || failed=1
