@@ -734,7 +734,7 @@ Four things make that access correct and cheap:
 - **64-byte alignment.** Every line sits on a cacheline boundary (the region layout guarantees it, checked at bind), so a whole-line access is one transaction and never straddles two lines.
 - **A barrier.** Each access is paired with a fence — `wmb` after a write, `rmb` before a read — the ordering the medium does not give for free.
 - **Flush or UC, per regime.** Cross-host visibility is not automatic; how it is achieved is the build and mapping choice:
-    - *write-back (WB)* — the barrier also flushes: `clflushopt` or `clwb` on the writer, `clflush` on the reader;
+    - *write-back (WB)* — the barrier also flushes: `clwb` on the writer, `clflushopt` on the reader;
     - *uncached (UC)* — the cache is bypassed, so the barrier does no flush.
 
 For state written often and read across hosts — coordination metadata, communication lines — caching earns nothing: there is no reuse to amortize, only a flush to pay on every access.

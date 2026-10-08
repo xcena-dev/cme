@@ -19,7 +19,7 @@ include(CheckCXXSourceCompiles)
 
 # The flags cme_isa puts on every TU that reaches the medium directly.
 function(cme_isa_probe_flags outVar)
-    set(flags -mclflushopt)
+    set(flags -mclflushopt -mclwb)
     if(CME_NATIVE_ARCH)
         list(APPEND flags -march=native)
     endif()

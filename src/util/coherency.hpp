@@ -32,10 +32,10 @@
 // Every regime now compiles into every build, so the whole file is x86-only. Kept as one
 // guard rather than spread over the call sites: a port has a single place to look.
 #if !defined(__x86_64__)
-#error "cme currently requires x86 (clflushopt/sfence/mfence)"
+#error "cme currently requires x86 (clflushopt/clwb/sfence/lfence/mfence)"
 #endif
-#include <emmintrin.h>  // _mm_mfence, _mm_sfence
-#include <immintrin.h>  // _mm_clflushopt, _movdir64b, _mm512_loadu_si512
+#include <emmintrin.h>  // _mm_lfence, _mm_mfence, _mm_sfence
+#include <immintrin.h>  // _mm_clflushopt, _mm_clwb, _movdir64b, _mm512_loadu_si512
 
 namespace cme
 {
@@ -75,9 +75,10 @@ inline void wmb(const void* addr, std::size_t len, Mode mode) noexcept
         const auto end = reinterpret_cast<std::uintptr_t>(addr) + len;
         // The walk is integer arithmetic because void* has none, and aligning a pointer below
         // its own object is out of bounds. Nothing dereferences what comes back.
+        // clwb may keep a clean copy in this cache, which is safe because every read flushes first in rmb.
         for (auto line = base; line < end; line += CacheLineBytes)
         {
-            _mm_clflushopt(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
+            _mm_clwb(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
         }
     }
     _mm_sfence();
@@ -86,22 +87,24 @@ inline void wmb(const void* addr, std::size_t len, Mode mode) noexcept
 // Drop a stale local copy, then order the read behind it.
 inline void rmb(const void* addr, std::size_t len, Mode mode) noexcept
 {
-    if (mode != Mode::CacheCoherent)
+    if (mode == Mode::Flush)
     {
-        if (mode == Mode::Flush)
+        const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~LineOffsetMask;
+        const auto end = reinterpret_cast<std::uintptr_t>(addr) + len;
+        // Integer walk for the same reason as wmb: void* has no arithmetic, and aligning a
+        // pointer below its own object is out of bounds.
+        for (auto line = base; line < end; line += CacheLineBytes)
         {
-            const auto base = reinterpret_cast<std::uintptr_t>(addr) & ~LineOffsetMask;
-            const auto end = reinterpret_cast<std::uintptr_t>(addr) + len;
-            // Integer walk for the same reason as wmb: void* has no arithmetic, and aligning a
-            // pointer below its own object is out of bounds.
-            for (auto line = base; line < end; line += CacheLineBytes)
-            {
-                _mm_clflushopt(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
-            }
+            _mm_clflushopt(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
         }
         // mfence, not lfence: lfence waits only for a flush to retire, so a later load can still hit
         // the line before the flush removes it. mfence waits for the flush to complete.
         _mm_mfence();
+    }
+    else if (mode == Mode::Uncached)
+    {
+        // Nothing is cached, so there is no flush to wait for. lfence keeps later loads behind this point.
+        _mm_lfence();
     }
     std::atomic_thread_fence(std::memory_order_acquire);
 }

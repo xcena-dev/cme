@@ -166,11 +166,12 @@ target_compile_options(cme PRIVATE
 
 # The ISA the 64B slot access needs, carried as its own target so that a bench which
 # measures the medium directly, without linking libcme, still gets it. Every one of
-# them uses AVX-512, streaming loads or clflushopt, and gcc refuses to inline those
+# them uses AVX-512, streaming loads, clflushopt or clwb, and gcc refuses to inline those
 # intrinsics without the matching -m flag.
 add_library(cme_isa INTERFACE)
 target_compile_options(cme_isa INTERFACE
     -mclflushopt
+    -mclwb
     $<$<BOOL:${CME_NATIVE_ARCH}>:-march=native>
 )
 
