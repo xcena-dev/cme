@@ -59,9 +59,9 @@ struct DomainEntry_t
 
 // Successor-policy kind. Recorded in region header; joiners use matching impl.
 //   Order      -- token-ring, fair under symmetric load
-//   Request    -- hand-raise / grant, lower latency under bursts (default)
+//   Request    -- hand-raise / grant, lower latency under bursts
 //   RequestAgg -- Request + packed pendingDomains aggregation for holder scan
-//   Peterson   -- tournament Peterson lock, per-domain tree, bounded-wait
+//   Peterson   -- tournament Peterson lock, per-domain tree, bounded-wait (default)
 enum class Strategy : std::uint8_t
 {
     Order = 0,
@@ -133,7 +133,7 @@ public:
         // Slot ceiling including control domain (slot 0); data domains in slots 1..maxDomains-1.
         std::uint32_t maxDomains{8};
         std::uint32_t maxPeers{8};
-        Strategy strategy{Strategy::Request};
+        Strategy strategy{Strategy::Peterson};
         // RequestAgg only: number of aggregator groups (peer p -> group p % groups).
         // 0 = auto (minimum that keeps one packed line per group). Ignored otherwise.
         std::uint32_t aggregatorGroups{0};
