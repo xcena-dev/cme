@@ -19,7 +19,7 @@ import tempfile
 STRATEGIES = ("request", "peterson")
 
 
-def cell(bench, strategy, nodes, threads, domains, iters, uri, coherency, csvPath):
+def cell(bench, strategy, nodes, threads, domains, iters, uri, csvPath):
     """One bench run. Returns (mean_us, p99_us) or None when the run failed."""
     before = rows(csvPath)
     outcome = subprocess.run(
@@ -31,7 +31,6 @@ def cell(bench, strategy, nodes, threads, domains, iters, uri, coherency, csvPat
             "--domains", str(domains),
             "--iters", str(iters),
             "--uri", uri,
-            "--coherency", coherency,
             "--csv", str(csvPath),
         ],
         capture_output=True,
@@ -61,9 +60,6 @@ def main():
     parser.add_argument("--splits", default="2,4")
     parser.add_argument("--iters", type=int, default=200)
     parser.add_argument("--uri", default="shm:/cmed-tiered-bench")
-    # A bare open assumes cache_coherent, which is the wrong barrier discipline on devdax and on an
-    # uncacheable mount, so a --uri that names one of those needs this too.
-    parser.add_argument("--coherency", default="cache_coherent")
     chosen = parser.parse_args()
 
     bench = pathlib.Path(chosen.bench).resolve()
@@ -93,7 +89,7 @@ def main():
             for count in domains:
                 measured = {
                     strategy: cell(bench, strategy, nodes, threads, count, chosen.iters,
-                                   chosen.uri, chosen.coherency, csvPath)
+                                   chosen.uri, csvPath)
                     for strategy in STRATEGIES
                 }
 

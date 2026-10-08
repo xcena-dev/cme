@@ -162,10 +162,10 @@ def test_enums_and_options_reach_the_library(tmp_path):
     opts.max_domains = 4
     opts.max_peers = 2
     opts.strategy = cme.Strategy.Peterson
+    opts.coherency = cme.CoherencyMode.Flush
     cme.Session.format(uri, opts)
 
     opened = cme.OpenOpts()
-    opened.coherency = cme.CoherencyMode.CacheCoherent
     session = cme.Session.open(uri, opened)
     assert session is not None
 

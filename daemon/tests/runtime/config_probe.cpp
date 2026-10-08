@@ -170,7 +170,6 @@ void everyDaemonKeyLandsInItsField(probe::Context& ctx)
         "  mode: \"0640\"\n"
         "region:\n"
         "  uri: shm:/other\n"
-        "  coherency: uncached\n"
         "  format_timeout_ms: 900\n"
         "cohort:\n"
         "  hold_ms: 30\n"
@@ -190,9 +189,8 @@ void everyDaemonKeyLandsInItsField(probe::Context& ctx)
     ctx.check(config.area.name == "lane" && config.socket.mode == 0640, "area.name and socket.mode land in their fields");
     ctx.check(config.socketPath() == "/run/probe/lane.sock" && config.lockPath() == "/run/probe/lane.lock",
               "and the socket and the lock are built from that one pair, so both name the same run");
-    ctx.check(config.region.uri == "shm:/other" && config.region.coherency == "uncached" &&
-                  config.region.formatTimeout == timing::Millis{900},
-              "the three region keys land in their fields");
+    ctx.check(config.region.uri == "shm:/other" && config.region.formatTimeout == timing::Millis{900},
+              "both region keys land in their fields");
     ctx.check(config.cohort.hold == timing::Millis{30} && config.cohort.grantValidity == timing::Millis{80},
               "both cohort keys land in theirs");
 

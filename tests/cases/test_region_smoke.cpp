@@ -55,7 +55,7 @@ void checkJoinerSeesSameHeader(const std::string& shmUri, const cme::Geometry::H
                                harness::TestContext& ctx)
 {
     auto joiner = cme::Geometry::open(shmUri);
-    joiner.bindBlocking(timing::Millis{0}, ctx.coherency());
+    joiner.bindBlocking(timing::Millis{0});
     const auto joinerHeader = *joiner.getHeader();
     ctx.check(joinerHeader.formatGeneration == hdr.formatGeneration,
               "joiner sees same formatGeneration");

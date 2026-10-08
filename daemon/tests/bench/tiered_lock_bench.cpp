@@ -19,7 +19,6 @@
 //   --strategy S   [request] request | request_agg | order | peterson
 //   --hold-ms N    [5]     cohort.hold_ms for every daemon: how long one run keeps the turn
 //   --uri URI      [shm:/cmed-tiered-bench]
-//   --coherency S  [cache_coherent]
 //   --csv PATH     [-]     append one row: peers,threads,domains,mean_us,p50_us,p90_us,p99_us,samples
 
 #include <sys/mman.h>
@@ -92,7 +91,6 @@ struct Config_t
     bool shuffle{true};
     std::string strategy{"request"};
     std::string uri{"shm:/cmed-tiered-bench"};
-    std::string coherency{"cache_coherent"};
     std::string csv;
 };
 
@@ -161,10 +159,6 @@ struct Config_t
         else if (flag == "--uri")
         {
             chosen.uri = value;
-        }
-        else if (flag == "--coherency")
-        {
-            chosen.coherency = value;
         }
         else if (flag == "--csv")
         {
@@ -244,7 +238,6 @@ void writeConfig(std::uint32_t node, const Config_t& chosen)
              << "  name: " << makeAreaName(node) << "\n"
              << "region:\n"
              << "  uri: " << chosen.uri << "\n"
-             << "  coherency: " << chosen.coherency << "\n"
              << "cohort:\n"
              << "  hold_ms: " << chosen.cohortHoldMillis << "\n"
              << "workers:\n";

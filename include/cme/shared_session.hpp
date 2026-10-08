@@ -109,6 +109,10 @@ public:
     // section does a full acquire/release).
     void setCohortCap(std::uint32_t cap) noexcept;
 
+    // ── accessors ──────────────────────────────────────────────────
+    // The mode the underlying Session runs under. cme::flush takes it.
+    [[nodiscard]] CoherencyMode getCoherencyMode() const noexcept;
+
 private:
     struct Impl;
     explicit SharedSession(std::unique_ptr<Impl> impl) noexcept;

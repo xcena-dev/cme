@@ -83,7 +83,7 @@ void scrubHeader(harness::TestMemory& area)
 }
 
 void writeConfig(const char* path, const std::string& areaName, const std::string& socketDir,
-                 const std::string& regionUri, const std::string& coherency)
+                 const std::string& regionUri)
 {
     std::ofstream file{path, std::ios::trunc};
     file << "area:\n"
@@ -94,8 +94,7 @@ void writeConfig(const char* path, const std::string& areaName, const std::strin
          << "  dir: " << socketDir << "\n"
          << "  mode: \"0600\"\n"
          << "region:\n"
-         << "  uri: " << regionUri << "\n"
-         << "  coherency: " << coherency << "\n";
+         << "  uri: " << regionUri << "\n";
     file.close();
 
     // The daemon refuses a config anyone else may write, and the umask ctest runs under is not this
@@ -363,9 +362,8 @@ int main(int argc, char** argv)
         opts.maxPeers = 2;
         cme::Session::format(chosen.uri, opts);
 
-        writeConfig(configPath.c_str(), areaName, socketDir, chosen.uri, chosen.coherency);
-        writeConfig(absentConfigPath.c_str(), areaName, socketDir, unformatted->uri(),
-                    chosen.coherency);
+        writeConfig(configPath.c_str(), areaName, socketDir, chosen.uri);
+        writeConfig(absentConfigPath.c_str(), areaName, socketDir, unformatted->uri());
 
         auto notified = posix::DatagramSocket::receiver(notifyPathAbsolute(scratch));
 

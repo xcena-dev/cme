@@ -65,8 +65,7 @@ void runBody(harness::TestContext& ctx)
     // 4 peers = shared, the verifier, and the move-assign target.
     harness::formatSession(4, 4);
 
-    // Through the OpenOpts_t overload, since coherency has to match how this run reaches the
-    // medium and the harness already resolved that from --backend.
+    // Through the OpenOpts_t overload of SharedSession::open.
     auto shared = harness::openSharedSession();
 
     shared.createDomain(LeaveDomain);

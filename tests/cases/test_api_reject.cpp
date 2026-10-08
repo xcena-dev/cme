@@ -134,7 +134,7 @@ void checkGeometryDims(harness::TestContext& ctx)
     ctx.check(harness::threw<cme::FormatError>(formatUnbound),
               "Geometry::format refuses an unbound geometry");
 
-    region.bindBlocking(timing::Secs{1}, ctx.coherency());
+    region.bindBlocking(timing::Secs{1});
     ctx.check(harness::threw<cme::FormatError>(formatTooManyGroups),
               "Geometry::format rejects aggregatorGroups above peerCount");
 }

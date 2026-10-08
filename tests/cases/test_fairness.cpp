@@ -262,7 +262,6 @@ struct PeerArgs_t
     const Opts_t* opts;
     cme::Geometry* region;
     cme::PeerId peerId;
-    cme::CoherencyMode coherency;
     std::atomic<std::uint32_t>* startBarrier;
     std::atomic<std::uint32_t>* warmupBarrier;
     std::atomic<std::uint32_t>* endBarrier;
@@ -417,7 +416,7 @@ void runPeer(PeerArgs_t arg)
     auto& opt = *arg.opts;
     try
     {
-        cme::Peer peer{*arg.region, arg.peerId, arg.coherency};
+        cme::Peer peer{*arg.region, arg.peerId};
         // Opt-in: join the data domains (slots 1..numDomains-1) this peer locks;
         // slot 0 (control) is joined by default.
         for (cme::DomainId domainId = 1; domainId < opt.numDomains; ++domainId)
@@ -457,8 +456,7 @@ void runPeer(PeerArgs_t arg)
     }
 }
 
-void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t>& results,
-              cme::CoherencyMode coherency)
+void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t>& results)
 {
     std::atomic<std::uint32_t> startBarrier{0};
     std::atomic<std::uint32_t> warmupBarrier{0};
@@ -468,7 +466,7 @@ void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t
     peers.reserve(opt.numPeers);
     for (cme::PeerId pid = 0; pid < opt.numPeers; ++pid)
     {
-        const PeerArgs_t args{&opt, &region, pid, coherency,
+        const PeerArgs_t args{&opt, &region, pid,
                               &startBarrier, &warmupBarrier, &endBarrier, &results[pid]};
         peers.emplace_back(runPeer, args);
     }
@@ -656,7 +654,7 @@ void runBody(harness::TestContext& ctx)
     harness::seedDataDomains(region, opt.numDomains - 1);
 
     std::vector<PeerResult_t> results(opt.numPeers);
-    runPeers(opt, region, results, ctx.coherency());
+    runPeers(opt, region, results);
 
     // Every peer thread has exited, so the worker and poll trace buffers are flushed.
     if (opt.traceJsonl != nullptr)

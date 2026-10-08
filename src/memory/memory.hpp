@@ -12,8 +12,11 @@
 #include <cerrno>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <system_error>
+
+#include "cme/shared.hpp"
 
 namespace cme
 {
@@ -52,9 +55,9 @@ public:
     // "@<offset>" suffix (decimal or 0x, PMD-aligned) to place the region inside the
     // device, so disjoint regions can share one /dev/dax.
     [[nodiscard]] static std::unique_ptr<Memory> open(std::string_view uri);
-    // dax rounds up to PMD; shm ftruncates to areaSize.
+    // dax rounds up to PMD; shm ftruncates to areaSize. Only file: reads @coherency, to pick its pool.
     [[nodiscard]] static std::unique_ptr<Memory>
-    create(std::string_view uri, std::uint64_t areaSize);
+    create(std::string_view uri, std::uint64_t areaSize, CoherencyMode coherency = CoherencyMode::Uncached);
     // Maps what is already there for reading only, so a caller that answers a question out of the
     // header needs no write permission on the region and takes no peer slot.
     [[nodiscard]] static std::unique_ptr<Memory> openReadOnly(std::string_view uri);
@@ -68,6 +71,8 @@ public:
     {
         return mappedSize_;
     }
+    // The mode this mapping calls for with peers on other hosts; nullopt where the mount does not say.
+    [[nodiscard]] virtual std::optional<CoherencyMode> getMappingCoherency() const noexcept = 0;
 
 protected:
     Memory(void* base, std::uint64_t mappedSize) noexcept
@@ -93,6 +98,13 @@ public:
     DaxMemory& operator=(const DaxMemory&) = delete;
     DaxMemory(DaxMemory&&) = delete;
     DaxMemory& operator=(DaxMemory&&) = delete;
+
+    // ── override ───────────────────────────────────────────────────
+    // device_dax maps write-back, and no other host sees this one's cache.
+    [[nodiscard]] std::optional<CoherencyMode> getMappingCoherency() const noexcept override
+    {
+        return CoherencyMode::Flush;
+    }
 };
 
 // Regular file (O_CREAT + ftruncate + mmap). On a marufs/devdax mount this
@@ -103,11 +115,25 @@ public:
     // ── rule of five ───────────────────────────────────────────────
     explicit FileMemory(std::string_view path);
     FileMemory(std::string_view path, ReadOnlyTag);
-    FileMemory(std::string_view path, std::uint64_t areaSize);
+    FileMemory(std::string_view path, std::uint64_t areaSize, CoherencyMode coherency);
     FileMemory(const FileMemory&) = delete;
     FileMemory& operator=(const FileMemory&) = delete;
     FileMemory(FileMemory&&) = delete;
     FileMemory& operator=(FileMemory&&) = delete;
+
+    // ── static ─────────────────────────────────────────────────────
+    // The mode the pool of the file at @path calls for, or nullopt when it cannot be opened or its
+    // mount has one pool. Lets a caller ask whether a mount offers a choice before formatting.
+    [[nodiscard]] static std::optional<CoherencyMode> readPoolCoherency(std::string_view path);
+
+    // ── override ───────────────────────────────────────────────────
+    [[nodiscard]] std::optional<CoherencyMode> getMappingCoherency() const noexcept override
+    {
+        return poolCoherency_;
+    }
+
+private:
+    std::optional<CoherencyMode> poolCoherency_;
 };
 
 class ShmMemory : public Memory
@@ -121,6 +147,13 @@ public:
     ShmMemory& operator=(const ShmMemory&) = delete;
     ShmMemory(ShmMemory&&) = delete;
     ShmMemory& operator=(ShmMemory&&) = delete;
+
+    // ── override ───────────────────────────────────────────────────
+    // One host's DRAM, which its own hardware keeps coherent.
+    [[nodiscard]] std::optional<CoherencyMode> getMappingCoherency() const noexcept override
+    {
+        return CoherencyMode::CacheCoherent;
+    }
 };
 
 }  // namespace cme

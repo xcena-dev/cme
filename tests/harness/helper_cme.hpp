@@ -64,8 +64,8 @@ formatSession(const std::string& uri, std::uint32_t maxDomains, std::uint32_t ma
     return opts;
 }
 
-// The form a case actually writes. The uri and the strategy come from the run, so only the dims
-// are said here.
+// The form a case actually writes. The uri, the strategy and the mode, which picks a file pool,
+// come from the run, so only the dims are said here.
 //
 // Every implicit form below reaches for currentRun(). A bench has no run, and calls the explicit
 // form above instead.
@@ -73,45 +73,37 @@ inline cme::Session::FormatOpts_t
 formatSession(std::uint32_t maxDomains, std::uint32_t maxPeers)
 {
     const TestContext& ctx = currentRun();
-    return formatSession(ctx.uri(), maxDomains, maxPeers, ctx.strategy());
+    auto opts = makeFormatOpts(maxDomains, maxPeers, ctx.strategy());
+    opts.coherency = ctx.coherency();
+    cme::Session::format(ctx.uri(), opts);
+    return opts;
 }
 
-// Open @uri under the mode the medium needs, which the bare open() overload cannot do:
-// OpenOpts_t defaults coherency to CacheCoherent, so a bare open on devdax or an uncacheable
-// mount runs a barrier discipline the medium does not have. It still passes on one host, where
-// the hardware is coherent whatever the mode says, and that is exactly why it goes unnoticed.
-//
-// formatTimeout stays at the library default unless a case is waiting out a format that will
-// never come, which is the only reason to shorten it.
+// Open @uri, the mode coming from its mapping. formatTimeout stays at the library default unless a
+// case is waiting out a format that will never come, which is the only reason to shorten it.
 [[nodiscard]] inline cme::Session
-openSession(const std::string& uri, cme::CoherencyMode coherency,
+openSession(const std::string& uri,
             timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
     cme::Session::OpenOpts_t opts;
-    opts.coherency = coherency;
     opts.formatTimeout = formatTimeout;
     return cme::Session::open(uri, opts);
 }
 
-// Same, with both the uri and the medium's mode taken from the run. This is the one a case wants:
-// getting the mode from anywhere else is how a devdax run ends up asserting CacheCoherent.
+// Same, on the run's uri. This is the one a case wants.
 [[nodiscard]] inline cme::Session
 openSession(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
-    const TestContext& ctx = currentRun();
-    return openSession(ctx.uri(), ctx.coherency(), formatTimeout);
+    return openSession(currentRun().uri(), formatTimeout);
 }
 
-// The intra-node tier, same reasoning: SharedSession::open takes the same OpenOpts_t and its bare
-// overload carries the same CacheCoherent default.
+// The intra-node tier, which takes the same OpenOpts_t.
 [[nodiscard]] inline cme::SharedSession
 openSharedSession(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.formatTimeout)
 {
-    const TestContext& ctx = currentRun();
     cme::Session::OpenOpts_t opts;
-    opts.coherency = ctx.coherency();
     opts.formatTimeout = formatTimeout;
-    return cme::SharedSession::open(ctx.uri(), opts);
+    return cme::SharedSession::open(currentRun().uri(), opts);
 }
 
 // Whether the acquire succeeded, with the turn given straight back. Templated on both the holder
@@ -144,7 +136,7 @@ openBoundRegion(timing::Millis formatTimeout = cme::Session::OpenOpts_t{}.format
 {
     const TestContext& ctx = currentRun();
     auto region = ctx.memory().openRegion();
-    region.bindBlocking(formatTimeout, ctx.coherency());
+    region.bindBlocking(formatTimeout);
     return region;
 }
 
@@ -204,11 +196,10 @@ readDomainRecordShadow(const cme::Geometry& region, cme::DomainId domainId, cme:
                                currentRun().coherency());
 }
 
-// A peer on @region under the run's mode. The mode is the argument a case must not get wrong, and
-// a Peer built with the wrong one runs a barrier discipline its medium does not have.
+// A peer on @region, under the mode its mapping calls for.
 [[nodiscard]] inline cme::Peer makePeer(cme::Geometry& region, cme::PeerId peerId)
 {
-    return cme::Peer{region, peerId, currentRun().coherency()};
+    return cme::Peer{region, peerId};
 }
 
 // The same, owned, for a case that drops a peer without running its destructor: a crash model
@@ -216,7 +207,7 @@ readDomainRecordShadow(const cme::Geometry& region, cme::DomainId domainId, cme:
 [[nodiscard]] inline std::unique_ptr<cme::Peer> makePeerPtr(cme::Geometry& region,
                                                             cme::PeerId peerId)
 {
-    return std::make_unique<cme::Peer>(region, peerId, currentRun().coherency());
+    return std::make_unique<cme::Peer>(region, peerId);
 }
 
 // Peers 0..count-1, each joining data domains 1..domainCount. domainCount = 0 leaves them in the
@@ -279,7 +270,7 @@ inline void dumpLatencyTrace(const char* path)
 // stays on slot 0 and the real peer 0 re-adopts it. Call once after format.
 inline void seedDataDomains(cme::Geometry& region, std::uint32_t count)
 {
-    cme::Peer creator{region, 0, currentRun().coherency()};
+    cme::Peer creator{region, 0};
     for (std::uint32_t i = 0; i < count; ++i)
     {
         (void)creator.createDomain("lane" + std::to_string(i));

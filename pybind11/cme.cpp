@@ -160,6 +160,7 @@ PYBIND11_MODULE(cme, module)
         .value("Uncached", cme::CoherencyMode::Uncached)
         .value("Flush", cme::CoherencyMode::Flush);
 
+
     // Read-only: a handle is what a join or a resolve answered, and a caller hands it back rather
     // than building one. Zero names no domain, which the library refuses.
     pybind::class_<cme::DomainHandle_t>(module, "DomainHandle")
@@ -182,12 +183,12 @@ PYBIND11_MODULE(cme, module)
         .def_readwrite("max_domains", &cme::Session::FormatOpts_t::maxDomains)
         .def_readwrite("max_peers", &cme::Session::FormatOpts_t::maxPeers)
         .def_readwrite("strategy", &cme::Session::FormatOpts_t::strategy)
-        .def_readwrite("aggregator_groups", &cme::Session::FormatOpts_t::aggregatorGroups);
+        .def_readwrite("aggregator_groups", &cme::Session::FormatOpts_t::aggregatorGroups)
+        .def_readwrite("coherency", &cme::Session::FormatOpts_t::coherency);
 
     pybind::class_<cme::Session::OpenOpts_t>(module, "OpenOpts")
         .def(pybind::init<>())
-        .def_readwrite("format_timeout", &cme::Session::OpenOpts_t::formatTimeout)
-        .def_readwrite("coherency", &cme::Session::OpenOpts_t::coherency);
+        .def_readwrite("format_timeout", &cme::Session::OpenOpts_t::formatTimeout);
 
     bindHeldDomain<cme::Session>(module, "HeldDomain");
     bindHeldDomain<cme::SharedSession>(module, "SharedHeldDomain");

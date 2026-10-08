@@ -66,32 +66,11 @@ void initMutexes(protocol::SharedArea_t& area)
 
 // ── the region ─────────────────────────────────────────────────────
 
-// The name config carries, as the mode libcme takes. Throws rather than falling back on a name this
-// does not know: the wrong mode is silent on a coherent host and wrong everywhere else.
-[[nodiscard]] cme::CoherencyMode getCoherencyMode(const std::string& name)
-{
-    if (name == "cache_coherent")
-    {
-        return cme::CoherencyMode::CacheCoherent;
-    }
-    if (name == "uncached")
-    {
-        return cme::CoherencyMode::Uncached;
-    }
-    if (name == "flush")
-    {
-        return cme::CoherencyMode::Flush;
-    }
-
-    throw CmedInvalidArgumentError{"cmed: region.coherency is not a mode: " + name};
-}
-
 // Open, never format: formatting zeroes the region, and the peers on other nodes are using it.
 // Throws whatever libcme throws; a region that will not open is not something to serve around.
 [[nodiscard]] cme::Session openCmeSession(const DaemonConfig_t& config)
 {
     cme::Session::OpenOpts_t opts;
-    opts.coherency = getCoherencyMode(config.region.coherency);
     opts.formatTimeout = config.region.formatTimeout;
 
     return cme::Session::open(config.region.uri, opts);

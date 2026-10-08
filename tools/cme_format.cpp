@@ -54,8 +54,7 @@ namespace
     throw cme::InvalidArgumentError{"--strategy is not a strategy: " + name};
 }
 
-// The name config carries, as the mode libcme takes. Throws rather than guessing: the wrong mode
-// reads a stale header on a region no cache keeps in sync.
+// The name --coherency carries, as the mode libcme takes. Throws rather than guessing a pool.
 [[nodiscard]] cme::CoherencyMode coherencyFromName(const std::string& name)
 {
     if (name == "cache_coherent")
@@ -71,16 +70,17 @@ namespace
         return cme::CoherencyMode::Flush;
     }
 
-    throw cme::InvalidArgumentError{"region.coherency is not a mode: " + name};
+    throw cme::InvalidArgumentError{"--coherency is not a mode: " + name};
 }
 
 // True when the region answers, so formatting would take it from whoever is on it. Reads the header
-// and joins nothing: whoever mounts asks this, and a region may grant that caller read alone.
-[[nodiscard]] bool alreadyLive(const std::string& uri, cme::CoherencyMode coherency)
+// and joins nothing: whoever mounts asks this, and a region may grant that caller read alone. Flush
+// reads the header right on any mapping.
+[[nodiscard]] bool alreadyLive(const std::string& uri)
 {
     try
     {
-        const cme::Inspector probing = cme::Inspector::open(uri, coherency);
+        const cme::Inspector probing = cme::Inspector::open(uri, cme::CoherencyMode::Flush);
         return probing.readHeader().has_value();
     }
     catch (const cme::BackendError&)
@@ -116,11 +116,14 @@ void reportUsage()
     std::fprintf(stderr,
                  "usage: cme-format [--config <path>] [--uri <uri>] [--max-domains N]\n"
                  "                  [--max-peers N] [--strategy order|request|request_agg|peterson]\n"
-                 "                  [--domains a,b,c] [--force]\n"
+                 "                  [--coherency uncached|flush|cache_coherent] [--domains a,b,c] [--force]\n"
                  "\n"
                  "  --uri          dax:<path>[@offset], shm:/<name>, or file:<path>\n"
                  "  --config       a file to read region.uri, region.max_domains,\n"
                  "                 region.max_peers, region.strategy and region.domains from\n"
+                 "  --coherency    the mode the region is for. On a file: mount with two pools, uncached\n"
+                 "                 places it in the uncached one and the others in the write-back one.\n"
+                 "                 Default uncached\n"
                  "  --force        format even though the region already answers\n");
 }
 
@@ -143,8 +146,7 @@ int main(int argc, char** argv)
             return 2;
         }
 
-        const auto coherency = coherencyFromName(deployed.getString("region.coherency", "cache_coherent"));
-        if (!cliargs::argFlag("--force") && alreadyLive(uri, coherency))
+        if (!cliargs::argFlag("--force") && alreadyLive(uri))
         {
             std::fprintf(stderr,
                          "cme-format: %s already answers. Formatting it would discard the domains "
@@ -159,6 +161,7 @@ int main(int argc, char** argv)
         opts.maxPeers = cliargs::get("--max-peers", deployed.get("region.max_peers", opts.maxPeers));
         opts.strategy = strategyFromName(
             cliargs::get("--strategy", deployed.getString("region.strategy", "peterson")));
+        opts.coherency = coherencyFromName(cliargs::get("--coherency", std::string{"uncached"}));
         cme::Session::format(uri, opts);
 
         std::printf("formatted %s: %u domain slots, %u peer slots\n", uri.c_str(), opts.maxDomains,

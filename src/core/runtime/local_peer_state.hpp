@@ -58,8 +58,8 @@ public:
     // ── SWPC line table pointers (set once at attach) ────────────
     // Capture every region section pointer (header, admission line, slot tables) from
     // the bound geometry in one shot.
-    // @mode is the Session's, from FormatOpts_t / OpenOpts_t -- it is not derivable from the
-    // geometry, since it describes how this peer reaches the region rather than the region.
+    // @mode is how this peer reaches the region: the Session's comes from its mapping, and a
+    // caller building a Peer directly names one.
     void setRegionPointers(const Geometry& geometry, CoherencyMode mode) noexcept;
     // Slot accessors return a pointer only; a fresh read is the caller's
     // coherency::get(...), a read-modify-write its rmw/rmwIfTrue (those barrier themselves).

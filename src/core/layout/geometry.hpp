@@ -252,7 +252,8 @@ public:
     struct FormatOpts_t
     {
         Strategy strategy;
-        std::uint32_t aggregatorGroups{0};  // RequestAgg group count (0 = auto)
+        std::uint32_t aggregatorGroups{0};                 // RequestAgg group count (0 = auto)
+        CoherencyMode coherency{CoherencyMode::Uncached};  // picks a file: region's pool
     };
 
     // ── static helpers ──────────────────────────────────────────────
@@ -310,12 +311,16 @@ public:
     void format(const FormatOpts_t& opts);  // geometry must be bound first
 
     // Poll header up to `timeout`, then bind. Throws on timeout / invalid header.
-    // @mode is this peer's regime; bindBlocking polls the header for the creator's format.
-    void bindBlocking(timing::Millis timeout, CoherencyMode mode);
+    // Reads the header under the mode the mapping calls for.
+    void bindBlocking(timing::Millis timeout);
 
     // Inspector path: best-effort re-validate; picks up reformats.
     // Returns false on invalid header. Passkey-protected.
     [[nodiscard]] bool rebind(Passkey<Inspector>, CoherencyMode mode) noexcept;
+
+    // The mode a peer of this mapping takes. Flush where the mapping does not say, since Flush is
+    // right on any of them.
+    [[nodiscard]] CoherencyMode getMappingCoherency() const noexcept;
 
     // ── accessors ───────────────────────────────────────────────────
     // Valid only after open()->bindBlocking() or rebind().

@@ -38,8 +38,9 @@ class Peer
 {
 public:
     // ── rule of five ───────────────────────────────────────────────
-    // Create + join. Throws JoinError on failure.
-    // @coherency comes from the Session's format/open options; see cme::CoherencyMode.
+    // Create + join. Throws JoinError on failure. Runs under the mode @geometry's mapping calls for.
+    Peer(Geometry& geometry, PeerId peerId);
+    // The same under @coherency, for a caller that runs a mode the mapping would not pick.
     Peer(Geometry& geometry, PeerId peerId, CoherencyMode coherency);
     Peer(const Peer&) = delete;
     Peer& operator=(const Peer&) = delete;

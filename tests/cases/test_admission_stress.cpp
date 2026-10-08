@@ -40,8 +40,7 @@ constexpr std::int32_t Failed = -1;
 // Fork @numClaimers children that open, wait on the shared barrier, then claim once each;
 // results[] carries the won peerId or Failed. The parent releases the barrier only after
 // every child is forked, so the claims contend in the tightest window we can arrange.
-void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* results, std::int32_t* barrier,
-              cme::CoherencyMode coherency)
+void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* results, std::int32_t* barrier)
 {
     for (std::uint32_t i = 0; i < numClaimers; ++i)
     {
@@ -51,18 +50,18 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
 
     const std::uint32_t spawned = harness::spawnChildren(
         numClaimers,
-        [&uri, results, barrier, coherency](std::uint32_t index)
+        [&uri, results, barrier](std::uint32_t index)
         {
             std::int32_t claimed = Failed;
             try
             {
                 auto region = cme::Geometry::open(uri);
-                region.bindBlocking(timing::Secs{5}, coherency);
+                region.bindBlocking(timing::Secs{5});
                 while (__atomic_load_n(barrier, __ATOMIC_ACQUIRE) == 0)
                 {
                     // spin to the barrier
                 }
-                claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, coherency));
+                claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region));
             }
             catch (...)
             {
@@ -135,7 +134,7 @@ void runBody(harness::TestContext& ctx)
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
         static_cast<void>(harness::createRegion(Domains, Slots));
-        runRound(uri, Slots, results.data(), barrier.data(), ctx.coherency());
+        runRound(uri, Slots, results.data(), barrier.data());
 
         bool valid = true;
         const std::uint32_t winners = auditWinners(results.data(), Slots, &valid);
@@ -160,7 +159,7 @@ void runBody(harness::TestContext& ctx)
         // Formats and lets the mapping go: the parent only lays the region down, and the
         // children each open it for themselves.
         static_cast<void>(harness::createRegion(Domains, Slots));
-        runRound(uri, Oversub, results.data(), barrier.data(), ctx.coherency());
+        runRound(uri, Oversub, results.data(), barrier.data());
 
         bool valid = true;
         const std::uint32_t winners = auditWinners(results.data(), Oversub, &valid);

@@ -74,16 +74,16 @@ function(cme_media_test name backend target)
     set_property(DIRECTORY PROPERTY cme_dax_next_slot ${slot})
 endfunction()
 
-# A uc case leaves its file behind: none of these binaries unlink their own, and a
+# A file case leaves its file behind: none of these binaries unlink their own, and a
 # stale pre-sized file is WORM-rejected by the next run's ftruncate (see file.cpp).
 # The cleanup runs the same binary with --cleanup, because only the harness knows
-# where the mount is -- CMake deliberately does not.
-function(cme_uc_test name target)
-    cme_media_test(${name} uc ${target} ${ARGN})
+# where the mount is -- CMake deliberately does not. @pool is uc or wb.
+function(cme_file_test name pool target)
+    cme_media_test(${name} ${pool} ${target} ${ARGN})
     set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED ${name}_fixture)
-    add_test(NAME ${name}_cleanup COMMAND ${target} --backend uc --case ${name} --cleanup)
+    add_test(NAME ${name}_cleanup COMMAND ${target} --backend ${pool} --case ${name} --cleanup)
     set_tests_properties(${name}_cleanup PROPERTIES
-        FIXTURES_CLEANUP ${name}_fixture LABELS uc SKIP_RETURN_CODE 77)
+        FIXTURES_CLEANUP ${name}_fixture LABELS ${pool} SKIP_RETURN_CODE 77)
 endfunction()
 
 # cme_case(<base> TARGET <exe> [options]) -- register one case on every backend
@@ -95,16 +95,17 @@ endfunction()
 #   STRATEGY <one>    fix one policy; the name gains no infix.
 #   (neither)         the binary picks its own policy.
 #   ARGS <args...>    command-line arguments, identical on every backend.
-#   BACKENDS <list>   default "shm dax uc".
+#   BACKENDS <list>   default "shm dax uc wb". uc and wb are one file mount, with
+#                     the region in its uncached pool or its write-back one.
 #   SHM_TIMEOUT <n>   ctest timeout for the shm variant, default 120. The dax
-#                     and uc variants use 180, set by cme_media_test.
+#                     and file variants use 180, set by cme_media_test.
 #   LABELS <label>    label for the shm variant. Unlabelled shm tests are
 #                     swept into the shm label at the end of this file.
-#   UC_VIA_DAX        register the uc variant without the cleanup fixture, for
+#   UC_VIA_DAX        register the file variants without the cleanup fixture, for
 #                     a binary that already unlinks its own file.
 #
-# Names follow <base>[_policy][_dax|_file], which is what the existing suites and the
-# report already assume.
+# Names follow <base>[_policy][_dax|_file|_filewb], which is what the existing suites and
+# the report already assume.
 function(cme_case base)
     cmake_parse_arguments(C
         "STRATEGIES;UC_VIA_DAX"
@@ -115,7 +116,7 @@ function(cme_case base)
         message(FATAL_ERROR "cme_case(${base}): TARGET is required")
     endif()
     if(NOT C_BACKENDS)
-        set(C_BACKENDS shm dax uc)
+        set(C_BACKENDS shm dax uc wb)
     endif()
     if(NOT C_SHM_TIMEOUT)
         set(C_SHM_TIMEOUT 120)
@@ -169,13 +170,20 @@ function(cme_case base)
             cme_media_test(${name}_dax dax $<TARGET_FILE:${C_TARGET}> ${policy_args} ${C_ARGS})
         endif()
 
-        if("uc" IN_LIST C_BACKENDS)
-            if(C_UC_VIA_DAX)
-                cme_media_test(${name}_file uc $<TARGET_FILE:${C_TARGET}> ${policy_args} ${C_ARGS})
-            else()
-                cme_uc_test(${name}_file $<TARGET_FILE:${C_TARGET}> ${policy_args} ${C_ARGS})
+        foreach(pool uc wb)
+            if(NOT pool IN_LIST C_BACKENDS)
+                continue()
             endif()
-        endif()
+            set(suffix _file)
+            if(pool STREQUAL "wb")
+                set(suffix _filewb)
+            endif()
+            if(C_UC_VIA_DAX)
+                cme_media_test(${name}${suffix} ${pool} $<TARGET_FILE:${C_TARGET}> ${policy_args} ${C_ARGS})
+            else()
+                cme_file_test(${name}${suffix} ${pool} $<TARGET_FILE:${C_TARGET}> ${policy_args} ${C_ARGS})
+            endif()
+        endforeach()
     endforeach()
 endfunction()
 
@@ -219,6 +227,7 @@ cme_test_exe(cme-slot-inherit-test test_slot_inherit.cpp)
 cme_test_exe(cme-domain-incarnation-test test_domain_incarnation.cpp)
 cme_test_exe(cme-domain-handle-test test_domain_handle.cpp)
 cme_test_exe(cme-file-presized-test test_file_presized.cpp)
+cme_test_exe(cme-file-pool-test test_file_pool.cpp)
 cme_test_exe(cme-peterson-delete-reuse-test test_peterson_delete_reuse.cpp)
 cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
 cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
@@ -271,6 +280,10 @@ cme_case(memory_reject TARGET cme-memory-reject-test BACKENDS shm SHM_TIMEOUT 60
 # pre-sized one is left alone, which is what a WORM mount requires. shm for the same reason as
 # memory_reject -- the case seals its own memfd and never opens the medium it was handed.
 cme_case(file_presized TARGET cme-file-presized-test BACKENDS shm SHM_TIMEOUT 60)
+
+# FormatOpts_t::coherency picks the file pool, and open follows it. uc alone: the case formats one
+# region per pool itself, so a wb registration would repeat it.
+cme_case(file_pool TARGET cme-file-pool-test STRATEGY peterson BACKENDS uc)
 
 # Peterson's tournament is per slot, so a delete must leave the slot's tree clear for the next domain
 # there. shm alone: the question is what the release path writes, not how a medium carries it.

@@ -9,13 +9,13 @@
 // machine with no device. Treat its behaviour as provisional.
 //
 // It also carries one dependency the other backends do not: grantDefaultPerms()
-// below speaks the permission ioctl of an internal, unreleased filesystem. The
+// and the cache-pool calls below speak the ioctls of one filesystem. The
 // constants are open-coded rather than included, so this compiles and runs
 // anywhere -- any other mount answers ENOTTY or EINVAL and the call is skipped.
 // That makes the coupling invisible at build time, which is exactly why it is
 // written down here.
 //
-// For a file on a marufs/devdax mount this hits the same f_op->mmap path as
+// For a file on a CXL filesystem mount this hits the same f_op->mmap path as
 // dax, so the kernel's pgprot (e.g. UC) applies. Sizes via ftruncate only when
 // the file is smaller than needed -- a pre-sized file held by another process
 // (WORM-finalized) is mapped as-is.
@@ -28,11 +28,13 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 
 #include "cme/errors.hpp"
+#include "cme/shared.hpp"
 #include "memory/memory.hpp"
 #include "util/util.hpp"
 
@@ -46,9 +48,10 @@ struct Mapping_t
 {
     void* base;
     std::uint64_t size;
+    std::optional<CoherencyMode> pool;  // the mode the region's pool calls for
 };
 
-// O_CLOEXEC required: marufs_mmap rejects non-cloexec fds (-EACCES).
+// O_CLOEXEC required: the CXL filesystem refuses mmap, read and its ioctls on an fd without it.
 [[nodiscard]] std::int32_t openFile(const std::string& path, bool create, bool writable)
 {
     const std::int32_t access = writable ? O_RDWR : O_RDONLY;
@@ -62,20 +65,20 @@ struct Mapping_t
     return file;
 }
 
-// marufs authorizes mmap per process, and a freshly created file's RAT entry has
-// default_perms=0, so every peer other than the creator is denied (kernel/src/acl.c). cme
-// peers are separate processes, so the creator opens the default up once. Mirrors
-// marufs_uapi.h: MARUFS_IOC_PERM_SET_DEFAULT / MARUFS_PERM_READ / MARUFS_PERM_WRITE. node_id and
-// pid are for per-target PERM_GRANT and unread here.
-struct MarufsPermReq_t
+// The filesystem authorizes mmap per process, and a freshly created file grants nothing by
+// default, so every peer other than the creator is denied. cme peers are separate processes, so
+// the creator opens the default up once. Mirrors FS_IOC_PERM_SET_DEFAULT and its fs_perm_req.
+// uid and gid name a target for PERM_GRANT and are unread here.
+struct FsPermReq_t
 {
-    std::uint32_t nodeId;
-    std::uint32_t pid;
+    static constexpr std::uint32_t Read = 0x0001U;
+    static constexpr std::uint32_t Write = 0x0002U;
+
+    std::uint32_t uid;
+    std::uint32_t gid;
     std::uint32_t perms;
     std::uint32_t reserved;
 };
-constexpr std::uint32_t MarufsPermRead = 0x0001U;
-constexpr std::uint32_t MarufsPermWrite = 0x0002U;
 
 // @wanted is what the mapping below asks for and no more: DELETE, ADMIN or GRANT in a default
 // would hand every process on the host what one mapping never uses.
@@ -86,16 +89,51 @@ constexpr std::uint32_t MarufsPermWrite = 0x0002U;
 // Anything else would surface later as an unexplained mmap EACCES in another process.
 void grantDefaultPerms(std::int32_t file, const std::string& path, std::uint32_t wanted)
 {
-    MarufsPermReq_t req{};
+    FsPermReq_t req{};
     req.perms = wanted;
-    if (::ioctl(file, _IOW('X', 11, MarufsPermReq_t), &req) == 0 || errno == ENOTTY ||
-        errno == EINVAL || errno == EACCES)
+    if (::ioctl(file, _IOW('X', 11, FsPermReq_t), &req) == 0 ||
+        errno == ENOTTY || errno == EINVAL || errno == EACCES)
     {
         return;
     }
     const auto failure = lastSystemError();
     ::close(file);
     throw BackendError{"cme::FileMemory perm_set_default(" + path + ")", failure};
+}
+
+// Mirrors FS_IOC_CACHE_SET / FS_IOC_CACHE_GET and their fs_cache_req.
+struct FsCacheReq_t
+{
+    static constexpr std::uint32_t WriteBack = 0U;
+    static constexpr std::uint32_t Uncached = 1U;
+
+    std::uint32_t policy;
+    std::uint32_t reserved;
+};
+
+// Before ftruncate, which places the region and so fixes its pool for good.
+// ENOTTY/EINVAL means the mount maps every file one way and has no pool to pick.
+void setCachePolicy(std::int32_t file, const std::string& path, CoherencyMode coherency)
+{
+    FsCacheReq_t req{};
+    req.policy = (coherency == CoherencyMode::Uncached) ? FsCacheReq_t::Uncached : FsCacheReq_t::WriteBack;
+    if (::ioctl(file, _IOW('X', 13, FsCacheReq_t), &req) == 0 || errno == ENOTTY || errno == EINVAL)
+    {
+        return;
+    }
+    const auto failure = lastSystemError();
+    ::close(file);
+    throw BackendError{"cme::FileMemory cache_set(" + path + ")", failure};
+}
+
+[[nodiscard]] std::optional<CoherencyMode> getCachePolicy(std::int32_t file) noexcept
+{
+    FsCacheReq_t req{};
+    if (::ioctl(file, _IOR('X', 14, FsCacheReq_t), &req) != 0)
+    {
+        return std::nullopt;
+    }
+    return (req.policy == FsCacheReq_t::Uncached) ? CoherencyMode::Uncached : CoherencyMode::Flush;
 }
 
 // Consumes @file either way.
@@ -113,7 +151,7 @@ void grantDefaultPerms(std::int32_t file, const std::string& path, std::uint32_t
     return mapped;
 }
 
-[[nodiscard]] Mapping_t openCreator(std::string_view pathView, std::uint64_t areaSize)
+[[nodiscard]] Mapping_t openCreator(std::string_view pathView, std::uint64_t areaSize, CoherencyMode coherency)
 {
     const std::string path{pathView};
     const std::uint64_t mapSize = roundUp(areaSize, PmdAlign);
@@ -121,16 +159,22 @@ void grantDefaultPerms(std::int32_t file, const std::string& path, std::uint32_t
     // WORM: ftruncate only grows a fresh file. A pre-sized file (created and held by another
     // process) is already finalized and rejects re-truncation, so skip when it is big enough.
     struct stat info = {};
-    const bool needGrow =
-        ::fstat(file, &info) != 0 || static_cast<std::uint64_t>(info.st_size) < mapSize;
-    if (needGrow && ::ftruncate(file, static_cast<off_t>(mapSize)) != 0)
+    const bool needGrow = ::fstat(file, &info) != 0 ||
+                          static_cast<std::uint64_t>(info.st_size) < mapSize;
+    if (needGrow)
     {
-        const auto failure = lastSystemError();
-        ::close(file);
-        throw BackendError{"cme::FileMemory ftruncate(" + path + ")", failure};
+        setCachePolicy(file, path, coherency);
+        if (::ftruncate(file, static_cast<off_t>(mapSize)) != 0)
+        {
+            const auto failure = lastSystemError();
+            ::close(file);
+            throw BackendError{"cme::FileMemory ftruncate(" + path + ")", failure};
+        }
     }
-    grantDefaultPerms(file, path, MarufsPermRead | MarufsPermWrite);
-    return {mapFd(file, path, mapSize, /*writable=*/true), mapSize};
+    grantDefaultPerms(file, path, FsPermReq_t::Read | FsPermReq_t::Write);
+    // A pre-sized file kept the pool it was placed in, whatever @coherency asked for.
+    const auto placed = getCachePolicy(file);
+    return {mapFd(file, path, mapSize, /*writable=*/true), mapSize, placed};
 }
 
 // Map what the file actually holds. The creator sized it to the region, which may be more
@@ -156,7 +200,8 @@ void grantDefaultPerms(std::int32_t file, const std::string& path, std::uint32_t
         throw BackendError{"cme::FileMemory: file size invalid (" + path + ")"};
     }
     const std::uint64_t mapSize = roundUp(static_cast<std::uint64_t>(info.st_size), PmdAlign);
-    return {mapFd(file, path, mapSize, writable), mapSize};
+    const auto placed = getCachePolicy(file);
+    return {mapFd(file, path, mapSize, writable), mapSize, placed};
 }
 
 }  // namespace
@@ -167,6 +212,7 @@ FileMemory::FileMemory(std::string_view path)
     const auto mapping = openJoiner(path, /*writable=*/true);
     base_ = mapping.base;
     mappedSize_ = mapping.size;
+    poolCoherency_ = mapping.pool;
 }
 
 FileMemory::FileMemory(std::string_view path, ReadOnlyTag)
@@ -175,14 +221,29 @@ FileMemory::FileMemory(std::string_view path, ReadOnlyTag)
     const auto mapping = openJoiner(path, /*writable=*/false);
     base_ = mapping.base;
     mappedSize_ = mapping.size;
+    poolCoherency_ = mapping.pool;
 }
 
-FileMemory::FileMemory(std::string_view path, std::uint64_t areaSize)
+FileMemory::FileMemory(std::string_view path, std::uint64_t areaSize, CoherencyMode coherency)
     : Memory{nullptr, 0}
 {
-    const auto mapping = openCreator(path, areaSize);
+    const auto mapping = openCreator(path, areaSize, coherency);
     base_ = mapping.base;
     mappedSize_ = mapping.size;
+    poolCoherency_ = mapping.pool;
+}
+
+std::optional<CoherencyMode> FileMemory::readPoolCoherency(std::string_view path)
+{
+    const std::string named{path};
+    const auto file = ::open(named.c_str(), O_RDONLY | O_CLOEXEC);
+    if (file < 0)
+    {
+        return std::nullopt;
+    }
+    const auto placed = getCachePolicy(file);
+    ::close(file);
+    return placed;
 }
 
 }  // namespace cme

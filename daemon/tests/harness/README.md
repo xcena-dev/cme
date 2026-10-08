@@ -18,7 +18,7 @@ It also carries `cme_harness`, so a probe reaches the cme harness headers that r
 | [`helper_requester.hpp`](helper_requester.hpp) | A requester on an area a fixture already laid down, at the compiled-in deadlines. Needs the client library. |
 | [`helper_socket.hpp`](helper_socket.hpp) | Both ends of one connection in one process, and the listening socket that owns the name. A case drops either end and reads what the other one then sees. |
 | [`helper_cme_region.hpp`](helper_cme_region.hpp) | One cme region a probe owns for as long as it runs, formatted and unlinked by the fixture. Needs libcme. |
-| [`helper_medium.hpp`](helper_medium.hpp) | Which medium a probe that starts a real daemon runs on: a backend name and a window index become a URI and the coherency word a daemon config takes. Needs libcme and the cme harness. |
+| [`helper_medium.hpp`](helper_medium.hpp) | Which medium a probe that starts a real daemon runs on: a backend name and a window index become a URI and the mode an Inspector attaches with. Needs libcme and the cme harness. |
 
 Each header is separated by what it drags in rather than by what it is about.
 `probe_context.hpp` needs no cmed header at all, `helper_area.hpp` needs the daemon's half because formatting zeroes the area, `helper_daemon.hpp` reaches the area through `helper_area.hpp` and so needs the same, `helper_handler.hpp` needs the callback type and that same area header for the domain ceiling and the poll step, and `helper_process.hpp` needs POSIX.

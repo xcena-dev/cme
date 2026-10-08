@@ -164,8 +164,9 @@ void growPeerScanBound(Geometry::AdmissionControl_t* admissionControl, PeerId pe
 
 // Hold the lease, reserve the lowest free slot, release. The lease is always
 // released -- including on a full-table throw -- so a failed claim never wedges.
-PeerId claimPeerSlot(const Geometry& geometry, CoherencyMode mode)
+PeerId claimPeerSlot(const Geometry& geometry)
 {
+    const CoherencyMode mode = geometry.getMappingCoherency();
     auto* admissionControl = geometry.getAdmissionControl();
     const std::uint64_t nonce = getRandomNonce();
 

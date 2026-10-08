@@ -37,16 +37,12 @@ Swap the URI for `shm:/cme-demo` to run it on a single host without CXL hardware
 |---|---|
 | `shm:/name` | POSIX shm, single host |
 | `dax:/dev/daxN.M` | CXL devdax chardev |
-| `file:/path` | a file on a mapped filesystem, uncacheable where the mount is |
+| `file:/path` | a file on a mapped filesystem, in the pool `FormatOpts_t::coherency` picks where the mount offers two |
 
 One process sets the region up:
 
 ```cpp
 #include "cme/cme.hpp"
-
-cme::Session::OpenOpts_t how;
-how.coherency = cme::CoherencyMode::Flush;   // devdax: cached, and outside the
-                                             // coherence domain the peers share
 
 cme::Session::FormatOpts_t opts;
 opts.maxPeers   = 8;
@@ -55,7 +51,7 @@ opts.strategy   = cme::Strategy::Request;    // recorded in the region; joiners
                                              // pick up the matching policy
 cme::Session::format("dax:/dev/dax0.0", opts);
 
-auto session = cme::Session::open("dax:/dev/dax0.0", how);
+auto session = cme::Session::open("dax:/dev/dax0.0");   // the mapping picks the mode: Flush
 session.createDomain("inv");
 session.joinDomain("inv");
 ```
@@ -63,7 +59,7 @@ session.joinDomain("inv");
 Every other process attaches to what is already there:
 
 ```cpp
-auto session = cme::Session::open("dax:/dev/dax0.0", how);
+auto session = cme::Session::open("dax:/dev/dax0.0");
 for (const auto& name : session.getDomainNames())
     session.joinDomain(name);           // lock() without this throws
 ```
@@ -74,7 +70,7 @@ From there the two are the same, and this is the part that repeats:
 {
     auto guard = session.lock("inv");   // throws LockTimeoutError on deadline
     // ... critical section on your own data ...
-    cme::flush(buf, nbytes, how.coherency);   // publish before the Guard releases
+    cme::flush(buf, nbytes, session.getCoherencyMode());   // publish before the Guard releases
 }                                       // Guard dtor releases
 ```
 

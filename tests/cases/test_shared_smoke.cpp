@@ -3,7 +3,7 @@
 //
 // test_shared_smoke.cpp -- smoke test for the public Session API. Exercises:
 //   - Session::format(shm)
-//   - Session::open(uri) where the medium is cache-coherent, Session::open(uri, OpenOpts) elsewhere
+//   - Session::open(uri) and Session::open(uri, OpenOpts)
 //   - Session::lock("name") + Guard RAII
 //   - Session::tryLock(name, timeout)
 //   - Session::withLock(name, fn)
@@ -11,7 +11,7 @@
 //   - unknown domain -> UnknownDomainError
 //   - format on top of an existing region (re-format is idempotent)
 //
-// Backend from --backend: uc (a file on an uncacheable mount), dax (a devdax slot), or shm.
+// Backend from --backend: uc or wb (a file in that pool of the mount), dax (a devdax slot), or shm.
 
 #include <cstdio>
 #include <cstdlib>
@@ -167,13 +167,7 @@ void runBody(harness::TestContext& ctx)
     }
 
     // ── second open, through the one-argument overload ────────────
-    // That overload fills OpenOpts_t with its defaults, and coherency defaults there to
-    // CacheCoherent. So it runs only where the medium is cache-coherent. On the other two the
-    // default would be the wrong barrier discipline, and the open would say nothing about the
-    // medium the variant exists to cover.
-    auto second = (ctx.coherency() == cme::CoherencyMode::CacheCoherent)
-                      ? cme::Session::open(uri)
-                      : harness::openSession();
+    auto second = cme::Session::open(uri);
     second.joinDomain("orders");  // opt-in: join before locking
 
     // ── two sessions, distinct domains, no contention ─────────────

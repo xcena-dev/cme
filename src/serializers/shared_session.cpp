@@ -258,4 +258,9 @@ void SharedSession::setCohortCap(std::uint32_t cap) noexcept
     impl_->cohortCap.store(cap, std::memory_order_relaxed);
 }
 
+CoherencyMode SharedSession::getCoherencyMode() const noexcept
+{
+    return impl_ ? impl_->session.getCoherencyMode() : CoherencyMode::Flush;
+}
+
 }  // namespace cme

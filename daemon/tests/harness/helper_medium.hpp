@@ -26,8 +26,7 @@ namespace cmed::harness
 // this one instead, because cmed::harness is what enclosing-scope lookup reaches first.
 namespace cmeh = ::harness;
 
-// What a daemon config's region.coherency line calls each mode. The daemon maps the name back with
-// a table of its own, so a name this does not produce is refused there rather than here.
+// What the --coherency flag calls each mode.
 [[nodiscard]] inline const char* coherencyName(cme::CoherencyMode mode) noexcept
 {
     switch (mode)
@@ -41,8 +40,7 @@ namespace cmeh = ::harness;
     }
 }
 
-// The same map read backwards, for a probe that opens the region itself. A bare open defaults to
-// CacheCoherent, which is the wrong barrier discipline on devdax and on an uncacheable mount.
+// The same map read backwards, for a probe that attaches an Inspector, which takes its mode explicitly.
 [[nodiscard]] inline cme::CoherencyMode coherencyFromName(std::string_view name) noexcept
 {
     if (name == "uncached")

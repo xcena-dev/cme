@@ -74,7 +74,7 @@ void runBody(harness::TestContext& ctx)
     bool rejected = false;
     try
     {
-        (void)cme::admission::claimPeerSlot(region, ctx.coherency());
+        (void)cme::admission::claimPeerSlot(region);
     }
     catch (const cme::NoFreeSlotError&)
     {
@@ -95,7 +95,7 @@ void runBody(harness::TestContext& ctx)
     bool reclaimOk = false;
     try
     {
-        reclaimed = cme::admission::claimPeerSlot(region, ctx.coherency());
+        reclaimed = cme::admission::claimPeerSlot(region);
         reclaimOk = true;
     }
     catch (const std::exception& e)

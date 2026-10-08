@@ -123,7 +123,6 @@ void writeConfig(const cmed::harness::ProbeScratch& scratch, const std::vector<s
     cmed::harness::DaemonSite_t site;
     site.areaName = areaNames.at(node);
     site.uri = chosen.uri;
-    site.coherency = chosen.coherency;
 
     // A cohort cap, because what this probe contends on is a domain several nodes want and an
     // uncapped run would let one node keep it. Both loops turn faster than a deployment's would.
@@ -507,8 +506,7 @@ int main(int argc, char** argv)
     {
         // The first domain exists before any daemon starts, because a daemon publishes what it finds at
         // startup and a later one waits for a refresh. One peer slot per node, plus this session's.
-        cmed::harness::ProbeRegion region{chosen.uri, RegionSlots, chosen.nodes + 1,
-                                          chosen.coherencyMode()};
+        cmed::harness::ProbeRegion region{chosen.uri, RegionSlots, chosen.nodes + 1};
         region.createDomain(DomainName);
 
         std::vector<std::unique_ptr<cmed::harness::NodeDaemon>> serving;

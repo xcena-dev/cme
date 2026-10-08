@@ -86,7 +86,7 @@ void worker(TimelineSlot_t* slot)
     {
         try
         {
-            slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
+            slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId);
             for (cme::DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
             {
                 slot->peer->joinDomain(domainId);
@@ -142,7 +142,6 @@ void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry& regi
 {
     peerSlot.peerId = peerId;
     peerSlot.region = &region;
-    peerSlot.coherency = harness::currentRun().coherency();
     peerSlot.domainCount = domainCount;
     peerSlot.state.store(PState::Running);
     peerSlot.frozen.store(false);

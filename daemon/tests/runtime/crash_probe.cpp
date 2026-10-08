@@ -107,7 +107,6 @@ void writeConfig(const cmed::harness::ProbeScratch& scratch, const std::vector<s
     cmed::harness::DaemonSite_t site;
     site.areaName = areaNames.at(node);
     site.uri = chosen.uri;
-    site.coherency = chosen.coherency;
 
     // This probe restarts daemons and waits for a name to travel, so both loops turn faster than a
     // deployment's would.
@@ -612,7 +611,7 @@ int main(int argc, char** argv)
         // Held in an optional so it can be let go while the daemons are still up: leaving a domain whose
         // holder is a killed peer waits on the region's own reclaim, which needs a live daemon to finish.
         std::optional<cmed::harness::ProbeRegion> region;
-        region.emplace(chosen.uri, RegionSlots, RegionPeers, chosen.coherencyMode());
+        region.emplace(chosen.uri, RegionSlots, RegionPeers);
         region->createDomain(HeldDomainName);
 
         writeConfig(scratch, areaNames, 0, chosen);

@@ -137,12 +137,14 @@ public:
         // RequestAgg only: number of aggregator groups (peer p -> group p % groups).
         // 0 = auto (minimum that keeps one packed line per group). Ignored otherwise.
         std::uint32_t aggregatorGroups{0};
+        // file: only, where the filesystem offers two pools: Uncached places the region in the
+        // uncached one, Flush and CacheCoherent in the write-back one.
+        CoherencyMode coherency{CoherencyMode::Uncached};
     };
 
     struct OpenOpts_t
     {
         std::chrono::milliseconds formatTimeout{5'000};  // wait for creator to finish format
-        CoherencyMode coherency{CoherencyMode::CacheCoherent};
     };
 
     // ── ctor / dtor ────────────────────────────────────────────────
@@ -163,6 +165,8 @@ public:
     static void format(std::string_view uri, const FormatOpts_t& opts);
 
     // Attach + claim a peer slot. Throws RegionNotFormattedError, NoFreeSlotError, JoinError.
+    // The mapping picks the mode: CacheCoherent on shm:, Flush on dax:, the pool's on file:, and
+    // Flush on a file: mount that names no pool.
     [[nodiscard]] static Session open(std::string_view uri);
     [[nodiscard]] static Session open(std::string_view uri, const OpenOpts_t& opts);
 
@@ -229,6 +233,9 @@ public:
     // Names of all live (Active) data domains; excludes the control domain.
     [[nodiscard]] std::vector<std::string> getDomainNames() const;
 
+    // The mode this peer runs under, which its mapping picked. cme::flush takes it.
+    [[nodiscard]] CoherencyMode getCoherencyMode() const noexcept;
+
 private:
     struct Impl;
     explicit Session(std::unique_ptr<Impl> impl) noexcept;
@@ -238,8 +245,8 @@ private:
 };
 
 // Publish caller-owned dirty cachelines to FAM. Call inside a Guard scope after writing your
-// own data; cme flushes its metadata itself. Pass the same CoherencyMode the Session was
-// opened with -- Flush is the only value that emits a flush, the others just fence.
+// own data; cme flushes its metadata itself. Pass Session::getCoherencyMode() -- Flush is the
+// only value that emits a flush, the others just fence.
 void flush(const void* addr, std::size_t bytes, CoherencyMode mode) noexcept;
 
 }  // namespace cme

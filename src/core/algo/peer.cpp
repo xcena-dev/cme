@@ -126,6 +126,11 @@ void refuseReplacedDomain(const LocalPeerState& state, DomainId domainId,
 
 }  // namespace
 
+Peer::Peer(Geometry& geometry, PeerId peerId)
+    : Peer{geometry, peerId, geometry.getMappingCoherency()}
+{
+}
+
 Peer::Peer(Geometry& geometry, PeerId peerId, CoherencyMode coherency)
     : impl_{std::make_unique<LocalPeerState>()}
 {

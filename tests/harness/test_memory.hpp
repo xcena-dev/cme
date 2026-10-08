@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -39,7 +40,8 @@ enum class Backend
 {
     Shm,
     Dax,
-    Uc
+    Uc,
+    Wb
 };
 
 // One rule for every POSIX shm name this harness makes: what the run calls itself, what the
@@ -61,6 +63,10 @@ enum class Backend
     if (name == "uc")
     {
         return Backend::Uc;
+    }
+    if (name == "wb")
+    {
+        return Backend::Wb;
     }
     return Backend::Shm;
 }
@@ -129,10 +135,11 @@ public:
     // ── region views, for a case ───────────────────────────────────────
 
     // Formats the area and hands back the region. The geometry is the case's decision, so
-    // it passes it in rather than this holding one.
+    // it passes it in rather than this holding one; the mode, which picks a file pool, is the medium's.
     [[nodiscard]] cme::Geometry createRegion(cme::DomainId domainCeiling, cme::PeerId maxPeers,
-                                             const cme::Geometry::FormatOpts_t& opts) const
+                                             cme::Geometry::FormatOpts_t opts) const
     {
+        opts.coherency = coherency();
         return cme::Geometry::create(uri(), domainCeiling, maxPeers, opts);
     }
 
@@ -150,7 +157,7 @@ public:
     // has one implementation of the open/ftruncate/mmap rules each backend imposes.
     [[nodiscard]] void* map(std::uint64_t bytes)
     {
-        mapping_ = cme::Memory::create(uri(), bytes);
+        mapping_ = cme::Memory::create(uri(), bytes, coherency());
         return mapping_->getBase();
     }
 
@@ -238,16 +245,21 @@ protected:
     }
 };
 
-// A file on an uncacheable mount.
+// A file on the file_backend_dir mount, placed in the pool @mode calls for and opened under @mode.
 class FileTestMemory : public TestMemory
 {
 public:
     FileTestMemory(const ConfigReader& config, const std::string& runName, std::uint64_t,
-                   const std::string& objectOverride)
+                   const std::string& objectOverride, cme::CoherencyMode mode)
         : TestMemory{objectOverride.empty() ? mountedDir(config) + "/cme_" + runName
-                                            : objectOverride}
+                                            : objectOverride},
+          mode_{mode}
     {
         clear();
+        if (mode_ != cme::CoherencyMode::Uncached)
+        {
+            requireWriteBackPool(object_);
+        }
     }
 
     ~FileTestMemory() override
@@ -257,7 +269,7 @@ public:
 
     [[nodiscard]] cme::CoherencyMode coherency() const noexcept override
     {
-        return cme::CoherencyMode::Uncached;
+        return mode_;
     }
 
 protected:
@@ -283,6 +295,25 @@ private:
         }
         return dir;
     }
+
+    // On a mount that maps every file one way, a wb case would run on that one pool and pass
+    // without testing anything write-back.
+    static void requireWriteBackPool(const std::string& path)
+    {
+        const std::int32_t probe = ::open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+        if (probe >= 0)
+        {
+            (void)::close(probe);
+        }
+        const auto offered = cme::FileMemory::readPoolCoherency(path);
+        (void)std::remove(path.c_str());
+        if (offered != cme::CoherencyMode::Flush)
+        {
+            throw MediumUnavailable{path + ": the mount offers no write-back pool"};
+        }
+    }
+
+    cme::CoherencyMode mode_;
 };
 
 // A window on a devdax device. The slot picks the window, so two dax runs never share a
@@ -408,7 +439,11 @@ inline std::unique_ptr<TestMemory> TestMemory::open(const ConfigReader& config, 
         case Backend::Dax:
             return std::make_unique<DaxTestMemory>(config, runName, slot, objectOverride);
         case Backend::Uc:
-            return std::make_unique<FileTestMemory>(config, runName, slot, objectOverride);
+            return std::make_unique<FileTestMemory>(config, runName, slot, objectOverride,
+                                                    cme::CoherencyMode::Uncached);
+        case Backend::Wb:
+            return std::make_unique<FileTestMemory>(config, runName, slot, objectOverride,
+                                                    cme::CoherencyMode::Flush);
         default:
             return std::make_unique<ShmTestMemory>(runName, slot, objectOverride);
     }

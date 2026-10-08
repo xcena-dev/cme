@@ -46,7 +46,6 @@ admit:
 # region. Opened and never formatted: a format zeroes the region and the other nodes are using it.
 region:
   uri: shm:/cme-region            # dax:, shm:, or file:
-  coherency: cache_coherent       # cache_coherent | uncached | flush
   format_timeout_ms: 5000         # wait for a format already in flight before giving up
 
 # ── Keeping CXL ownership across requesters ─────────────────────────────

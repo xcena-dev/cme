@@ -116,7 +116,7 @@ std::unique_ptr<Memory> Memory::openReadOnly(std::string_view uri)
                                parts.scheme};
 }
 
-std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaSize)
+std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaSize, CoherencyMode coherency)
 {
     const auto parts = parseUri(uri);
     if (parts.scheme == "dax")
@@ -129,7 +129,7 @@ std::unique_ptr<Memory> Memory::create(std::string_view uri, std::uint64_t areaS
     }
     if (parts.scheme == "file")
     {
-        return std::make_unique<FileMemory>(parts.path, areaSize);
+        return std::make_unique<FileMemory>(parts.path, areaSize, coherency);
     }
     throw InvalidArgumentError{std::string{"cme::Memory::create: unsupported scheme: "} +
                                parts.scheme};

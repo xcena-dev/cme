@@ -115,9 +115,9 @@ void worker(ChurnSlot_t* peerSlot)
         try
         {
             const cme::PeerId claimedId =
-                cme::admission::claimPeerSlot(*peerSlot->region, peerSlot->coherency);
+                cme::admission::claimPeerSlot(*peerSlot->region);
             peerSlot->peer =
-                std::make_unique<cme::Peer>(*peerSlot->region, claimedId, peerSlot->coherency);
+                std::make_unique<cme::Peer>(*peerSlot->region, claimedId);
             return true;
         }
         catch (const std::exception& e)
@@ -225,7 +225,6 @@ void runBody(harness::TestContext& ctx)
     {
         peers[i].peerId = i;
         peers[i].region = &region;
-        peers[i].coherency = ctx.coherency();
         peers[i].runner = std::thread{worker, &peers[i]};
     }
     for (cme::PeerId i = 0; i < Workers; ++i)
@@ -274,7 +273,7 @@ void runBody(harness::TestContext& ctx)
     // ── leak audit: a fresh peer must still create >= (slots - workers) domains. ──
     std::uint32_t auditCreated = 0;
     {
-        cme::Peer audit{region, cme::admission::claimPeerSlot(region, ctx.coherency()), ctx.coherency()};
+        cme::Peer audit{region, cme::admission::claimPeerSlot(region)};
         for (cme::DomainId k = 0; k < DataSlots; ++k)
         {
             try

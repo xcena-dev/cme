@@ -42,6 +42,7 @@ Geometry::FormatOpts_t makeInternalFormatOpts(const Session::FormatOpts_t& opts)
     return Geometry::FormatOpts_t{
         opts.strategy,
         opts.aggregatorGroups,
+        opts.coherency,
     };
 }
 
@@ -166,12 +167,12 @@ Session Session::open(std::string_view uri)
 Session Session::open(std::string_view uri, const OpenOpts_t& opts)
 {
     auto geometry = Geometry::open(uri);
-    geometry.bindBlocking(opts.formatTimeout, opts.coherency);
+    geometry.bindBlocking(opts.formatTimeout);
 
-    const auto peerId = admission::claimPeerSlot(geometry, opts.coherency);
+    const auto peerId = admission::claimPeerSlot(geometry);
 
     auto impl = std::make_unique<Session::Impl>(std::move(geometry));
-    impl->peer = std::make_unique<Peer>(impl->geometry, peerId, opts.coherency);
+    impl->peer = std::make_unique<Peer>(impl->geometry, peerId);
     return Session{std::move(impl)};
 }
 
@@ -329,6 +330,12 @@ std::vector<std::string> Session::getDomainNames() const
         names.push_back(entry.name);
     }
     return names;
+}
+
+CoherencyMode Session::getCoherencyMode() const noexcept
+{
+    // A moved-from Session maps nothing, and Flush is right on any mapping.
+    return impl_ ? impl_->peer->getCoherencyMode() : CoherencyMode::Flush;
 }
 
 // ── flush ─────────────────────────────────────────────────────────

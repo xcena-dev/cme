@@ -5,7 +5,7 @@
 // daemon's own half. Separate from helper.hpp because it drags in libcme.
 //
 // shm by default, so a case runs wherever ctest does. A case naming a uri instead owns that medium
-// itself, down to the coherency mode it passes: nothing here unlinks a dax device or a file.
+// itself: nothing here unlinks a dax device or a file.
 
 #pragma once
 
@@ -40,11 +40,10 @@ public:
 
     // Any backend, named whole. Nothing is unlinked at either end: a dax device or a file belongs to
     // whoever set it up, and format is what makes the region this case's regardless.
-    ProbeRegion(std::string uri, std::uint32_t slots, std::uint32_t peers,
-                cme::CoherencyMode coherency)
+    ProbeRegion(std::string uri, std::uint32_t slots, std::uint32_t peers)
         : shmName_{nullptr},
           uri_{std::move(uri)},
-          session_{formattedSession(uri_, slots, peers, coherency)}
+          session_{formattedSession(uri_, slots, peers)}
     {
     }
 
@@ -83,23 +82,18 @@ private:
     freshSession(const char* shmName, const std::string& uri, std::uint32_t slots, std::uint32_t peers)
     {
         ::shm_unlink(shmName);
-        return formattedSession(uri, slots, peers, cme::CoherencyMode::CacheCoherent);
+        return formattedSession(uri, slots, peers);
     }
 
-    // The mode is the medium's, not a preference: a bare open defaults to CacheCoherent, and on
-    // devdax or an uncacheable mount that is a barrier discipline the hardware does not have.
     [[nodiscard]] static cme::Session
-    formattedSession(const std::string& uri, std::uint32_t slots, std::uint32_t peers,
-                     cme::CoherencyMode coherency)
+    formattedSession(const std::string& uri, std::uint32_t slots, std::uint32_t peers)
     {
         cme::Session::FormatOpts_t opts;
         opts.maxDomains = slots;
         opts.maxPeers = peers;
         cme::Session::format(uri, opts);
 
-        cme::Session::OpenOpts_t opening;
-        opening.coherency = coherency;
-        return cme::Session::open(uri, opening);
+        return cme::Session::open(uri, cme::Session::OpenOpts_t{});
     }
 
 private:

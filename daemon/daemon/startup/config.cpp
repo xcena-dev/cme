@@ -116,7 +116,6 @@ DaemonConfig_t loadDaemonConfig(const std::string& path)
     config.admit.uids = readIds<::uid_t>(values, "admit.uids", posix::getUid);
     config.admit.gids = readIds<::gid_t>(values, "admit.gids", posix::getGid);
     config.region.uri = values.getString("region.uri", config.region.uri);
-    config.region.coherency = values.getString("region.coherency", config.region.coherency);
     config.region.formatTimeout = values.get("region.format_timeout_ms", config.region.formatTimeout);
     config.cohort.hold = values.get("cohort.hold_ms", config.cohort.hold);
     config.cohort.grantValidity = values.get("cohort.grant_validity_ms", config.cohort.grantValidity);

@@ -9,7 +9,6 @@
 
 #pragma once
 
-#include "cme/shared.hpp"
 #include "core/types.hpp"
 
 namespace cme
@@ -22,8 +21,7 @@ namespace cme::admission
 
 // Claim a free peer slot in the membership table. Throws NoFreeSlotError when the
 // lease cannot be acquired before LeaseAcquireDeadline or the table is full.
-// @mode is the joining peer's coherency regime; admission writes the region before any
-// LocalPeerState exists, so it cannot be read back from one.
-[[nodiscard]] PeerId claimPeerSlot(const Geometry& geometry, CoherencyMode mode);
+// Runs under the mode @geometry's mapping calls for.
+[[nodiscard]] PeerId claimPeerSlot(const Geometry& geometry);
 
 }  // namespace cme::admission

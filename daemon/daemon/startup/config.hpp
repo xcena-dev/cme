@@ -2,7 +2,7 @@
 // Copyright XCENA Inc.
 //
 // daemon/startup/config.hpp -- the settings the daemon gets to choose. Not installed: a requester links
-// the client library and never opens a region, so region uri, coherency and cohort cap are settings
+// the client library and never opens a region, so region uri and cohort cap are settings
 // for a process it does not run. The client's file and this one are the same deployment file.
 
 #pragma once
@@ -64,9 +64,6 @@ struct DaemonConfig_t
     struct
     {
         std::string uri{"shm:/cme-region"};
-
-        // Named rather than typed, so this header stays clear of libcme.
-        std::string coherency{"cache_coherent"};
 
         // How long open() waits for a format another process started.
         timing::Millis formatTimeout{5000};

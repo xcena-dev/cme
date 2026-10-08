@@ -78,7 +78,7 @@ void runWorker(const WorkerContext_t& shared, std::uint32_t pid)
 {
     try
     {
-        cme::Peer peer{shared.region, pid, shared.ctx.coherency()};
+        cme::Peer peer{shared.region, pid};
 
         // Wait at the start-line so peers contend concurrently.
         shared.atStart.fetch_add(1, std::memory_order_release);

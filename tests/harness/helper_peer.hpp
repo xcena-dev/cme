@@ -52,7 +52,6 @@ struct PeerSlot_t
     // ── set before spawnPeerWorker ─────────────────────────────────
     cme::Geometry* region{nullptr};
     cme::PeerId peerId{0};
-    cme::CoherencyMode coherency{};
     cme::DomainId domainCount{0};
     // How long a frozen worker idles before it looks at `frozen` again. A case measuring a thaw
     // wants this well under the window it is measuring.
@@ -94,7 +93,7 @@ inline void runPeerWorker(PeerSlot_t* slot)
 {
     try
     {
-        slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
+        slot->peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId);
         for (cme::DomainId joinId = 1; joinId <= slot->domainCount; ++joinId)
         {
             slot->peer->joinDomain(joinId);
@@ -175,7 +174,6 @@ inline void spawnPeerWorker(PeerSlot_t& slot, cme::PeerId peerId, cme::Geometry&
 {
     slot.region = &region;
     slot.peerId = peerId;
-    slot.coherency = currentRun().coherency();
     slot.domainCount = domainCount;
     slot.runner = std::thread{runPeerWorker, &slot};
 }

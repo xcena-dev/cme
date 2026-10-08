@@ -84,7 +84,7 @@ Geometry Geometry::create(std::string_view uri, std::uint32_t domainCount,
     }
     const std::uint64_t areaSize =
         computeAreaSize(domainCount, peerCount, opts.strategy, opts.aggregatorGroups);
-    auto memory = Memory::create(uri, areaSize);
+    auto memory = Memory::create(uri, areaSize, opts.coherency);
     if (memory->getMappedSize() < areaSize)
     {
         throw FormatError{"cme::Geometry::create: backend mapping smaller than area"};
@@ -193,7 +193,7 @@ void Geometry::format(const FormatOpts_t& opts)
     coherency::set(geometry.getHeader(), header, FormatCoherency);
 }
 
-void Geometry::bindBlocking(timing::Millis timeout, CoherencyMode mode)
+void Geometry::bindBlocking(timing::Millis timeout)
 {
     if (bound_)
     {
@@ -204,6 +204,7 @@ void Geometry::bindBlocking(timing::Millis timeout, CoherencyMode mode)
     {
         throw RegionInvalidError{"cme::Geometry::bindBlocking: region not mapped"};
     }
+    const CoherencyMode mode = getMappingCoherency();
     if (!poll::waitUntil([base, mode]
                          {
                              return isHeaderReady(base, mode);
@@ -272,6 +273,11 @@ bool Geometry::rebind(Passkey<Inspector>, CoherencyMode mode) noexcept
         return false;
     }
     return true;
+}
+
+CoherencyMode Geometry::getMappingCoherency() const noexcept
+{
+    return memory_->getMappingCoherency().value_or(CoherencyMode::Flush);
 }
 
 // ── private: ctors ─────────────────────────────────────────────────

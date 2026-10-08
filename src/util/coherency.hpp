@@ -7,8 +7,8 @@
 //
 // The regime is a runtime value, because it is a property of how *this* peer mapped the
 // region rather than of the region: two peers over one device may differ, one mapping devdax
-// WB while the other reaches the same storage through a marufs UC file. The Session states
-// it in OpenOpts_t; it reaches these calls through LocalPeerState, or as an explicit
+// WB while the other reaches the same storage through a UC file. The Session takes it from
+// its mapping. It reaches these calls through LocalPeerState, or as an explicit
 // parameter on the paths that run before a LocalPeerState exists (format, admission).
 //
 // Costs measured on this bench (ns per 64B op, sustained; data_coherency_0728/):
@@ -57,7 +57,7 @@ namespace coherency
 {
 
 // The Session's answer, spelled coherency::Mode at these call sites. Declared publicly
-// because the caller chooses it in Session::OpenOpts_t; aliased rather than mirrored so
+// because a format names it to pick a file pool; aliased rather than mirrored so
 // there is one type and nothing to keep in sync.
 using Mode = CoherencyMode;
 

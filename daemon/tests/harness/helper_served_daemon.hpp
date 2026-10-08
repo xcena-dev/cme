@@ -73,7 +73,6 @@ struct DaemonSite_t
 {
     std::string areaName;
     std::string uri;
-    std::string coherency{"cache_coherent"};
     std::string extra;
 };
 
@@ -91,7 +90,6 @@ inline void writeDaemonConfig(const ProbeScratch& scratch, const DaemonSite_t& s
              << "  name: " << site.areaName << "\n"
              << "region:\n"
              << "  uri: " << site.uri << "\n"
-             << "  coherency: " << site.coherency << "\n"
              << site.extra;
     }
 

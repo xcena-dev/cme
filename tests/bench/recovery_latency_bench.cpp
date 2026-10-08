@@ -72,7 +72,7 @@ void worker(BenchSlot_t* slot)
 {
     try
     {
-        auto peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId, slot->coherency);
+        auto peer = std::make_unique<cme::Peer>(*slot->region, slot->peerId);
         for (cme::DomainId domainId = 1; domainId <= slot->domainCount; ++domainId)
         {
             peer->joinDomain(domainId);
@@ -179,7 +179,6 @@ struct Phases_t
         slot->region = &region;
         slot->peerId = peerId;
         slot->domainCount = domains;
-        slot->coherency = coherency;
         slot->isDead = (peerId == deadPeer);
         slots.push_back(std::move(slot));
     }

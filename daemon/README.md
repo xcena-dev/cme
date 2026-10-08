@@ -52,7 +52,7 @@ It needs neither libcme nor the region's uri, and it cannot reach the region exc
 
 What cmed refuses is part of the same contract.
 It never formats the region, because a format zeroes what the peers on other nodes are using.
-It refuses a config file that group or other can write, a world-writable socket mode, a worker count of zero, a turn hold that outlives its grants, and a coherency name it does not know.
+It refuses a config file that group or other can write, a world-writable socket mode, a worker count of zero, and a turn hold that outlives its grants.
 It refuses a connect from an account its admit policy does not name, a greeting from a build with a different ABI, and any command from a connection that has not greeted.
 It exits rather than serve beside another daemon of the same name.
 
@@ -149,7 +149,7 @@ Two files, and each side writes only its own.
 Whoever decides a value owns the file it lives in.
 
 The daemon's file is `deploy/cmed.example.yaml`, deployed to `/etc/cme/cmed.yaml` unless `--config <path>` says otherwise.
-It carries what the daemon decides: the run's name (`area.name`), the socket's place and mode (`socket.dir`, `socket.mode`), who may connect (`admit.uids`, `admit.gids`), the region (`region.uri`, `region.coherency`), how long a turn is held and how long a grant stays valid (`cohort.hold_ms`, `cohort.grant_validity_ms`), the worker pool (`workers.count`), and the pace of its passes.
+It carries what the daemon decides: the run's name (`area.name`), the socket's place and mode (`socket.dir`, `socket.mode`), who may connect (`admit.uids`, `admit.gids`), the region (`region.uri`), how long a turn is held and how long a grant stays valid (`cohort.hold_ms`, `cohort.grant_validity_ms`), the worker pool (`workers.count`), and the pace of its passes.
 The example file documents every key beside its default.
 
 An application's file is `deploy/cmed-client.example.yaml`, and where it lives is that application's choice.
@@ -222,7 +222,6 @@ What a wrong setting costs, for the mistakes worth knowing in advance:
 | `socket.dir` | directory does not exist | bind fails, exit `1` |
 | `socket.mode` | world-writable | refused, exit `1` |
 | `region.uri` | names nothing | `shm_open(attach)` on stderr, exit `1` |
-| `region.coherency` | not a known mode | refused, exit `1` |
 | `workers.count` | `0` | refused, exit `1` |
 | `cohort.hold_ms` | at or above `grant_validity_ms` | refused, exit `1` |
 | `area.name` | same name started twice | second daemon exits `3` |

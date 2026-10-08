@@ -65,7 +65,7 @@ void runBody(harness::TestContext& ctx)
                 {
                     // spin, so the claim below lands with the others rather than after them
                 }
-                claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region, ctx.coherency()));
+                claimed = static_cast<std::int32_t>(cme::admission::claimPeerSlot(region));
             }
             catch (...)
             {
