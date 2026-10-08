@@ -32,9 +32,9 @@
 // Every regime now compiles into every build, so the whole file is x86-only. Kept as one
 // guard rather than spread over the call sites: a port has a single place to look.
 #if !defined(__x86_64__)
-#error "cme currently requires x86 (clflush/clflushopt/sfence/mfence)"
+#error "cme currently requires x86 (clflushopt/sfence/mfence)"
 #endif
-#include <emmintrin.h>  // _mm_clflush, _mm_mfence, _mm_sfence
+#include <emmintrin.h>  // _mm_mfence, _mm_sfence
 #include <immintrin.h>  // _mm_clflushopt, _movdir64b, _mm512_loadu_si512
 
 namespace cme
@@ -96,7 +96,7 @@ inline void rmb(const void* addr, std::size_t len, Mode mode) noexcept
             // pointer below its own object is out of bounds.
             for (auto line = base; line < end; line += CacheLineBytes)
             {
-                _mm_clflush(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
+                _mm_clflushopt(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
             }
         }
         // mfence, not lfence: lfence waits only for a flush to retire, so a later load can still hit
