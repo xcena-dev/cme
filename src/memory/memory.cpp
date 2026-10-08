@@ -15,6 +15,7 @@
 #include <string_view>
 
 #include "cme/errors.hpp"
+#include "cme/shared.hpp"
 
 namespace cme
 {

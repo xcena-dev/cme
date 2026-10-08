@@ -26,6 +26,8 @@
 
 #include "cme/shared.hpp"
 #include "common/timing.hpp"
+#include "core/algo/peer.hpp"
+#include "core/types.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 

@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "common/timing.hpp"
+#include "core/types.hpp"
 #include "helper_cme.hpp"
 #include "test_context.hpp"
 
