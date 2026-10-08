@@ -35,7 +35,6 @@
 #include "core/types.hpp"
 #include "helper_util.hpp"
 #include "observe/stats.hpp"
-#include "test_context.hpp"
 
 namespace harness
 {
