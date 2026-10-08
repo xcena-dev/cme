@@ -82,7 +82,8 @@ function(cme_uc_test name target)
     cme_media_test(${name} uc ${target} ${ARGN})
     set_tests_properties(${name} PROPERTIES FIXTURES_REQUIRED ${name}_fixture)
     add_test(NAME ${name}_cleanup COMMAND ${target} --backend uc --case ${name} --cleanup)
-    set_tests_properties(${name}_cleanup PROPERTIES FIXTURES_CLEANUP ${name}_fixture LABELS uc)
+    set_tests_properties(${name}_cleanup PROPERTIES
+        FIXTURES_CLEANUP ${name}_fixture LABELS uc SKIP_RETURN_CODE 77)
 endfunction()
 
 # cme_case(<base> TARGET <exe> [options]) -- register one case on every backend
