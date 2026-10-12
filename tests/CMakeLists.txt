@@ -238,6 +238,7 @@ cme_test_exe(cme-timeout-late-grant-test test_timeout_late_grant.cpp)
 cme_test_exe(cme-format-interrupted-test test_format_interrupted.cpp)
 cme_test_exe(cme-pid-reuse-test test_pid_reuse.cpp)
 cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
+cme_test_exe(cme-admission-late-stake-test test_admission_late_stake.cpp)
 cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
 cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
 cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
@@ -427,6 +428,11 @@ cme_case(pid_reuse TARGET cme-pid-reuse-test STRATEGY request SHM_TIMEOUT 60)
 # line and the case reads no other medium state.
 cme_case(failpoint_admission TARGET cme-failpoint-admission-test STRATEGY request BACKENDS shm
     SHM_TIMEOUT 120)
+
+# A joiner held between reading the lease free and staking it, while another joiner's nonce lands.
+# Skips without CME_FAILPOINT. shm only: the case asserts wall-clock windows on one line.
+cme_case(admission_late_stake TARGET cme-admission-late-stake-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 60)
 
 # A holder killed while handing over, on either side of the record write. All four, because which
 # of them even reaches transferOwnership differs: Peterson vacates on release where the others hand

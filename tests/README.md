@@ -57,6 +57,7 @@ A case registered with all four strategies appears four times per backend.
 | Admission | `test_admission_race.cpp` | `admission_race` | N processes claim peer slots at once, slots >= N: distinct slots, no spurious NoFreeSlot |
 | Admission | `test_admission_stress.cpp` | `admission_stress` | The same protocol over many rounds behind a spin barrier, exact-fit and over-subscribed. The only lock-free multi-writer race in cme |
 | Admission | `test_readmit_gate.cpp` | `readmit_gate` (request) | C1: a dead peer's slot is re-claimable only after recovery marks it None |
+| Admission | `test_admission_late_stake.cpp` | `admission_late_stake` (shm, request) | A joiner whose stake lands after another joiner confirmed gives up, and gets in only by stealing the line after LeaseTimeout. Skips without `CME_FAILPOINT` |
 | Registry | `test_domain_lifecycle.cpp` | `domain_lifecycle` | create/delete over the control domain: duplicate, ceiling, delete, slot reuse, foreign participant, unknown name |
 | Registry | `test_domain_incarnation.cpp` | `domain_incarnation` (request) | A reused domain slot is a new incarnation: `generation` rises, `epoch` is not reset, the old name resolves to nothing, and a peer holding the old view is refused until it re-joins |
 | Registry | `test_create_race.cpp` | `create_race` | N processes createDomain at once; the control lock serialises the registry, so none is lost |

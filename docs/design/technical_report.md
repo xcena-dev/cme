@@ -761,6 +761,8 @@ Both are confined to one word.
   Claiming that slot in the first place happens *before* membership: the joiner owns nothing yet, so it cannot `lock`, and several joiners may reach for the same free slots at once.
   That contention needs its own arbitration point — a separate cacheline, *AdmissionControl*, holding a nonce lease.
   The joiner stakes a random nonce, waits one settle interval, then re-reads: if its nonce survived it holds the lease, if not it lost and retries.
+  A stake flushed more than a fixed stake window after the read that found the lease free gives up without settling.
+  Such a stake could land after another joiner had already confirmed ([§11.4](#114-the-lww-settle-window)).
   A lease left unchanged for a fixed steal window is presumed dead and stolen, so a crash mid-claim never wedges later joiners.
   Holding the lease, the joiner reserves the lowest free slot.
 - **Recovery — the claim.** Which peer is a target's RA is derived from membership — under a ring-order policy, for instance, its ring neighbour — and membership shifts as peers join and leave.
@@ -1291,8 +1293,19 @@ A staker that re-reads before the last stake finds its own nonce standing and de
 What it must clear is therefore the worst case, not the 99th percentile.
 Neither tail statistic is stable here.
 A staker preempted between its read and its store lands anywhere above the median, which is why the p99 row is not monotone in N and the worst observation moves from run to run: it is kernel preemption and IRQ work on cores we do not isolate, not line contention.
-No finite settle is a proof against an arbitrarily long preemption either — that a staker is not descheduled for longer than the settle is an assumption the design names rather than measures.
 So the constant is sized off the worst observation with room above it — 5 ms against a worst of ~1 ms — which costs nothing on a path taken only on a cold join or a crash.
+
+No finite settle is a proof against an arbitrarily long preemption.
+Admission therefore times the gap between a joiner's read and its stake.
+A joiner starts a timer just before the read that finds the lease free or stalled.
+The joiner checks the timer once its stake is flushed.
+A stake flushed more than 1 ms after that read gives up without settling.
+A stake that passes becomes visible less than 1 ms plus two store-visibility lags after the stake it raced was flushed.
+The 5 ms settle outlasts that span as long as a flushed store becomes visible to other hosts within 2 ms.
+A stake that gave up may still overwrite a holder's nonce.
+Later joiners then wait out the steal window before they get in.
+The recovery claim needs no timer.
+Its confirmed RA re-reads its claim word on every tick and stands down when a late stake overwrites it ([§10.4](#104-recovery-authority)).
 
 ### 11.5 Recovery latency
 

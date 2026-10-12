@@ -81,6 +81,13 @@ inline constexpr std::uint32_t SpinPausesMax = 1;
 // LWW recheck window after staking the admission lease. Sized off the worst observed settle
 // (~1ms), not the p50; cold-join/crash only, so the slack costs nothing hot.
 inline constexpr auto ClaimSettle = timing::Millis{5};
+// Longest a joiner may take from reading the lease free or stalled to flushing its stake. A slower
+// stake gives up without settling. Such a stake may land after another joiner's confirming re-read.
+inline constexpr timing::Millis StakeWindow{1};
+// An assumed bound on how long a flushed store stays invisible to another host's read.
+inline constexpr timing::Millis StoreVisibilityLag{2};
+static_assert(StakeWindow + StoreVisibilityLag * 2 <= ClaimSettle,
+              "a stake inside StakeWindow must land before an earlier staker's re-read");
 // A held lease whose nonce is unchanged this long is presumed dead and stolen. Conservative:
 // a false steal risks a double claim, and the real hold is a few reads plus two flushes.
 inline constexpr auto LeaseTimeout = timing::Millis{200};
