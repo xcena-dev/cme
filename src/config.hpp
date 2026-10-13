@@ -81,13 +81,19 @@ inline constexpr std::uint32_t SpinPausesMax = 1;
 // LWW recheck window after staking the admission lease. Sized off the worst observed settle
 // (~1ms), not the p50; cold-join/crash only, so the slack costs nothing hot.
 inline constexpr auto ClaimSettle = timing::Millis{5};
-// Longest a joiner may take from reading the lease free or stalled to flushing its stake. A slower
-// stake gives up without settling. Such a stake may land after another joiner's confirming re-read.
+// Longest a joiner or a recovery authority may take from reading the line it stakes to flushing the
+// stake. A slower stake gives up without settling, since it may land after another's confirmation.
 inline constexpr timing::Millis StakeWindow{1};
 // An assumed bound on how long a flushed store stays invisible to another host's read.
 inline constexpr timing::Millis StoreVisibilityLag{2};
 static_assert(StakeWindow + StoreVisibilityLag * 2 <= ClaimSettle,
               "a stake inside StakeWindow must land before an earlier staker's re-read");
+// An assumed bound on how long a recovery authority stalls between re-reading its claim and the
+// write that read guards. The same order as LeaseTimeout, which assumes this of admission.
+inline constexpr timing::Millis RecoveryTickStall{100};
+// A recovery stake that landed late stays this long before it is withdrawn. It may have deposed an
+// authority mid-write, and no stake may start until that write has landed.
+inline constexpr auto LateStakeHold = RecoveryTickStall + StoreVisibilityLag * 2;
 // A held lease whose nonce is unchanged this long is presumed dead and stolen. Conservative:
 // a false steal risks a double claim, and the real hold is a few reads plus two flushes.
 inline constexpr auto LeaseTimeout = timing::Millis{200};

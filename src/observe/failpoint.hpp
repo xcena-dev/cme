@@ -53,6 +53,7 @@ enum class Boundary : std::uint32_t
     LeaveBeforeHandoff,  // BeginLeave: Leaving published, domains still held
     LeaveBeforeNone,     // PublishNone: domains handed off, status not yet None
 
+    RecoveryBeforeStake,   // the claim read free or orphaned, our authority not yet written
     RecoveryAfterClaim,    // the claim is won, the slot is not yet Recovering
     TakeoverMidLoop,       // TakeoverOwnership: some of the dead peer's domains moved
     RecoveryBeforeScrub,   // claim retracted, policy-private state not yet scrubbed
@@ -96,6 +97,8 @@ enum class Boundary : std::uint32_t
             return "leave.before_handoff";
         case Boundary::LeaveBeforeNone:
             return "leave.before_none";
+        case Boundary::RecoveryBeforeStake:
+            return "recovery.before_stake";
         case Boundary::RecoveryAfterClaim:
             return "recovery.after_claim";
         case Boundary::TakeoverMidLoop:

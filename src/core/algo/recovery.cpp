@@ -12,9 +12,12 @@
 
 #include "core/algo/recovery.hpp"
 
+#include <cstdint>
+
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/layout/geometry.hpp"
+#include "core/policy/recovery_authority.hpp"
 #include "core/policy/successor_policy.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
@@ -88,27 +91,42 @@ void finishRecoveryCleanup(LocalPeerState& peerState, PeerId deadPeerId)
         });
 }
 
-// TLA+ TakeoverOwnership: seize the dead peer's domains. Returns true while the pass still finds
-// work, which extends the FINISH span. The truth record's holder is the sole authority
-// (waitForOwnership settles on it), so a shadow ahead of it is only an incomplete handoff.
-bool takeoverDomainsHeldByDeadPeer(LocalPeerState& peerState, PeerId deadPeerId)
+// What one takeover pass did. Touched extends the FINISH span; Deposed leaves the rest of the pass
+// to whoever holds the claim now.
+enum class TakeoverPass : std::uint8_t
 {
-    bool touched = false;
+    Quiet,
+    Touched,
+    Deposed,
+};
+
+// TLA+ TakeoverOwnership: seize the dead peer's domains. The truth record's holder is the sole
+// authority (waitForOwnership settles on it), so a shadow ahead of it is only an incomplete handoff.
+TakeoverPass takeoverDomainsHeldByDeadPeer(LocalPeerState& peerState,
+                                           const RecoveryAuthorityPolicy& recoveryAuthority, PeerId deadPeerId)
+{
+    auto pass = TakeoverPass::Quiet;
     for (const DomainId domainId : peerState.getDomainIdRange())
     {
         auto record = coherency::get(peerState.getDomainRecord(domainId), peerState.getCoherencyMode());
         if (record.getHolder() == deadPeerId)
         {
+            // Per write rather than per tick: a late stake can depose us mid-pass, and the next
+            // authority must not meet a write of ours made from a read older than its own.
+            if (!recoveryAuthority.isClaimHeld(peerState, deadPeerId))
+            {
+                return TakeoverPass::Deposed;
+            }
             // Jump clear of an in-flight shadow, which can sit an epoch above the truth:
             // reusing that epoch would break EpochImpliesIdentity.
             record.epoch = record.epoch + RecoverySeizeEpochGap;
             ownership_transfer::takeoverOwnership(peerState, domainId, record);
             OBSERVE_EVENT(Event::RecoveryTakeover, peerState, domainId);
-            touched = true;
+            pass = TakeoverPass::Touched;
             CME_FAILPOINT_REACH(failpoint::Boundary::TakeoverMidLoop);
         }
     }
-    return touched;
+    return pass;
 }
 
 }  // namespace
@@ -160,14 +178,21 @@ void serviceRecovery(LocalPeerState& peerState)
     // rather than deciding on its own that none is left. Refilling (not re-arming from scratch)
     // keeps the Recovering stamp and the participation clear untouched -- both write a line the
     // target's own poll thread also owns.
-    if (takeoverDomainsHeldByDeadPeer(peerState, targetPeerId))
+    switch (takeoverDomainsHeldByDeadPeer(peerState, recoveryAuthority, targetPeerId))
     {
-        peerState.setRecoveryCycles(targetPeerId);
-        return;
+        case TakeoverPass::Touched:
+            peerState.setRecoveryCycles(targetPeerId);
+            return;
+        case TakeoverPass::Deposed:
+            return;  // the next tick's claim() sees the loss and drops the latch
+        case TakeoverPass::Quiet:
+            break;
     }
-    if (peerState.isRecoveryOngoing())
+    // Finish only once the span has run out quiet, and never after being deposed: the finish frees
+    // the slot for re-admission.
+    if (peerState.isRecoveryOngoing() || !recoveryAuthority.isClaimHeld(peerState, targetPeerId))
     {
-        return;  // quiet this tick, but the span has not run out
+        return;
     }
 
     // Retract the target's own claims BEFORE freeing its slot: once None it can re-admit

@@ -68,6 +68,7 @@ A case registered with all four strategies appears four times per backend.
 | Recovery | `test_recovery_resume.cpp` | `recovery_resume` x4 strategies | A peer stranded in Recovering by an RA that died mid-recovery is resumed to None |
 | Recovery | `test_recovery_stake_gate.cpp` | `recovery_stake_gate` x4 strategies | A live claim word is left alone; a dead RA's is taken over |
 | Recovery | `test_recovery_zombie_claim.cpp` | `recovery_zombie_claim` x4 strategies | A ghost claim authored by a peer that has since re-admitted is retracted at FINISH |
+| Recovery | `test_recovery_late_stake.cpp` | `recovery_late_stake` (shm, request) | A claim stake that lands after another RA confirmed is held, not settled, until that RA's stalled takeover write lands, so no domain ends with two holders at one epoch. Skips without `CME_FAILPOINT` |
 | Recovery | `test_orphan_churn.cpp` | `orphan_churn` x4 strategies | Recovery while the registry mutates, which the scripted tests never do |
 | Recovery | `test_departure_strand.cpp` | `departure_strand` (order) | C4: a grant landing on a departing peer must not strand the domain |
 | Recovery | `test_demand_scrub.cpp` | `demand_scrub` (request) | R3: recovery clears a dead requester's demand line, so the grant scan stops naming a corpse as a candidate. The Request-family analogue of what `agg_recovery` checks for the aggregator record |

@@ -18,6 +18,7 @@
 #include "core/policy/recovery_authority_layout.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
+#include "observe/failpoint.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
 
@@ -58,14 +59,38 @@ getClaimSlot(const LocalPeerState& peerState, PeerId deadPeerId) noexcept
     return isClaimantGone(peerState, static_cast<PeerId>(recoveryClaim.recoveryAuthority));
 }
 
+[[nodiscard]] bool isOwnClaim(const LocalPeerState& peerState, PeerId target)
+{
+    const auto claim = coherency::get(getClaimSlot(peerState, target), peerState.getCoherencyMode());
+    return claim.isValidMagic() && claim.isAuthoredBy(peerState.getPeerId());
+}
+
+// Withdraw our stake on @target. Only a word we authored: a later LWW writer's claim stands.
+void retractOwnClaim(const LocalPeerState& peerState, PeerId target)
+{
+    const auto self = peerState.getPeerId();
+    coherency::rmwIfTrue(
+        getClaimSlot(peerState, target), peerState.getCoherencyMode(),
+        [self](auto* recoveryClaim)
+        {
+            if (!recoveryClaim->isValidMagic() || !recoveryClaim->isAuthoredBy(self))
+            {
+                return false;
+            }
+            recoveryClaim->retract();
+            return true;
+        });
+}
+
 }  // namespace
 
 PeerId ChainRecoveryAuthorityPolicy::getRecoveryTarget(const LocalPeerState& peerState) const
 {
-    // While settling/won on a target, stay locked on it regardless of ring order.
-    if (settleTarget_ != NoPeer)
+    // While settling, won, or holding a late stake on a target, stay locked on it regardless of
+    // ring order: claim() runs only for the target returned here.
+    if (claimTarget_ != NoPeer)
     {
-        return settleTarget_;
+        return claimTarget_;
     }
 
     // First alive peer clockwise = this node's RA target. Crashed-but-uncleaned peers stay
@@ -95,10 +120,13 @@ PeerId ChainRecoveryAuthorityPolicy::getRecoveryTarget(const LocalPeerState& pee
 
 bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadPeerId)
 {
-    const PeerId self = peerState.getPeerId();
+    const auto self = peerState.getPeerId();
 
-    if (settleTarget_ == NoPeer)
+    if (claimTarget_ == NoPeer)
     {
+        // Opened before the read, as admission does: a stake flushed after it closes may land
+        // behind another authority's confirmation, so it never settles.
+        const timing::Deadline stakeWindow{StakeWindow};
         // Stake only when the right is up for grabs: unclaimed, held by a dead RA, or already
         // ours. A live claim means yield. The claim line is no-cache, so the lambda sees the
         // current LWW winner without a settle race.
@@ -115,6 +143,7 @@ bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadP
                 {
                     return false;  // a live RA holds the claim -> yield, no write
                 }
+                CME_FAILPOINT_REACH(failpoint::Boundary::RecoveryBeforeStake);
                 recoveryClaim->recoveryAuthority = self;
                 return true;
             });
@@ -122,53 +151,56 @@ bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadP
         {
             return false;  // yielded to a live claim or invalid slot; retry next tick
         }
-        settleTarget_ = deadPeerId;
-        settleWindow_ = timing::Deadline{ClaimSettle};
-        return false;  // settling, not confirmed yet
+        lateStake_ = stakeWindow.expired();
+        claimTarget_ = deadPeerId;
+        claimWindow_ = timing::Deadline{lateStake_ ? LateStakeHold : ClaimSettle};
+        return false;  // settling, or holding a late stake
     }
 
-    if (!settleWindow_.expired())
+    if (!claimWindow_.expired())
     {
-        return false;  // still settling
+        return false;
+    }
+
+    // A late stake stays until the authority it may have deposed has finished the write it was
+    // making, so no other stake starts meanwhile. Then it goes, and the claim is open again.
+    if (lateStake_)
+    {
+        resetClaim(peerState);
+        return false;
     }
 
     // Settle window elapsed: confirm win/loss by re-reading the slot (a later
     // cross-host LWW write may have overwritten us).
-    const auto recoveryClaim = coherency::get(getClaimSlot(peerState, deadPeerId), peerState.getCoherencyMode());
-    if (recoveryClaim.isValidMagic() && recoveryClaim.isAuthoredBy(self))
+    if (isOwnClaim(peerState, deadPeerId))
     {
         return true;  // won
     }
-    settleTarget_ = NoPeer;
+    claimTarget_ = NoPeer;
     return false;  // lost
+}
+
+bool ChainRecoveryAuthorityPolicy::isClaimHeld(const LocalPeerState& peerState, PeerId deadPeerId) const
+{
+    return isOwnClaim(peerState, deadPeerId);
 }
 
 void ChainRecoveryAuthorityPolicy::resetClaim(LocalPeerState& peerState)
 {
-    // Retract, then drop the latch so getRecoveryTarget falls back to the ring. Only our own
-    // authored word: a later LWW writer may have overwritten us, and their claim stands.
-    if (settleTarget_ != NoPeer)
+    // Retract, then drop the latch so getRecoveryTarget falls back to the ring.
+    if (claimTarget_ != NoPeer)
     {
-        const PeerId self = peerState.getPeerId();
-        coherency::rmwIfTrue(getClaimSlot(peerState, settleTarget_), peerState.getCoherencyMode(), [self](auto* recoveryClaim)
-                             {
-                                 if (!recoveryClaim->isValidMagic() ||
-                                     !recoveryClaim->isAuthoredBy(self))
-                                 {
-                                     return false;
-                                 }
-                                 recoveryClaim->retract();
-                                 return true;
-                             });
+        retractOwnClaim(peerState, claimTarget_);
     }
-    settleTarget_ = NoPeer;
+    claimTarget_ = NoPeer;
+    lateStake_ = false;
 }
 
 void ChainRecoveryAuthorityPolicy::resetClaim(LocalPeerState& peerState, PeerId target)
 {
     // Only when actually latched on @target; otherwise it came from the ring walk and we
     // hold no claim to drop.
-    if (settleTarget_ == target)
+    if (claimTarget_ == target)
     {
         resetClaim(peerState);
     }

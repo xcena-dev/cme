@@ -35,13 +35,17 @@ public:
     RecoveryAuthorityPolicy& operator=(RecoveryAuthorityPolicy&&) = delete;
 
     // ── ops ────────────────────────────────────────────────────────
-    // Nearest Active predecessor, so the watcher is by construction that peer's RA. Stays
-    // locked on an in-progress settle target regardless of ring order; NoPeer if solo.
+    // Nearest Active predecessor, so the watcher is by construction that peer's RA. Stays locked
+    // on a settle target or a held late stake regardless of ring order; NoPeer if solo.
     [[nodiscard]] virtual PeerId getRecoveryTarget(const LocalPeerState& peerState) const = 0;
 
-    // One tick of the 2-phase LWW claim for @deadPeerId: stake, settle for cross-host
-    // visibility, confirm. True only once the window elapsed with our claim still standing.
+    // One tick of the 2-phase LWW claim for @deadPeerId; true once settled with our claim standing.
+    // A stake flushed past StakeWindow never settles: it is held for LateStakeHold, then withdrawn.
     [[nodiscard]] virtual bool claim(LocalPeerState& peerState, PeerId deadPeerId) = 0;
+
+    // Whether the claim on @deadPeerId still names us. A confirmed RA asks before each write for the
+    // target, so one deposed mid-tick stops at its next write rather than its next tick.
+    [[nodiscard]] virtual bool isClaimHeld(const LocalPeerState& peerState, PeerId deadPeerId) const = 0;
 
     // After FINISH: retract our own claim word and clear settle state, so the policy stops
     // locking onto the now-freed peer.
@@ -75,6 +79,7 @@ public:
     // ── ops ────────────────────────────────────────────────────────
     [[nodiscard]] PeerId getRecoveryTarget(const LocalPeerState& peerState) const override;
     [[nodiscard]] bool claim(LocalPeerState& peerState, PeerId deadPeerId) override;
+    [[nodiscard]] bool isClaimHeld(const LocalPeerState& peerState, PeerId deadPeerId) const override;
     void resetClaim(LocalPeerState& peerState) override;
     void resetClaim(LocalPeerState& peerState, PeerId target) override;
     void retractClaimsBy(LocalPeerState& peerState, PeerId recoveredPeerId) override;
@@ -82,11 +87,12 @@ public:
     void formatClaimRegion(std::uint8_t* base, std::uint32_t maxPeers) const override;
 
 private:
-    PeerId settleTarget_{NoPeer};  // dead peer we are settling/won a claim on
+    PeerId claimTarget_{NoPeer};  // dead peer we are settling, won, or holding a late stake on
+    bool lateStake_{false};       // the stake on claimTarget_ landed late: held, then withdrawn
 
-    // A zero budget, so it reads as expired until a claim opens a real one. settleTarget_ is what
-    // says whether a window is open, and a second field for that would be one more to keep in step.
-    timing::Deadline settleWindow_{timing::Nanos::zero()};
+    // Settle, or the late-stake hold. A zero budget, so it reads as expired until a claim opens a
+    // real one; claimTarget_ says whether a window is open.
+    timing::Deadline claimWindow_{timing::Nanos::zero()};
 };
 
 // Factory: returns ChainRecoveryAuthorityPolicy; future kinds selected here.

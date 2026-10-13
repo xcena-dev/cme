@@ -239,6 +239,7 @@ cme_test_exe(cme-format-interrupted-test test_format_interrupted.cpp)
 cme_test_exe(cme-pid-reuse-test test_pid_reuse.cpp)
 cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
 cme_test_exe(cme-admission-late-stake-test test_admission_late_stake.cpp)
+cme_test_exe(cme-recovery-late-stake-test test_recovery_late_stake.cpp)
 cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
 cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
 cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
@@ -432,6 +433,11 @@ cme_case(failpoint_admission TARGET cme-failpoint-admission-test STRATEGY reques
 # A joiner held between reading the lease free and staking it, while another joiner's nonce lands.
 # Skips without CME_FAILPOINT. shm only: the case asserts wall-clock windows on one line.
 cme_case(admission_late_stake TARGET cme-admission-late-stake-test STRATEGY request BACKENDS shm
+    SHM_TIMEOUT 60)
+
+# A recovery authority held between reading the claim free and staking it, while another confirms
+# and stops inside its takeover. Skips without CME_FAILPOINT.
+cme_case(recovery_late_stake TARGET cme-recovery-late-stake-test STRATEGY request BACKENDS shm
     SHM_TIMEOUT 60)
 
 # A holder killed while handing over, on either side of the record write. All four, because which

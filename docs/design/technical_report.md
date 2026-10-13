@@ -768,6 +768,8 @@ Both are confined to one word.
 - **Recovery — the claim.** Which peer is a target's RA is derived from membership — under a ring-order policy, for instance, its ring neighbour — and membership shifts as peers join and leave.
   So during churn two peers can transiently each see themselves as the RA for the same dead target, with no pre-assigned writer to defer to.
   Last-writer-wins collapses them to one: an RA stakes its identity over the target's *RecoveryClaim* word — only where a fresh read shows it free or naming a dead RA — then re-reads after a settle to confirm it survived (the same stake-and-confirm shape as admission).
+  The stake is timed as admission's is: one flushed more than the stake window after its read never settles, 
+  and stays for a fixed hold before its staker withdraws it ([§11.4](#114-the-lww-settle-window)).
   The survivor runs the recovery; the loser backs off ([§10.4](#104-recovery-authority)).
   Crash-stop plus silence-timeout detection already make a genuine double-RA rare; LWW covers the transient overlap churn can still produce.
 
@@ -1053,10 +1055,13 @@ Read against the design space above, the claim is contention's residue: the race
 - **At the word — the stake-gate.** A contender stakes over a claim word it has just read fresh (the claim line is never cached, [§9.5](#95-dram-local-state)), and only where the word is free or names a dead RA; a live claim means yield, without writing.
   What this leaves exploitable is only a write still in flight.
 - **In flight — the settle.** Contenders whose stakes race each other all re-read after the settle window; one word absorbed every stake, so at most one finds its own value standing, and every other stands down.
-- **After everything — the re-read backstop.** The confirmed RA re-reads its claim word on every poll tick for as long as it recovers; a stake that slipped every gate dethrones it within one tick, and the at-most-one-tick overlap writes nothing unguarded — the takeover span already re-seizes records against exactly this kind of staleness ([§7.1](#71-the-recovery-procedure)).
+- **Late — the stake window and the hold.** A stake flushed past the stake window never settles.
+  It stays for the late-stake hold, while every other contender yields to it, and is then withdrawn.
+- **After everything — the re-read before each write.** The confirmed RA re-reads its claim word at the start of every poll tick and right before each takeover write and the commit.
+  It stops at the first re-read that finds the word overwritten.
 
 The last stake the gates admit is the final authority.
-The settle window's size buys efficiency, not correctness — it sets how often the later gates engage.
+The settle and the hold are safety bounds, sized in [§11.4](#114-the-lww-settle-window).
 
 The claim is the policy's, not the core's.
 Uniqueness is produced by selection *plus* the claim, and splitting the pair would smear one decision across two owners — so the RA policy owns both: the claim word lives in a policy-private FAM region the policy itself sizes and formats (as the successor policies do their demand region, [§10.2](#102-successor-selection-implementation)), and the stake-then-settle arbitration runs inside the policy, spread across poll ticks so a settling peer never stalls its own heartbeat.
@@ -1304,8 +1309,11 @@ A stake that passes becomes visible less than 1 ms plus two store-visibility lag
 The 5 ms settle outlasts that span as long as a flushed store becomes visible to other hosts within 2 ms.
 A stake that gave up may still overwrite a holder's nonce.
 Later joiners then wait out the steal window before they get in.
-The recovery claim needs no timer.
-Its confirmed RA re-reads its claim word on every tick and stands down when a late stake overwrites it ([§10.4](#104-recovery-authority)).
+The recovery claim times its stake the same way.
+A late stake there may overwrite a confirmed RA that is about to write a record.
+Withdrawn at once, it would let a new RA take over before that write lands, leaving one domain with two holders.
+So it is held for 100 ms plus two store-visibility lags, during which every other contender yields, and then withdrawn.
+Like admission's steal window, the hold assumes the deposed RA never stalls longer than the hold between re-reading its claim and writing ([§10.4](#104-recovery-authority)).
 
 ### 11.5 Recovery latency
 
