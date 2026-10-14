@@ -27,6 +27,7 @@
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/event.hpp"
+#include "observe/latency.hpp"
 #include "observe/observe.hpp"
 #include "util/coherency.hpp"
 #include "util/endian.hpp"
@@ -237,12 +238,16 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
                                        const timing::Deadline& deadline)
 {
     // Fast path: already holder (single-peer or cached residency).
+    OBSERVE_LATENCY_BEGIN(Resident);
     if (ownership_transfer::holdAndCheckResident(peerState, domainId))
     {
+        OBSERVE_LATENCY_END(Resident, peerState, domainId);
         return OwnershipResult::Arrived;
     }
 
+    OBSERVE_LATENCY_BEGIN(Raise);
     updateDemandAndSlice(peerState, domainId, true);  // the request signal + its slice
+    OBSERVE_LATENCY_END(Raise, peerState, domainId);
     OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     // Plain drop, no slice write. A slice late to clear attracts one grant this peer forwards on
     // (harmless, see transferHeldDomains); a slice late to appear costs a full config::acquire::Timeout. The
@@ -268,6 +273,7 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
 
 void RequestAggPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 {
+    OBSERVE_LATENCY_BEGIN(Unlock);
     auto& domain = peerState.getDomain(domainId);
 
     domain.unpinOwnership();
@@ -278,11 +284,15 @@ void RequestAggPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
         OBSERVE_EVENT(Event::OwnershipTransferable, peerState, domain.getOwnershipPinStart());
         DomainBitmap released;
         released.set(domainId);
-        if (transferHeldDomainsAgg(peerState, released))
+        OBSERVE_LATENCY_BEGIN(Scan);
+        const bool granted = transferHeldDomainsAgg(peerState, released);
+        OBSERVE_LATENCY_END(Scan, peerState, domainId);
+        if (granted)
         {
             OBSERVE_EVENT(Event::OwnershipTransferOnRelease, peerState);
         }
     }
+    OBSERVE_LATENCY_END(Unlock, peerState, domainId);
 }
 
 void RequestAggPolicy::pollCycle(LocalPeerState& peerState)
