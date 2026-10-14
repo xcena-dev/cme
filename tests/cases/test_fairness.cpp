@@ -250,6 +250,8 @@ struct PeerResult_t
     std::uint64_t latCount[LatCount]{};
     // Token handoff path counters (cumulative, incl warmup) -- which path hands off.
     std::uint64_t xferOnRelease{0}, xferOnPoll{0};
+    // False when the library was built without CME_STATS, so every counter above stays zero.
+    bool countersLive{false};
     // Per-acquire wall latency (lock() call -> Guard returned), elapsedNs. Bench-level
     // measurement spanning fast-path AND wait-path, complementing telemetry
     // waitTime (wait-phase only). Filled by workers under latMutex.
@@ -326,6 +328,7 @@ void collectTelemetry(const cme::Peer& peer, PeerResult_t& result, std::uint64_t
     result.lockHoldTime = stats.lockHoldTime;
     result.xferOnRelease = stats.transferOnRelease;
     result.xferOnPoll = stats.transferOnPoll;
+    result.countersLive = stats.countersLive;
     for (std::size_t bucket = 0; bucket < PeerResult_t::LatCount; ++bucket)
     {
         result.latCycles[bucket] = stats.handoffLat.cycles[bucket];
@@ -521,12 +524,25 @@ void printConfig(const Opts_t& opt)
                 opt.iterPerThread * opt.numDomains * opt.threadsPerPeer);
 }
 
+// Whether the library bumped the counters behind wait, hold, spin and the handoff path at all.
+[[nodiscard]] bool hasStatsCounters(const std::vector<PeerResult_t>& results)
+{
+    return !results.empty() && results.front().countersLive;
+}
+
 void printPerPeerTotals(const std::vector<PeerResult_t>& results)
 {
-    std::printf("\nper-peer totals:\n");
+    const bool countersLive = hasStatsCounters(results);
+    std::printf("\nper-peer totals%s:\n", countersLive ? "" : " (wait, hold and spin need a CME_STATS build)");
     for (std::uint32_t peerIndex = 0; peerIndex < results.size(); ++peerIndex)
     {
         const auto& result = results[peerIndex];
+        if (!countersLive)
+        {
+            std::printf("  peer %u: acq=%" PRIu64 " wall=%.1fms dl=%u rc=%d\n", peerIndex, result.totalAcq,
+                        static_cast<double>(result.wallNs) / 1e6, result.deadlineHits.load(), result.returnCode);
+            continue;
+        }
         const auto avgWaitUs =
             result.waitCount ? static_cast<double>(result.waitTime) / static_cast<double>(result.waitCount) / 1000.0 : 0.0;
         const auto avgHoldUs =
@@ -618,12 +634,18 @@ void printHandoffBreakdown(const std::vector<PeerResult_t>& results)
         return (count == 0 || ghz == 0.0) ? 0.0 : static_cast<double>(cycles) / static_cast<double>(count) / ghz;
     };
 
-    const std::uint64_t xferTotal = xferRel + xferPoll;
-    const double relPct = xferTotal ? 100.0 * static_cast<double>(xferRel) / static_cast<double>(xferTotal) : 0.0;
     std::printf("\nhandoff latency breakdown (avg elapsedNs, tsc=%.3f GHz):\n", ghz);
-    std::printf("token handoff path: on_release=%" PRIu64 " (%.1f%%)  on_poll=%" PRIu64
-                " (%.1f%%)\n",
-                xferRel, relPct, xferPoll, 100.0 - relPct);
+    if (hasStatsCounters(results))
+    {
+        const std::uint64_t xferTotal = xferRel + xferPoll;
+        const double relPct = xferTotal ? 100.0 * static_cast<double>(xferRel) / static_cast<double>(xferTotal) : 0.0;
+        std::printf("token handoff path: on_release=%" PRIu64 " (%.1f%%)  on_poll=%" PRIu64 " (%.1f%%)\n", xferRel,
+                    relPct, xferPoll, 100.0 - relPct);
+    }
+    else
+    {
+        std::printf("token handoff path: not counted (needs a CME_STATS build)\n");
+    }
     // One line per LatencyStage; n=0 means unmeasured in this build.
     for (std::uint32_t stageIndex = 0; stageIndex < PeerResult_t::LatCount; ++stageIndex)
     {
