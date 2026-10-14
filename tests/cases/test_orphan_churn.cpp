@@ -271,23 +271,34 @@ void runBody(harness::TestContext& ctx)
     harness::sleepMs(5000);
 
     // ── leak audit: a fresh peer must still create >= (slots - workers) domains. ──
+    // A control-lock timeout is the same churn race the worker loop catches, so the audit retries
+    // it within a budget. Only DomainLimitError ends the count.
+    constexpr std::uint32_t AuditTimeoutBudget = 5;
     std::uint32_t auditCreated = 0;
+    std::uint32_t auditTimeouts = 0;
     {
         cme::Peer audit{region, cme::admission::claimPeerSlot(region)};
-        for (cme::DomainId k = 0; k < DataSlots; ++k)
+        cme::DomainId auditIndex = 0;
+        while (auditIndex < DataSlots && auditTimeouts < AuditTimeoutBudget)
         {
             try
             {
-                (void)audit.createDomain("audit_" + std::to_string(k));
+                (void)audit.createDomain("audit_" + std::to_string(auditIndex));
                 ++auditCreated;
+                ++auditIndex;
             }
             catch (const cme::DomainLimitError&)
             {
                 break;
             }
+            catch (const cme::LockTimeoutError&)
+            {
+                ++auditTimeouts;
+            }
         }
     }
-    harness::log("audit created %u domains (expect >= %u)", auditCreated, DataSlots - Workers);
+    harness::log("audit created %u domains (expect >= %u), %u lock timeouts",
+                 auditCreated, DataSlots - Workers, auditTimeouts);
 
     for (cme::PeerId i = 0; i < Workers; ++i)
     {
@@ -308,6 +319,8 @@ void runBody(harness::TestContext& ctx)
         ctx.check(peers[i].progressed.load() > 0, "worker completed at least one op");
         ctx.check(!peers[i].failed.load(), "worker hit no unexpected fatal");
     }
+    ctx.check(auditTimeouts < AuditTimeoutBudget,
+              "audit's control lock timed out fewer times than its budget");
     ctx.check(auditCreated >= DataSlots - Workers,
               "slots not leaked: fresh peer created >= (slots - workers) domains");
 }
