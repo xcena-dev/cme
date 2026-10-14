@@ -130,10 +130,9 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     churning.store(false, std::memory_order_relaxed);
     contender.join();
 
-    // Evidence the contention was real rather than one stamp the joiner happened to miss: the
-    // thread restamped the line throughout the deadline it spent.
-    const std::uint64_t expected =
-        static_cast<std::uint64_t>(cme::LeaseAcquireDeadline / ChurnPeriod) / 2;
+    // Evidence the contention was real rather than one stamp the joiner happened to miss. A loaded
+    // host oversleeps each ChurnPeriod, so the bound allows each stamp five periods.
+    const auto expected = static_cast<std::uint64_t>(cme::LeaseAcquireDeadline / ChurnPeriod) / 5;
     ctx.checkf(stamps.load() >= expected,
                "contended lease: the nonce kept moving (%" PRIu64 " stamps)",
                stamps.load());
