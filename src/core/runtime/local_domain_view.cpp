@@ -108,16 +108,10 @@ bool LocalDomainView::isHolder() const noexcept
     return ownership_.isHolder.load(std::memory_order_acquire);
 }
 
-bool LocalDomainView::isTurnToCheckOwnership() noexcept
+bool LocalDomainView::isTurnToCheckOwnership(timing::TimePoint now) noexcept
 {
-    // True once every config::poll_thread::OwnershipCheckInterval cycles, then rearms. Poll thread only.
-    if (poll_.ownershipCheckCountdown == 0)
-    {
-        poll_.ownershipCheckCountdown = config::poll_thread::OwnershipCheckInterval - 1;
-        return true;
-    }
-    --poll_.ownershipCheckCountdown;
-    return false;
+    // Poll thread only.
+    return poll_.ownershipCheck.isDue(now, config::poll_thread::OwnershipCheckInterval);
 }
 
 std::uint64_t LocalDomainView::getLastOwnershipEpoch() const noexcept

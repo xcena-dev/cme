@@ -274,4 +274,23 @@ private:
     TimePoint began_;
 };
 
+// The due time of one piece of periodic work. isDue is true once per period of the instants passed
+// in, then rearms, and starts due. Taking the instant lets every gate in one pass share a clock read.
+class PeriodicGate
+{
+public:
+    [[nodiscard]] bool isDue(TimePoint instant, Nanos period) noexcept
+    {
+        if (instant < next_)
+        {
+            return false;
+        }
+        next_ = instant + period;
+        return true;
+    }
+
+private:
+    TimePoint next_{};
+};
+
 }  // namespace timing

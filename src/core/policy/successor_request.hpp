@@ -42,8 +42,8 @@ public:
                       std::uint32_t aggregatorGroups) const noexcept override;
 
 private:
-    // Poll cycles until the next FAM belief reconcile; see pollCycle. Poll-thread only.
-    std::uint32_t reconcileCountdown_{0};
+    // The FAM belief reconcile turn; see pollCycle. Poll-thread only.
+    timing::PeriodicGate reconcileGate_;
 };
 
 }  // namespace cme

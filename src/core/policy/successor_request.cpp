@@ -133,11 +133,9 @@ void RequestPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 
 void RequestPolicy::pollCycle(LocalPeerState& peerState)
 {
-    // Local belief most cycles; a full FAM reconcile every config::poll_thread::OwnershipCheckInterval to adopt
-    // ownership handed over out-of-band, which the belief misses. The period is well under
-    // config::acquire::Timeout, so a waiter on such a domain still resolves within one lock().
-    const bool reconcile = (reconcileCountdown_ == 0);
-    reconcileCountdown_ = reconcile ? config::poll_thread::OwnershipCheckInterval : reconcileCountdown_ - 1;
+    // Local belief most ticks; a full FAM reconcile every OwnershipCheckInterval adopts ownership
+    // handed over out-of-band, which the belief misses.
+    const bool reconcile = reconcileGate_.isDue(peerState.getTickTime(), config::poll_thread::OwnershipCheckInterval);
     const DomainBitmap heldTransferable =
         reconcile ? ownership_transfer::reconcileAndCollectTransferable(peerState)
                   : ownership_transfer::collectTransferableLocal(peerState);

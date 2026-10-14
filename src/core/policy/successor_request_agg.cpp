@@ -292,8 +292,7 @@ void RequestAggPolicy::pollCycle(LocalPeerState& peerState)
 
     // Mostly local-belief collect; periodic FAM reconcile adopts out-of-band ownership
     // (see RequestPolicy::pollCycle).
-    const bool reconcile = (reconcileCountdown_ == 0);
-    reconcileCountdown_ = reconcile ? config::poll_thread::OwnershipCheckInterval : reconcileCountdown_ - 1;
+    const bool reconcile = reconcileGate_.isDue(peerState.getTickTime(), config::poll_thread::OwnershipCheckInterval);
     const DomainBitmap heldTransferable =
         reconcile ? ownership_transfer::reconcileAndCollectTransferable(peerState)
                   : ownership_transfer::collectTransferableLocal(peerState);

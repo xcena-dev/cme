@@ -43,7 +43,7 @@ public:
     [[nodiscard]] bool isHolder() const noexcept;
 
     // ── Poll-thread sequencing ────────────────────────────────────
-    [[nodiscard]] bool isTurnToCheckOwnership() noexcept;
+    [[nodiscard]] bool isTurnToCheckOwnership(timing::TimePoint now) noexcept;
 
     // ── Worker sequencing (phantom-filter baselines) ─────────────
     [[nodiscard]] std::uint64_t getLastOwnershipEpoch() const noexcept;
@@ -66,7 +66,7 @@ private:
 
     struct
     {
-        std::uint32_t ownershipCheckCountdown{0};  // poll-only: cycles until next record check
+        timing::PeriodicGate ownershipCheck;  // poll-only: this domain's record-check turn
     } poll_;
 
     struct

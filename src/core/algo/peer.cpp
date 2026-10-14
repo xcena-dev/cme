@@ -63,7 +63,7 @@ void pollThreadLoop(Peer* peer, LocalPeerState* state)
         // witness as a stall, so anything that delays the bump risks false suspicion.
         ownership_transfer::bumpHeartbeat(*state);
 
-        // One gate per tick: on a scan cycle refresh the cached scan scopes, keeping the
+        // One gate per tick: when a scan is due refresh the cached scan scopes, keeping the
         // admission and Header lines cold. pollCycle reads the same latch.
         if (state->tickPeriodicScan())
         {

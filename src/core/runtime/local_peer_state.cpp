@@ -44,6 +44,7 @@ void LocalPeerState::activate() noexcept
 
 void LocalPeerState::publishSelfSeen() noexcept
 {
+    poll_.tickTime = timing::now();
     const std::uint64_t now = timing::wall<timing::Nanos>();
     publishSelfMember(
         [now](auto& member)
@@ -405,15 +406,14 @@ void LocalPeerState::refreshActiveDomains() noexcept
     activeDomains_ = coherency::get(region_.header, getCoherencyMode()).loadActiveDomains();  // rmb + 64B read
 }
 
+timing::TimePoint LocalPeerState::getTickTime() const noexcept
+{
+    return poll_.tickTime;
+}
+
 bool LocalPeerState::tickPeriodicScan() noexcept
 {
-    if (poll_.periodicScanCountdown == 0)
-    {
-        poll_.periodicScanCountdown = config::poll_thread::ScanRefreshInterval - 1;
-        return true;
-    }
-    --poll_.periodicScanCountdown;
-    return false;
+    return poll_.scanRefresh.isDue(poll_.tickTime, config::poll_thread::ScanRefreshInterval);
 }
 
 LocalPeerState::MemberView_t

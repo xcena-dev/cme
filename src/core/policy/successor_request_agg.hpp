@@ -79,8 +79,8 @@ private:
     // layout so that "not bound yet" stays a state one can test for.
     std::optional<RequestAggLayout> layout_;
 
-    // Poll cycles until the next FAM belief reconcile; see RequestPolicy. Poll-thread only.
-    std::uint32_t reconcileCountdown_{0};
+    // The FAM belief reconcile turn; see RequestPolicy. Poll-thread only.
+    timing::PeriodicGate reconcileGate_;
 };
 
 }  // namespace cme

@@ -43,7 +43,8 @@ public:
     void activate() noexcept;
     void deactivate() noexcept;
     [[nodiscard]] bool isActive() const noexcept;
-    // Stamp self's liveness witness with the current wall clock and write the slot through.
+    // Stamp this tick (poll thread only): the wall-clock liveness witness, written through to the
+    // slot, and the steady tick time the tick's periodic gates compare against.
     void publishSelfSeen() noexcept;
     // Mutate the local truth of self's member slot, then write the whole slot through, as one step
     // under selfMemberMutex_: an older copy from another thread can then never land after this one.
@@ -255,9 +256,11 @@ public:
     [[nodiscard]] bool isOrphanSweepPending() const noexcept;
     void clearOrphanSweep() noexcept;
 
-    // Scan-scope refresh gate (poll thread only). Decrements one countdown and returns
-    // true once every config::poll_thread::ScanRefreshInterval cycles -- call it exactly once per tick; the
-    // poll loop runs the two scan-scope refreshes on a true return. Mutate-on-query.
+    // The steady time publishSelfSeen stamped for this tick (poll thread only).
+    [[nodiscard]] timing::TimePoint getTickTime() const noexcept;
+
+    // Scan-scope refresh gate (poll thread only): true once every ScanRefreshInterval, then rearms.
+    // The poll loop runs both scan-scope refreshes on true. Mutate-on-query.
     bool tickPeriodicScan() noexcept;
 
     // Cold-line re-reads driven by the periodic-scan gate: the admission line (membership
@@ -343,7 +346,8 @@ private:
         PeerId recoveryTarget{NoPeer};    // peer the countdown belongs to; NoPeer when idle
         bool orphanSweepPending{false};   // free orphans next tick
 
-        std::uint32_t periodicScanCountdown{0};  // cycles until next scan-scope refresh (0 => refresh first tick)
+        timing::TimePoint tickTime{};      // read once at the top of each tick
+        timing::PeriodicGate scanRefresh;  // scan-scope refresh turn
     } poll_;
 
     PeerTelemetry_t telemetry_;

@@ -267,7 +267,7 @@ DomainBitmap reconcileAndCollectTransferable(LocalPeerState& peerState)
         // The check turn is the only abdication point, so it reads the truth. Off-turn the
         // shadow is a pre-filter for an arriving grant; naming a group-mate is ignored,
         // since a desynced shared line must never drive abdication.
-        if (domain.isTurnToCheckOwnership() ||
+        if (domain.isTurnToCheckOwnership(peerState.getTickTime()) ||
             coherency::get(peerState.getDomainRecordShadow(domainId, selfPeerId), peerState.getCoherencyMode()).getHolder() == selfPeerId)
         {
             reconcileHolderBelief(peerState, domainId);

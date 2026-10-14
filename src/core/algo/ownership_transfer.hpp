@@ -46,8 +46,8 @@ void takeoverOwnership(LocalPeerState& peerState, DomainId domainId, Geometry::D
 // Must run BEFORE the tournament release so a new winner can't race our NoPeer write.
 void vacateOwnership(LocalPeerState& peerState, DomainId domainId);
 
-// Poll-thread liveness tick: stamps Geometry::Member_t::lastSeenNanos with the
-// current wall clock, then mirrors poll/worker CPU times into the profile slot.
+// Poll-thread liveness tick: stamps the tick time and Geometry::Member_t::lastSeenNanos,
+// then mirrors poll/worker CPU times into the profile slot.
 void bumpHeartbeat(LocalPeerState& peerState);
 
 // Block until this peer's record line names us at a newer epoch (EpochImpliesIdentity), or

@@ -27,14 +27,15 @@ inline constexpr std::uint32_t SpinPausesMax = 1;
 inline constexpr auto WithdrawSettle = timing::Micros{10};
 }  // namespace acquire
 
-// Poll thread: its tick, and the periodic passes it makes (in ticks).
+// Poll thread: its tick, and the periodic passes it makes. Periods are time, not ticks, because a
+// loaded core stretches a tick to milliseconds.
 namespace poll_thread
 {
 inline constexpr auto Interval = timing::Micros{10};
 // Per domain: reconcile holder belief with the record, to adopt a handoff written only there.
-inline constexpr std::uint32_t OwnershipCheckInterval = 1024;
+inline constexpr auto OwnershipCheckInterval = timing::Millis{50};
 // Re-read the cached scan scopes: the admission line (new joiners) and the active-domain bitmap.
-inline constexpr std::uint32_t ScanRefreshInterval = 1024;
+inline constexpr auto ScanRefreshInterval = timing::Millis{50};
 }  // namespace poll_thread
 
 // Membership: the member-slot cache and a clean departure.
@@ -95,5 +96,7 @@ static_assert(stake::Window + stake::StoreVisibilityLag * 2 <= stake::Settle,
               "a stake inside Window must land before an earlier staker's re-read");
 static_assert(recovery::QuietCycles * poll_thread::Interval >= membership::LeaveDrainWindow,
               "the quiet span must cover the departure drain");
+static_assert((poll_thread::OwnershipCheckInterval + poll_thread::ScanRefreshInterval) * 4 <= acquire::Timeout,
+              "a waiter must see a scan refresh and a reconcile well within one acquire");
 
 }  // namespace cme::config
