@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -71,44 +72,64 @@ struct WorkerContext_t
     std::uint32_t iterPerPeer;
 };
 
+// Counts this peer in at one line, then waits until every peer has arrived.
+void arriveAndWait(std::atomic<std::uint32_t>& line, std::uint32_t numPeers)
+{
+    line.fetch_add(1, std::memory_order_acq_rel);
+    while (line.load(std::memory_order_acquire) < numPeers)
+    {
+        std::this_thread::yield();
+    }
+}
+
 // One peer's whole life: join the start line, warm the caches, acquire M times, wait for the
 // others to finish. An exception is recorded rather than thrown on, because a thread that
 // escapes its body takes the process down with it.
 void runWorker(const WorkerContext_t& shared, std::uint32_t pid)
 {
+    WorkerResult_t& result = shared.results[pid];
+    const auto recordFailure = [&result](const std::exception& error)
+    {
+        result.ok = false;
+        result.err = error.what();
+    };
+
+    // A failed peer still passes both lines. Skipping one leaves the rest spinning there until
+    // ctest's timeout, and the recorded failure never prints.
+    std::optional<cme::Peer> peer;
     try
     {
-        cme::Peer peer{shared.region, pid};
-
-        // Wait at the start-line so peers contend concurrently.
-        shared.atStart.fetch_add(1, std::memory_order_release);
-        while (shared.atStart.load(std::memory_order_acquire) < shared.numPeers)
-        {
-            std::this_thread::yield();
-        }
-
-        // Every peer is Active in FAM, but the DRAM member caches refresh only per tick. Warm
-        // them so we time steady-state handoff, not the cold-start transient.
-        std::this_thread::sleep_for(timing::Millis{20});
-        for (std::uint32_t i = 0; i < shared.iterPerPeer; ++i)
-        {
-            auto guard = peer.lock(0);
-            ++shared.results[pid].acquires;
-        }
-
-        // End barrier: an early leaver's None status could route a still-running peer's token
-        // to a departed peer.
-        shared.atEnd.fetch_add(1, std::memory_order_acq_rel);
-        while (shared.atEnd.load(std::memory_order_acquire) < shared.numPeers)
-        {
-            std::this_thread::yield();
-        }
+        peer.emplace(shared.region, pid);
     }
     catch (const std::exception& error)
     {
-        shared.results[pid].ok = false;
-        shared.results[pid].err = error.what();
+        recordFailure(error);
     }
+
+    // Wait at the start-line so peers contend concurrently.
+    arriveAndWait(shared.atStart, shared.numPeers);
+    if (peer)
+    {
+        try
+        {
+            // Every peer is Active in FAM, but the DRAM member caches refresh only per tick. Warm
+            // them so we time steady-state handoff, not the cold-start transient.
+            std::this_thread::sleep_for(timing::Millis{20});
+            for (std::uint32_t cycle = 0; cycle < shared.iterPerPeer; ++cycle)
+            {
+                auto guard = peer->lock(0);
+                ++result.acquires;
+            }
+        }
+        catch (const std::exception& error)
+        {
+            recordFailure(error);
+        }
+    }
+
+    // End barrier: an early leaver's None status could route a still-running peer's token
+    // to a departed peer.
+    arriveAndWait(shared.atEnd, shared.numPeers);
 }
 
 void runOne(harness::TestContext& ctx, const Scenario_t& scenario)
