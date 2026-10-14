@@ -78,7 +78,11 @@ inline void wmb(const void* addr, std::size_t len, Mode mode) noexcept
         // clwb may keep a clean copy in this cache, which is safe because every read flushes first in rmb.
         for (auto line = base; line < end; line += CacheLineBytes)
         {
+#if defined(__CLWB__)
             _mm_clwb(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
+#else
+            _mm_clflushopt(reinterpret_cast<void*>(line));  // NOLINT(performance-no-int-to-ptr)
+#endif
         }
     }
     _mm_sfence();

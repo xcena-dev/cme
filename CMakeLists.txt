@@ -171,7 +171,6 @@ target_compile_options(cme PRIVATE
 add_library(cme_isa INTERFACE)
 target_compile_options(cme_isa INTERFACE
     -mclflushopt
-    -mclwb
     $<$<BOOL:${CME_NATIVE_ARCH}>:-march=native>
 )
 
