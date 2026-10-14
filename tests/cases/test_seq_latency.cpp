@@ -3,9 +3,9 @@
 //
 // test_seq_latency.cpp -- uncontended sequential lock-acquire latency bench.
 //
-// One lock at a time from a single driver loop: pick a random peer and data domain,
-// measure peer.lock(domain), release, repeat. No contention or queueing, so the number is
-// the pure acquire cost, dominated by the handoff when the domain sits on another peer.
+// One lock at a time from a single driver loop: pick a random peer, measure its lock of data
+// domain 1, release, repeat. No contention or queueing, so the number is the pure acquire cost,
+// dominated by the handoff when the domain sits on another peer.
 //
 // Every peer is live (own poll thread), so a handoff runs the real transfer path. Holder =
 // last locker, so a random pick migrates with prob ~(N-1)/N and the rest are resident
@@ -18,7 +18,8 @@
 // Strategy via --order|--request|--request-agg|--peterson (default request).
 //
 //   -n N            peers (default 8)
-//   -d D            domains incl. control slot 0 (default 8 -> 7 data domains)
+//   -d D            domains incl. control slot 0 (default 8 -> 7 data domains). Every peer joins
+//                   them all, so D sets the poll cycle's per-domain work. Only domain 1 is locked.
 //   -i ITER         measured sequential acquires (default 20000)
 //   --warmup W      unmeasured warm-up acquires (default 1000)
 //   --force-migrate always pick requester != current holder
@@ -273,14 +274,14 @@ void report(const char* tag, std::vector<std::uint64_t>& samples)
                 harness::percentile(samples, 0.99), harness::percentile(samples, 1.0));
 }
 
-void printReport(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& state,
+void printReport(const Opts_t& opt, cme::DomainId lockedDomain, DriveState_t& state,
                  const char* backend)
 {
     std::printf("\n=== sequential (uncontended) acquire latency ===\n");
     std::printf("strategy        : %s\n", harness::strategyName(opt.strategy));
     std::printf("backend         : %s\n", backend);
     std::printf("peers           : %u\n", opt.numPeers);
-    std::printf("data domains    : %u (slots 1..%u)\n", dataDomains, opt.numDomains - 1);
+    std::printf("locked domain   : %u (every peer joins slots 1..%u)\n", lockedDomain, opt.numDomains - 1);
     std::printf("iters (measured): %u (warmup %u)\n", opt.iters, opt.warmup);
     std::printf("force-migrate   : %s\n", opt.forceMigrate ? "yes" : "no");
     std::printf("timeouts        : %u\n", state.timeouts);
@@ -289,9 +290,9 @@ void printReport(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& sta
     report("resident", state.latResident);
 }
 
-// --csv: append one sweep row. Plots the MIGRATE cost (pure handoff, the point
-// of a sequential bench); falls back to all if no migration happened (n=1).
-void writeCsvRow(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& state)
+// --csv: append one sweep row. Plots the MIGRATE cost (pure handoff, the point of a sequential
+// bench); falls back to all if no migration happened (n=1). domains is -d, the swept axis.
+void writeCsvRow(const Opts_t& opt, DriveState_t& state)
 {
     if (opt.csvPath == nullptr)
     {
@@ -306,7 +307,7 @@ void writeCsvRow(const Opts_t& opt, std::uint32_t dataDomains, DriveState_t& sta
     const double meanUs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size()) / 1000.0;
     if (FILE* out = std::fopen(opt.csvPath, "a"))
     {
-        std::fprintf(out, "%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", opt.numPeers, dataDomains,
+        std::fprintf(out, "%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", opt.numPeers, opt.numDomains,
                      meanUs, harness::percentile(samples, 0.50) / 1000.0, harness::percentile(samples, 0.90) / 1000.0,
                      harness::percentile(samples, 0.99) / 1000.0, samples.size());
         std::fclose(out);
@@ -333,7 +334,6 @@ void runBody(harness::TestContext& ctx)
     auto peers = harness::makePeers(region, opt.numPeers, opt.numDomains - 1);
 
     const cme::DomainId domainId = 1;  // single fixed domain -- only peer order varies
-    const std::uint32_t dataDomains = 1;
 
     Baton_t baton;
     // One thread per peer, each parked on its own baton slot. Joined after the drive loop below,
@@ -357,8 +357,8 @@ void runBody(harness::TestContext& ctx)
         harness::dumpLatencyTrace(opt.traceJsonl);
     }
 
-    printReport(opt, dataDomains, state, ctx.backendName());
-    writeCsvRow(opt, dataDomains, state);
+    printReport(opt, domainId, state, ctx.backendName());
+    writeCsvRow(opt, state);
 
     // The distribution above is reported, not gated. What is gated is the handoff: nothing
     // contends here, so an acquire that spent its whole deadline waiting is a handoff defect.
