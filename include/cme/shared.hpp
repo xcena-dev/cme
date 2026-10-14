@@ -194,6 +194,7 @@ public:
     // joinDomain is idempotent. Unknown name -> UnknownDomainError. Answers the handle it resolved to
     // join by, so a caller that needs one after joining pays no second scan of the region's records.
     DomainHandle_t joinDomain(std::string_view name);
+    // Throws DomainBusyError while this session holds a Guard on the domain; release it first.
     void leaveDomain(std::string_view name);
 
     // Leaving by the handle a join answered, without the walk. The incarnation refuses a slot that
@@ -222,7 +223,8 @@ public:
     // the new domain took, since the create already knows it and resolving by name is a scan. Not
     // nodiscard: most callers create for the side effect and have no use for the handle.
     DomainHandle_t createDomain(std::string_view name);
-    // Caller must be sole participant. Throws UnknownDomainError / NotParticipatingError.
+    // Caller must be sole participant and hold no Guard on it.
+    // Throws UnknownDomainError / NotParticipatingError / DomainBusyError.
     void deleteDomain(std::string_view name);
 
     // ── accessors ──────────────────────────────────────────────────

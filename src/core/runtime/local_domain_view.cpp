@@ -76,6 +76,13 @@ bool LocalDomainView::canTransferOwnership() const noexcept
     return pin_.count.load(std::memory_order_acquire) == 0;
 }
 
+bool LocalDomainView::hasOwnershipPins() const noexcept
+{
+    // The transfer sentinel is the poll thread's latch, not a worker's pin.
+    const auto pins = pin_.count.load(std::memory_order_acquire);
+    return pins != 0 && pins != TransferringPins;
+}
+
 std::uint32_t LocalDomainView::getOwnershipPinCount() const noexcept
 {
     return pin_.count.load(std::memory_order_acquire);

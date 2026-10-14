@@ -236,8 +236,8 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
     auto& domain = peerState.getDomain(domainId);
     const auto pins = domain.getOwnershipPinCount();
 
-    // The outermost unlock, or one after a delete cleared the pins: the climb leaves the slot's tournament
-    // either way. Only a live record is vacated, before the release, so a new winner's stamp survives.
+    // The outermost unlock leaves the slot's tournament, and so does one that finds no pin left.
+    // Only the outermost vacates the record, before the release, so a new winner's stamp survives.
     if (pins <= 1)
     {
         OBSERVE_LATENCY_BEGIN(Release);

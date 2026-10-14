@@ -229,6 +229,7 @@ cme_test_exe(cme-domain-handle-test test_domain_handle.cpp)
 cme_test_exe(cme-file-presized-test test_file_presized.cpp)
 cme_test_exe(cme-file-pool-test test_file_pool.cpp)
 cme_test_exe(cme-peterson-delete-reuse-test test_peterson_delete_reuse.cpp)
+cme_test_exe(cme-held-domain-refusal-test test_held_domain_refusal.cpp)
 cme_test_exe(cme-degenerate-region-test test_degenerate_region.cpp)
 cme_test_exe(cme-ceiling-region-test test_ceiling_region.cpp)
 cme_test_exe(cme-demand-scrub-test test_demand_scrub.cpp)
@@ -291,6 +292,10 @@ cme_case(file_pool TARGET cme-file-pool-test STRATEGY peterson BACKENDS uc)
 # there. shm alone: the question is what the release path writes, not how a medium carries it.
 cme_case(peterson_delete_reuse TARGET cme-peterson-delete-reuse-test STRATEGY peterson BACKENDS shm
     SHM_TIMEOUT 60)
+
+# Delete and leave refuse a domain the peer still holds, under every policy since each one pins the
+# same way. shm alone: the refusal is decided in the peer's own memory before any record is written.
+cme_case(held_domain_refusal TARGET cme-held-domain-refusal-test STRATEGIES BACKENDS shm SHM_TIMEOUT 60)
 
 # Smoke and lifecycle: no policy axis, every backend.
 cme_case(fairness_smoke TARGET cme-fairness-smoke-test SHM_TIMEOUT 60)

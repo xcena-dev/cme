@@ -291,6 +291,11 @@ void Peer::leaveDomain(DomainId domainId, std::optional<std::uint64_t> expectedI
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = state.lockControlSection();
     refuseReplacedDomain(state, domainId, expectedIncarnation, "leaveDomain");
+    // Leave clears the pins, so a Guard still held would later release a turn that belongs to another lock.
+    if (state.getDomain(domainId).hasOwnershipPins())
+    {
+        throw DomainBusyError{"cme::Peer::leaveDomain: this peer still holds the domain"};
+    }
     const auto result = lifecycle::leaveDomain(state, domainId);
     controlGuard.release();
 
@@ -351,6 +356,11 @@ void Peer::deleteDomain(DomainId domainId, std::optional<std::uint64_t> expected
     // Dual-lock (§1.4): target domain first, THEN control -- no inversion with
     // createDomain (control-only), so no deadlock.
     auto domainGuard = lock(domainId);
+    // Locks re-enter per peer, so any pin beyond ours is a Guard of this peer that would outlive the delete.
+    if (state.getDomain(domainId).getOwnershipPinCount() > 1)
+    {
+        throw DomainBusyError{"cme::Peer::deleteDomain: this peer still holds the domain"};
+    }
     auto controlGuard = lock(ControlDomainId);
     const auto sectionGuard = state.lockControlSection();  // always last: no inversion
     // Both locks held, so this is the last word: nothing can replace the domain between here and the flip

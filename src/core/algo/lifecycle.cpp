@@ -397,8 +397,8 @@ DeleteResult deleteDomainLocked(LocalPeerState& peerState, DomainId domainId)
 
     CME_FAILPOINT_REACH(failpoint::Boundary::DeleteBeforeFree);
 
-    // One 64B store, so a crash lands on Active (safe) or Free, never between. holder=NoPeer
-    // makes a Guard release inert. We hold control and are sole holder, so no writer races it.
+    // One 64B store, so a crash lands on Active (safe) or Free, never between.
+    // We hold control and are sole holder, so no writer races it.
     snapshot.holder = NoPeer;
     snapshot.setState(Geometry::DomainRecord_t::State::Free);
     std::memset(snapshot.name, 0, Geometry::DomainRecord_t::MaxNameLen);

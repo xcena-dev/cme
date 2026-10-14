@@ -27,6 +27,7 @@ public:
     void unpinOwnership() noexcept;
     void resetOwnershipPins() noexcept;
     [[nodiscard]] bool canTransferOwnership() const noexcept;
+    [[nodiscard]] bool hasOwnershipPins() const noexcept;
     [[nodiscard]] std::uint32_t getOwnershipPinCount() const noexcept;
     [[nodiscard]] timing::TimePoint getOwnershipPinStart() const noexcept;
 

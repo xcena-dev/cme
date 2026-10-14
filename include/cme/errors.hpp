@@ -124,6 +124,13 @@ public:
     using Error::Error;
 };
 
+// deleteDomain()/leaveDomain() on a domain this peer still holds a Guard on. Release it first.
+class DomainBusyError : public Error
+{
+public:
+    using Error::Error;
+};
+
 // me_lock hit the global 5 s deadline (counter probe path triggered).
 class LockTimeoutError : public Error
 {

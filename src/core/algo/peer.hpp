@@ -59,7 +59,8 @@ public:
 
     // ── participation (opt-in) ─────────────────────────────────────
     // lock() on non-joined domain throws NotParticipatingError.
-    // leaveDomain throws it when sole participant. JoinError on range/corrupt.
+    // leaveDomain throws it when sole participant, and DomainBusyError while this peer holds the domain.
+    // JoinError on range/corrupt.
     //
     // @expectedIncarnation refuses a slot that changed hands since the caller resolved the name it used.
     // Compared under the control lock, which is what create and delete take, so the answer is final.
@@ -73,7 +74,8 @@ public:
     // Answers the handle the create wrote, both halves from that one visit: a later read of the slot
     // could find the incarnation of whatever took it after this domain.
     [[nodiscard]] DomainHandle_t createDomain(std::string_view name);
-    // Delete @domainId (dual-lock: target + control). Throws if not sole participant / not holder.
+    // Delete @domainId (dual-lock: target + control). Throws if not sole participant / not holder,
+    // and DomainBusyError while this peer holds the domain.
     void deleteDomain(DomainId domainId, std::optional<std::uint64_t> expectedIncarnation = std::nullopt);
 
     // Which live slot carries @name, and the incarnation that same visit read. NoDomain and 0 if unknown.
