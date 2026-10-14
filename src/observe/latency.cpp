@@ -3,11 +3,15 @@
 //
 // latency.cpp -- global lane registry + JSONL dump for CME_LATENCY.
 
+#include "observe/latency.hpp"
+
 #if defined(CME_LATENCY)
 
 #include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 namespace cme::trace
@@ -47,16 +51,16 @@ struct ThreadLocalBuffer_t
     std::uint32_t threadId = 0;
     bool isTagged = false;
 
-    void tag(std::uint16_t peerId, std::uint8_t roleCode) noexcept
+    void tag(std::uint16_t laneOwner, std::uint8_t laneRole) noexcept
     {
         if (isTagged)
         {
             return;
         }
-        this->peerId = peerId;
-        this->roleCode = roleCode;
+        peerId = laneOwner;
+        roleCode = laneRole;
         records.reserve(1u << 16);
-        std::lock_guard<std::mutex> lock(g_mutex);
+        const std::lock_guard<std::mutex> guard{g_mutex};
         threadId = g_nextThreadId++;
         isTagged = true;
     }
@@ -67,7 +71,7 @@ struct ThreadLocalBuffer_t
         {
             return;
         }
-        std::lock_guard<std::mutex> lock(g_mutex);
+        const std::lock_guard<std::mutex> guard{g_mutex};
         g_lanes.push_back(Lane_t{peerId, roleCode, threadId, std::move(records)});
         records.clear();
     }
@@ -78,8 +82,8 @@ struct ThreadLocalBuffer_t
     }
 };
 
-thread_local ThreadLocalBuffer_t t_threadLocal;
-thread_local bool t_measuring = false;  // set true by setMeasuring after warmup
+thread_local ThreadLocalBuffer_t g_threadBuffer;
+thread_local bool g_threadMeasuring = false;  // set true by setMeasuring after warmup
 
 const char* stageName(std::uint8_t stageCode) noexcept
 {
@@ -88,23 +92,23 @@ const char* stageName(std::uint8_t stageCode) noexcept
 
 }  // namespace
 
-void setMeasuring(bool on) noexcept
+void setMeasuring(bool measuring) noexcept
 {
-    t_measuring = on;
+    g_threadMeasuring = measuring;
 }
 
 void pushSpan(std::uint16_t peerId, LatencyStage stage, std::uint16_t domain,
               std::uint64_t tscBegin, std::uint64_t tscEnd) noexcept
 {
-    t_threadLocal.tag(peerId, static_cast<std::uint8_t>(Role::Worker));
-    t_threadLocal.records.push_back(
-        SpanRecord_t{tscBegin, tscEnd, domain, static_cast<std::uint8_t>(stage), t_measuring});
+    g_threadBuffer.tag(peerId, static_cast<std::uint8_t>(Role::Worker));
+    g_threadBuffer.records.push_back(
+        SpanRecord_t{tscBegin, tscEnd, domain, static_cast<std::uint8_t>(stage), g_threadMeasuring});
 }
 
 void writeJsonl(const char* path, double clockGhz) noexcept
 {
-    t_threadLocal.flush();  // in case the caller logged anything
-    std::lock_guard<std::mutex> lock(g_mutex);
+    g_threadBuffer.flush();  // in case the caller logged anything
+    const std::lock_guard<std::mutex> guard{g_mutex};
     FILE* file = std::fopen(path, "w");
     if (file == nullptr)
     {

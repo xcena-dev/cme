@@ -235,11 +235,11 @@ fi
 # 2. Build cme: sweep build (+ trace build if TRACE=1)
 cd "$CME"
 quiet cmake -S . -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
-	-DME_STATS=OFF -DME_PROFILE=OFF -DME_LOGGING=OFF
+	-DCME_STATS=OFF -DCME_PROFILE=OFF -DCME_LOGGING=OFF
 quiet cmake --build "$BUILD" -j128
 if [ "$TRACE" = 1 ]; then
 	quiet cmake -S . -B "$TBUILD" -DCMAKE_BUILD_TYPE=Release \
-		-DME_LATENCY=ON -DME_STATS=OFF -DME_PROFILE=OFF -DME_LOGGING=OFF
+		-DCME_LATENCY=ON -DCME_STATS=OFF -DCME_PROFILE=OFF -DCME_LOGGING=OFF
 	quiet cmake --build "$TBUILD" -j128
 fi
 

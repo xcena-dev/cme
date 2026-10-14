@@ -597,40 +597,39 @@ void printLatencyDistribution(const Opts_t& opt, const std::vector<PeerResult_t>
 #if defined(CME_LATENCY)
 void printHandoffBreakdown(const std::vector<PeerResult_t>& results)
 {
-    const double ghz = measureTscGhz();
+    const double ghz = harness::measureTscGhz();
 
-    constexpr std::size_t latCount = PeerResult_t::LatCount;
-    std::uint64_t cyc[latCount] = {};
-    std::uint64_t cnt[latCount] = {};
+    std::uint64_t cyc[PeerResult_t::LatCount] = {};
+    std::uint64_t cnt[PeerResult_t::LatCount] = {};
     std::uint64_t xferRel = 0;
     std::uint64_t xferPoll = 0;
     for (const auto& result : results)
     {
         xferRel += result.xferOnRelease;
         xferPoll += result.xferOnPoll;
-        for (std::size_t i = 0; i < latCount; ++i)
+        for (std::uint32_t stageIndex = 0; stageIndex < PeerResult_t::LatCount; ++stageIndex)
         {
-            cyc[i] += result.latCycles[i];
-            cnt[i] += result.latCount[i];
+            cyc[stageIndex] += result.latCycles[stageIndex];
+            cnt[stageIndex] += result.latCount[stageIndex];
         }
     }
-    const auto avgNs = [&](std::uint64_t c, std::uint64_t count) -> double
+    const auto avgNs = [&](std::uint64_t cycles, std::uint64_t count) -> double
     {
-        return (count == 0 || ghz == 0.0) ? 0.0 : static_cast<double>(c) / count / ghz;
+        return (count == 0 || ghz == 0.0) ? 0.0 : static_cast<double>(cycles) / static_cast<double>(count) / ghz;
     };
 
     const std::uint64_t xferTotal = xferRel + xferPoll;
-    const double relPct = xferTotal ? 100.0 * static_cast<double>(xferRel) / xferTotal : 0.0;
+    const double relPct = xferTotal ? 100.0 * static_cast<double>(xferRel) / static_cast<double>(xferTotal) : 0.0;
     std::printf("\nhandoff latency breakdown (avg elapsedNs, tsc=%.3f GHz):\n", ghz);
     std::printf("token handoff path: on_release=%" PRIu64 " (%.1f%%)  on_poll=%" PRIu64
                 " (%.1f%%)\n",
                 xferRel, relPct, xferPoll, 100.0 - relPct);
     // One line per LatencyStage; n=0 means unmeasured in this build.
-    for (std::size_t i = 0; i < latCount; ++i)
+    for (std::uint32_t stageIndex = 0; stageIndex < PeerResult_t::LatCount; ++stageIndex)
     {
-        const auto stage = static_cast<cme::trace::LatencyStage>(i);
+        const auto stage = static_cast<cme::trace::LatencyStage>(stageIndex);
         std::printf("  %-14s: %8.1f  (n=%" PRIu64 ")\n", cme::trace::getLatencyName(stage),
-                    avgNs(cyc[i], cnt[i]), cnt[i]);
+                    avgNs(cyc[stageIndex], cnt[stageIndex]), cnt[stageIndex]);
     }
 }
 #endif

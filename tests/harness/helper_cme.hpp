@@ -242,27 +242,25 @@ template <typename T_Session>
     return std::find(names.begin(), names.end(), name) != names.end();
 }
 
-// Write the collected span trace to @path, with the TSC frequency the plotter needs to turn cycle
-// counts into nanoseconds.
-//
-// The frequency is measured rather than read from anywhere: there is no portable way to ask, and
-// /proc's nominal figure is not what the counter actually ticks at. A 50 ms steady-clock window is
-// long enough that the two reads' own cost disappears into it.
-//
-// writeJsonl compiles to nothing unless the build defines CME_LATENCY, so this is a measurement
-// hook rather than a test assertion, and a case reaches it only when asked with --trace-jsonl.
-inline void dumpLatencyTrace(const char* path)
+// TSC cycles per nanosecond, measured over a steady-clock window. No portable call reports the rate,
+// and /proc's nominal figure is not the rate the counter ticks at.
+[[nodiscard]] inline double measureTscGhz()
 {
+    constexpr timing::Millis CalibrationSpan{50};  // long enough that the two counter reads cost nothing in it
     const auto startCycles = cme::cpu::readTimestampCounter();
     const timing::Stopwatch window;
-    std::this_thread::sleep_for(timing::Millis{50});
+    std::this_thread::sleep_for(CalibrationSpan);
     const auto endCycles = cme::cpu::readTimestampCounter();
 
     const double windowNs = static_cast<double>(window.elapsed().count());
-    const double gigahertz =
-        windowNs > 0 ? static_cast<double>(endCycles - startCycles) / windowNs : 0.0;
+    return windowNs > 0 ? static_cast<double>(endCycles - startCycles) / windowNs : 0.0;
+}
 
-    cme::trace::writeJsonl(path, gigahertz);
+// Write the collected span trace to @path with the TSC frequency the plotter needs. writeJsonl is
+// empty unless the build defines CME_LATENCY, and a case calls this only under --trace-jsonl.
+inline void dumpLatencyTrace(const char* path)
+{
+    cme::trace::writeJsonl(path, measureTscGhz());
     std::printf("trace-jsonl -> %s\n", path);
 }
 

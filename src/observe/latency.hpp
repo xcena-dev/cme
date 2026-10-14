@@ -69,7 +69,7 @@ static_assert(sizeof(LatencyNames) / sizeof(LatencyNames[0]) == static_cast<std:
 
 #if defined(CME_LATENCY)
 
-#include "util/cpu.hpp"
+#include "util/cpu.hpp"  // NOLINT(misc-include-cleaner) -- OBSERVE_LATENCY_TSC below
 
 namespace cme::trace
 {
@@ -87,7 +87,7 @@ void pushSpan(std::uint16_t peerId, LatencyStage stage, std::uint16_t domain,
 
 // Tag subsequent spans on THIS thread as measured (true) or warmup (false).
 // The harness calls setMeasuring(true) after its warm-up barrier.
-void setMeasuring(bool on) noexcept;
+void setMeasuring(bool measuring) noexcept;
 
 // Dump all lanes as JSONL to @path; first line is {"meta":{"ghz":...}} for ns
 // conversion. Flushes the calling thread's buffer first. Call after all worker
