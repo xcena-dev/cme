@@ -481,7 +481,7 @@ cme_case(timeout_recovery_race TARGET cme-timeout-recovery-race-test STRATEGIES 
 cme_case(resource_lifecycle TARGET cme-resource-lifecycle-test STRATEGY request BACKENDS shm
     SHM_TIMEOUT 120)
 
-# The admission lease's failure side: a stalled lease stolen after LeaseTimeout, and a lease that
+# The admission lease's failure side: a stalled lease stolen after config::lease::Timeout, and a lease that
 # keeps moving until the joiner's deadline runs out. shm only -- both cases assert wall-clock
 # windows on one 64 B line and read no other medium state.
 cme_case(lease_steal TARGET cme-lease-steal-test STRATEGY request BACKENDS shm SHM_TIMEOUT 60)

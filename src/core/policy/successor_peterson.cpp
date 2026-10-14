@@ -67,7 +67,7 @@ using peterson_tree::roundUpPow2;
     OBSERVE_LATENCY_END(ClimbAnnounce, peerState, domainId);
 
     OBSERVE_LATENCY_BEGIN(ClimbSpin);
-    spin::Backoff backoff{SpinPausesMin, SpinPausesMax};
+    spin::Backoff backoff{config::acquire::SpinPausesMin, config::acquire::SpinPausesMax};
     bool won = false;
     while (true)
     {

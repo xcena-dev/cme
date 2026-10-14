@@ -13,7 +13,7 @@
 // replaces sleep so scheduler wakeups do not blur the timeline. Caveat: threads on ONE host,
 // so this is same-host UC write-settling, not cross-host visibility skew.
 //
-// This bench sets a constant that ships: ClaimSettle in src/config.hpp. A port to
+// This bench sets a constant that ships: config::stake::Settle in src/config.hpp. A port to
 // different FAM hardware has to re-run it, because too short a settle leaves the
 // claim window open and too long only adds latency.
 //

@@ -39,19 +39,19 @@ bool HeartbeatLivenessPolicy::isAlive(const Geometry::Member_t& member) const
 
 bool HeartbeatLivenessPolicy::hasFailed(const LocalPeerState& peerState, PeerId peerId) const
 {
-    // Stateless: dead if the last self-stamp is older than DeadWindowEffective
+    // Stateless: dead if the last self-stamp is older than config::liveness::DeadWindowEffective
     // (nominal + δ + cache staleness). One cached read + local wall clock.
     if (!peerState.isValidPeer(peerId))
     {
         return false;
     }
-    const timing::WallStamp lastSeen{peerState.getMemberView(peerId, MemberCacheTTL).lastSeenNanos};
+    const timing::WallStamp lastSeen{peerState.getMemberView(peerId, config::membership::CacheTTL).lastSeenNanos};
 
     // No age means the stamp sits at or ahead of our clock: the target's own clock runs ahead, so
     // its witness is fresh rather than stale. A slot that never stamped reads as an enormous age
     // and so as dead, which is what an unstamped slot on a peer we consider valid is.
     const std::optional<timing::Nanos> age = lastSeen.age();
-    return age.has_value() && *age > DeadWindowEffective;
+    return age.has_value() && *age > config::liveness::DeadWindowEffective;
 }
 
 std::unique_ptr<LivenessPolicy> makeLivenessPolicy()

@@ -41,7 +41,7 @@ constexpr cme::PeerId Dead = 2;                    // not 0, so a blank slot can
 
 constexpr std::uint32_t RecoveryDeadlineMs = 20000;
 
-// How long the blank slot has to keep the dead peer where it is. Orders over DeadWindowEffective
+// How long the blank slot has to keep the dead peer where it is. Orders over config::liveness::DeadWindowEffective
 // plus a few poll ticks, so a recovery that was going to run would have run inside it.
 constexpr std::uint32_t BlankRefusalWindowMs = 3000;
 

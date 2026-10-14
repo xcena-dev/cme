@@ -12,12 +12,12 @@
 // by hand. That is what both cases here do, and it is also what a crashed peer leaves behind: a
 // nonzero nonce with nobody to clear it. Nothing distinguishes the two, which is the point.
 //
-// A stalled lease is a nonce that does not change for LeaseTimeout. A contended one is a nonce that
+// A stalled lease is a nonce that does not change for config::lease::Timeout. A contended one is a nonce that
 // keeps changing, which is why the second case runs a thread doing nothing but changing it. The
 // joiner cannot tell that thread from a run of real joiners, and it must not steal a lease that is
-// still moving -- so it recontends until LeaseAcquireDeadline and then reports failure.
+// still moving -- so it recontends until config::lease::AcquireDeadline and then reports failure.
 //
-// shm only. Both cases turn on wall-clock windows measured against LeaseTimeout, and the devdax
+// shm only. Both cases turn on wall-clock windows measured against config::lease::Timeout, and the devdax
 // and uc variants would spend the same seconds re-asserting a timing rule that reads no medium
 // state beyond that one line.
 
@@ -47,7 +47,7 @@ constexpr std::uint32_t FormatPeers = 4;
 // value reads as held; zero is the unlocked sentinel.
 constexpr std::uint64_t StaleNonce = 0xDEADBEEFCAFEF00DULL;
 
-// How often the contending thread restamps the nonce. Shorter than ClaimSettle on purpose: the
+// How often the contending thread restamps the nonce. Shorter than config::stake::Settle on purpose: the
 // joiner stakes its own nonce and re-reads it one settle later, so a restamp inside that window is
 // what makes the stake fail and the joiner recontend.
 constexpr auto ChurnPeriod = timing::Millis{1};
@@ -82,10 +82,10 @@ void checkStalledLeaseIsStolen(harness::TestContext& ctx)
         const auto guard = session.lock("lane0");
         ctx.check(static_cast<bool>(guard), "stalled lease: the joiner got in and can lock");
     }
-    // The join had to watch the nonce for a full LeaseTimeout before it was allowed to steal, so
+    // The join had to watch the nonce for a full config::lease::Timeout before it was allowed to steal, so
     // anything faster means it took the lease while the holder still looked alive.
     const double elapsedMs = joining.elapsed<timing::MillisF>().count();
-    const double stallMs = timing::MillisF(cme::LeaseTimeout).count();
+    const double stallMs = timing::MillisF(cme::config::lease::Timeout).count();
     ctx.checkf(elapsedMs >= stallMs, "stalled lease: the joiner waited out the stall (%.0f ms)",
                elapsedMs);
 
@@ -132,7 +132,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
 
     // Evidence the contention was real rather than one stamp the joiner happened to miss. A loaded
     // host oversleeps each ChurnPeriod, so the bound allows each stamp five periods.
-    const auto expected = static_cast<std::uint64_t>(cme::LeaseAcquireDeadline / ChurnPeriod) / 5;
+    const auto expected = static_cast<std::uint64_t>(cme::config::lease::AcquireDeadline / ChurnPeriod) / 5;
     ctx.checkf(stamps.load() >= expected,
                "contended lease: the nonce kept moving (%" PRIu64 " stamps)",
                stamps.load());

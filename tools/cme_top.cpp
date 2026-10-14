@@ -232,7 +232,7 @@ enum class Role
         return false;
     }
     const std::optional<timing::Nanos> age = lastSeen.ageAt(nowNs);
-    return age.has_value() && *age > cme::DeadWindowEffective;
+    return age.has_value() && *age > cme::config::liveness::DeadWindowEffective;
 }
 
 // How far ahead of this host's clock a stamp may sit before it is worth naming. The frame
@@ -248,7 +248,7 @@ enum class Role
     }
     if (const std::optional<timing::Nanos> ahead = lastSeen.aheadAt(nowNs))
     {
-        return (*ahead > cme::ClockSkewBound) ? "skew" : "0ms";
+        return (*ahead > cme::config::liveness::ClockSkewBound) ? "skew" : "0ms";
     }
 
     // Neither ahead nor behind: the stamp landed on this frame's own instant.

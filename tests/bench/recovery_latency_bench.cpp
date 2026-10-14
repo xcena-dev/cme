@@ -11,7 +11,7 @@
 // cannot grant them away and the survivors block until recovery takes them over.
 //
 // Phases, relative to the freeze instant t0:
-//   detect+claim = t_recovering - t0          (Active -> Recovering; DeadWindow dominates)
+//   detect+claim = t_recovering - t0          (Active -> Recovering; config::liveness::DeadWindow dominates)
 //   takeover     = t_seized - t_recovering    (every domain's holder != D)
 //   finish       = t_none - t_seized          (Recovering -> None)
 // Also per-domain takeover cost and survivor time-to-resume.
@@ -223,7 +223,7 @@ struct Phases_t
     slots[deadPeer]->frozen.store(true, std::memory_order_release);  // start the clock
 
     Phases_t phases;
-    // Busy-spin every wait: the DeadWindow (detect) is ~O(100ms) but claim/takeover/
+    // Busy-spin every wait: the config::liveness::DeadWindow (detect) is ~O(100ms) but claim/takeover/
     // finish are microseconds apart, so a sleeping poll would collapse them to 0.
     while (!isRecovering(region, deadPeer, coherency) &&
            !isNone(region, deadPeer, coherency) &&

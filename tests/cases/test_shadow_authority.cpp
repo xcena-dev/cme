@@ -58,7 +58,7 @@ constexpr std::uint64_t EpochLead = 16;
 constexpr std::uint32_t ForgedPollCycles = 100;
 constexpr timing::Millis ForgedWindow =
     std::max(timing::Millis{400},
-             std::chrono::duration_cast<timing::Millis>(cme::DefaultPollInterval*
+             std::chrono::duration_cast<timing::Millis>(cme::config::poll_thread::Interval*
                                                             ForgedPollCycles));
 
 // The window for the real handoff once the holder unpins. Wide enough for one poll cycle to

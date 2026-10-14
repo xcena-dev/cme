@@ -7,8 +7,8 @@
 // ClaimRecovery / TakeoverOwnership / CompleteRecovery. The 2-phase LWW claim lives in
 // RecoveryAuthorityPolicy::claim, spread non-blockingly across ticks; the failure grace
 // lives in LivenessPolicy::hasFailed, which is a single stateless comparison of the target's
-// last self-stamp against DeadWindowEffective -- the only re-check is claim()'s confirm one
-// ClaimSettle later, so a stall need not be continuous for longer than that.
+// last self-stamp against config::liveness::DeadWindowEffective -- the only re-check is claim()'s confirm one
+// config::stake::Settle later, so a stall need not be continuous for longer than that.
 
 #include "core/algo/recovery.hpp"
 
@@ -119,7 +119,7 @@ TakeoverPass takeoverDomainsHeldByDeadPeer(LocalPeerState& peerState,
             }
             // Jump clear of an in-flight shadow, which can sit an epoch above the truth:
             // reusing that epoch would break EpochImpliesIdentity.
-            record.epoch = record.epoch + RecoverySeizeEpochGap;
+            record.epoch = record.epoch + config::recovery::SeizeEpochGap;
             ownership_transfer::takeoverOwnership(peerState, domainId, record);
             OBSERVE_EVENT(Event::RecoveryTakeover, peerState, domainId);
             pass = TakeoverPass::Touched;
@@ -132,7 +132,7 @@ TakeoverPass takeoverDomainsHeldByDeadPeer(LocalPeerState& peerState,
 }  // namespace
 
 // One tick of the FSM, never blocking: detect (ring target + hasFailed) -> claim (spread
-// across ticks) -> takeover (RecoveryCycles ticks, outlasting the visibility bound) -> finish.
+// across ticks) -> takeover (config::recovery::QuietCycles ticks, outlasting the visibility bound) -> finish.
 void serviceRecovery(LocalPeerState& peerState)
 {
     auto& recoveryAuthority = *peerState.getRecoveryAuthorityPolicy();
@@ -173,7 +173,7 @@ void serviceRecovery(LocalPeerState& peerState)
         OBSERVE_EVENT(Event::RecoveryClaimed, peerState, targetPeerId);
     }
 
-    // Refill the span whenever the pass still had work: FINISH then needs RecoveryCycles
+    // Refill the span whenever the pass still had work: FINISH then needs config::recovery::QuietCycles
     // consecutive quiet ticks, so the constant bounds how long we wait for a straggler record
     // rather than deciding on its own that none is left. Refilling (not re-arming from scratch)
     // keeps the Recovering stamp and the participation clear untouched -- both write a line the

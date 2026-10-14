@@ -98,7 +98,7 @@ OwnershipResult RequestPolicy::lock(LocalPeerState& peerState, DomainId domainId
     // A new budget on purpose: the caller's is already spent, and this is the extra window the
     // withdraw opens rather than time it was promised.
     result = ownership_transfer::waitForOwnership(peerState, domainId,
-                                                  timing::Deadline{RequestWithdrawSettle});
+                                                  timing::Deadline{config::acquire::WithdrawSettle});
     if (result == OwnershipResult::Arrived)
     {
         return result;
@@ -133,11 +133,11 @@ void RequestPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 
 void RequestPolicy::pollCycle(LocalPeerState& peerState)
 {
-    // Local belief most cycles; a full FAM reconcile every OwnershipCheckInterval to adopt
+    // Local belief most cycles; a full FAM reconcile every config::poll_thread::OwnershipCheckInterval to adopt
     // ownership handed over out-of-band, which the belief misses. The period is well under
-    // AcquireTimeout, so a waiter on such a domain still resolves within one lock().
+    // config::acquire::Timeout, so a waiter on such a domain still resolves within one lock().
     const bool reconcile = (reconcileCountdown_ == 0);
-    reconcileCountdown_ = reconcile ? OwnershipCheckInterval : reconcileCountdown_ - 1;
+    reconcileCountdown_ = reconcile ? config::poll_thread::OwnershipCheckInterval : reconcileCountdown_ - 1;
     const DomainBitmap heldTransferable =
         reconcile ? ownership_transfer::reconcileAndCollectTransferable(peerState)
                   : ownership_transfer::collectTransferableLocal(peerState);

@@ -20,7 +20,7 @@ namespace cme::admission
 {
 
 // Claim a free peer slot in the membership table. Throws NoFreeSlotError when the
-// lease cannot be acquired before LeaseAcquireDeadline or the table is full.
+// lease cannot be acquired before config::lease::AcquireDeadline or the table is full.
 // Runs under the mode @geometry's mapping calls for.
 [[nodiscard]] PeerId claimPeerSlot(const Geometry& geometry);
 

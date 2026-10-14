@@ -216,7 +216,7 @@ public:
     // lock is a per-peer token, so a second thread of this peer enters it through the resident
     // fast path -- which is what let the poll thread's orphan sweep run concurrently with an app
     // thread's createDomain. Always taken AFTER the control lock: holding it across a blocking
-    // acquire would stall this peer's other threads for up to AcquireTimeout.
+    // acquire would stall this peer's other threads for up to config::acquire::Timeout.
     [[nodiscard]] std::unique_lock<std::mutex> lockControlSection() noexcept
     {
         return std::unique_lock<std::mutex>{controlSectionMutex_};
@@ -236,11 +236,11 @@ public:
     void setFreeze(bool frozen) noexcept;
     [[nodiscard]] bool isFrozen() const noexcept;
 
-    // Recovery takeover span (poll thread only): the RecoveryCycles countdown, armed once a
+    // Recovery takeover span (poll thread only): the config::recovery::QuietCycles countdown, armed once a
     // claim is confirmed. Peek without side effect -- "arm now" vs "already in the span".
     // Keyed to the target so a target switch cannot inherit a leftover span.
     [[nodiscard]] bool isRecoveryArmed(PeerId targetPeerId) const noexcept;
-    // Arm the countdown to RecoveryCycles for @targetPeerId.
+    // Arm the countdown to config::recovery::QuietCycles for @targetPeerId.
     void setRecoveryCycles(PeerId targetPeerId) noexcept;
     // Drop the span. Every abort path must call this, or the next genuine recovery starts
     // mid-span and skips arming (no participation clear, no Recovering stamp).
@@ -256,7 +256,7 @@ public:
     void clearOrphanSweep() noexcept;
 
     // Scan-scope refresh gate (poll thread only). Decrements one countdown and returns
-    // true once every PeriodicScanInterval cycles -- call it exactly once per tick; the
+    // true once every config::poll_thread::ScanRefreshInterval cycles -- call it exactly once per tick; the
     // poll loop runs the two scan-scope refreshes on a true return. Mutate-on-query.
     bool tickPeriodicScan() noexcept;
 
@@ -317,7 +317,7 @@ private:
     {
         std::uint32_t numDomains{0};
         std::uint32_t maxPeers{0};
-        timing::Nanos pollInterval{DefaultPollInterval};
+        timing::Nanos pollInterval{config::poll_thread::Interval};
         Strategy successorPolicyKind{Strategy::Order};
         std::uint32_t aggregatorGroups{0};  // RequestAgg group count (0 = auto)
     } config_;

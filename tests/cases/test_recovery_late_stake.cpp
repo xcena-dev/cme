@@ -5,7 +5,7 @@
 //
 // The late authority is held between reading the claim free and staking it. The early authority, a
 // child of its own, confirms meanwhile and stalls inside its takeover, between the shadow and the
-// truth write, for less than RecoveryTickStall. The late stake deposes it, and must not act on the
+// truth write, for less than config::recovery::TickStall. The late stake deposes it, and must not act on the
 // dead peer's records before that stalled write lands.
 
 #include <cinttypes>
@@ -37,7 +37,7 @@ constexpr const char* HeldLane = "lane0";
 // Each hold is reached after the doomed peer's grace window plus scheduling, never a fixed span.
 constexpr std::uint32_t HoldWaitMs = 4000;
 // The early authority's stall after the late stake, inside the bound the settle is sized for.
-constexpr std::uint32_t EarlyStallMs = static_cast<std::uint32_t>(cme::RecoveryTickStall.count() / 2);
+constexpr std::uint32_t EarlyStallMs = static_cast<std::uint32_t>(cme::config::recovery::TickStall.count() / 2);
 // A write after a release, and a whole recovery after the settle: generous, since both are polled.
 constexpr std::uint32_t WriteWaitMs = 1000;
 constexpr std::uint32_t RecoveryWaitMs = 5000;

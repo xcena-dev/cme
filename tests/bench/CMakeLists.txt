@@ -55,7 +55,7 @@ cme_add_bench(NAME cme-read-tail-bench SOURCE read_tail_bench.cpp
               REQUIRES cme_avx512
               LIBS Threads::Threads)
 
-# Sets ClaimSettle in src/config.hpp. A port to other FAM hardware re-runs this.
+# Sets config::stake::Settle in src/config.hpp. A port to other FAM hardware re-runs this.
 cme_add_bench(NAME cme-lww-settle-bench SOURCE lww_settle_bench.cpp
               LIBS Threads::Threads)
 

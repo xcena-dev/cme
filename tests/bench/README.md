@@ -7,7 +7,7 @@ None is registered with ctest: they measure rather than assert, so a slow run he
 |---|---|
 | `cacheline_bench` | Load and store ns/iter on one 64-byte line, uncacheable against write-back over one device. The floor everything else is built on. |
 | `read_tail_bench` | Per-access read latency on one line, in four modes that each leave one candidate cause of a multi-microsecond read in place. Untimed poller threads sweep the pile-up. |
-| `lww_settle_bench` | How long a last-writer-wins claim takes to settle without atomics. Sets `ClaimSettle` in `src/config.hpp`, so a port to other FAM hardware re-runs it. |
+| `lww_settle_bench` | How long a last-writer-wins claim takes to settle without atomics. Sets `config::stake::Settle` in `src/config.hpp`, so a port to other FAM hardware re-runs it. |
 | `recovery_latency_bench` | End-to-end recovery latency in phases, swept over the dead peer's owned-domain count, with the strategies side by side. Section 11.5. |
 
 Each has a script beside it with the same name, which runs it the way the numbers were taken, and documents its own environment variables in its header.

@@ -77,10 +77,10 @@ void pollThreadLoop(Peer* peer, LocalPeerState* state)
         recovery::serviceRecovery(*state);
 
         // Orphan sweep armed by recovery FINISH; control serialises free vs create/join.
-        // SweepControlTimeout rather than a 0ns probe -- see config.hpp. Retries next tick.
+        // A bounded wait, since a 0ns probe never lands under concurrent sweepers. Retries next tick.
         if (state->isOrphanSweepPending())
         {
-            auto controlGuard = peer->tryLock(ControlDomainId, SweepControlTimeout);
+            auto controlGuard = peer->tryLock(ControlDomainId, config::recovery::SweepControlTimeout);
             // The control lock alone does not exclude this peer's own app threads, so the
             // section mutex does. Non-blocking here: a busy section retries next tick.
             const auto sectionGuard = state->tryLockControlSection();
@@ -139,7 +139,7 @@ Peer::Peer(Geometry& geometry, PeerId peerId, CoherencyMode coherency)
     auto* header = geometry.getHeader();
     const auto successorPolicyKind = header->getStrategy();
     // Poll cadence is not region state; seed it from the config.hpp constant.
-    state.setConfig(header->numDomains, header->maxPeers, DefaultPollInterval, successorPolicyKind,
+    state.setConfig(header->numDomains, header->maxPeers, config::poll_thread::Interval, successorPolicyKind,
                     header->getAggregatorGroups());
 
     if (!state.isValidPeer(peerId))
@@ -194,7 +194,7 @@ Peer::~Peer()
         });
 
     CME_FAILPOINT_REACH(failpoint::Boundary::LeaveInDrain);
-    std::this_thread::sleep_for(LeaveDrainWindow);
+    std::this_thread::sleep_for(config::membership::LeaveDrainWindow);
 
     state.requestPollStop();
     state.joinPollThread();
@@ -223,7 +223,7 @@ PeerGuard Peer::lock(DomainId domainId)
     {
         throw NotParticipatingError{"cme::Peer::lock: domain not joined"};
     }
-    const timing::Deadline budget{AcquireTimeout};
+    const timing::Deadline budget{config::acquire::Timeout};
     if (state.getSuccessorPolicy()->lock(state, domainId, budget) != OwnershipResult::Arrived)
     {
         throw LockTimeoutError{};

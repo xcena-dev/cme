@@ -50,7 +50,7 @@ PEERS
 | `worker%` | Frame share spent in the peer's own work. |
 | `wait%` | Frame share spent blocked on ownership. |
 | `spin%` | Share of that wait spent busy-spinning. 27% waiting with 4% spinning means the blocked time is not burning a core. |
-| `hb_age` | Age of the liveness stamp. Past `DeadWindowEffective` (`src/config.hpp`) the role reads `STALE`, which is the window the region's own failure detector uses, so `--interval` does not change the diagnosis. |
+| `hb_age` | Age of the liveness stamp. Past `config::liveness::DeadWindowEffective` (`src/config.hpp`) the role reads `STALE`, which is the window the region's own failure detector uses, so `--interval` does not change the diagnosis. |
 | `pending` | Domains this peer is queued for. |
 
 A `-` in any column means the value could not be derived, not zero: no previous frame yet, a counter that went backwards, or an instrumentation axis that is off.

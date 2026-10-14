@@ -40,7 +40,7 @@ public:
     [[nodiscard]] virtual PeerId getRecoveryTarget(const LocalPeerState& peerState) const = 0;
 
     // One tick of the 2-phase LWW claim for @deadPeerId; true once settled with our claim standing.
-    // A stake flushed past StakeWindow never settles: it is held for LateStakeHold, then withdrawn.
+    // A stake flushed past config::stake::Window never settles: it is held for config::recovery::LateStakeHold, then withdrawn.
     [[nodiscard]] virtual bool claim(LocalPeerState& peerState, PeerId deadPeerId) = 0;
 
     // Whether the claim on @deadPeerId still names us. A confirmed RA asks before each write for the

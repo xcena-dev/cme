@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright XCENA Inc.
 //
-// config.hpp -- tunable algorithm constants.
+// config.hpp -- tunable algorithm constants, grouped by the mechanism that reads them.
 //
-// Layout ceilings (MaxPeers/MaxDomains) live in core/types.hpp; changing
-// them breaks on-disk layout.
+// Layout ceilings (MaxPeers/MaxDomains) live in core/types.hpp; changing them breaks on-disk layout.
 
 #pragma once
 
@@ -12,94 +11,89 @@
 
 #include "common/timing.hpp"
 
-namespace cme
+namespace cme::config
 {
 
-// Wall-clock deadline for a single acquire attempt before takeover probe.
-inline constexpr auto AcquireTimeout = timing::Secs{1};
-
-// Poll-thread cadence. LocalPeerState seeds its pollInterval from this.
-inline constexpr auto DefaultPollInterval = timing::Micros{10};
-
-// Failure-detector window: >> DefaultPollInterval so a live peer ticks
-// several times during the window; short enough ownership doesn't rotate far.
-inline constexpr auto LivenessProbeInterval = timing::Micros{500};
-
-// Freshness window for the lazy read-through member cache; a hit skips the FAM read.
-// REQUEST demand is not cached here -- it is read fresh on the grant scan.
-inline constexpr auto MemberCacheTTL = timing::Micros{5};
-
-// Departure drain: ~Peer stays Leaving this long before its sweep. Only the first MemberCacheTTL is
-// a bound; the rest covers a granter preempted between its member read and its record write, which
-// is what leaves a record on a departed peer. Sized for a scheduler timeslice, not a page fault.
-inline constexpr auto LeaveDrainWindow = timing::Millis{1};
-
-// RA monitor: wall-clock silence window before crash declared.
-// Conservative: false suspicion of a live peer (SWOT reliable-FD) is the dangerous direction.
-inline constexpr auto DeadWindow = timing::Millis{500};
-// Declared pairwise clock-skew bound δ (bounded-skew contract). Widens the effective
-// window so a live-but-skewed peer is never falsely declared dead.
-inline constexpr auto ClockSkewBound = timing::Millis{50};
-// Effective dead window: nominal + δ + member-cache staleness, all folded into one margin.
-inline constexpr auto DeadWindowEffective = DeadWindow + ClockSkewBound + MemberCacheTTL;
-
-// Consecutive quiet poll cycles before recovery FINISHes. Guards the same window as
-// LeaveDrainWindow -- a straggler grant naming the dead peer after the slot reads None strands
-// the domain -- so it is sized to match it: 100 cycles x DefaultPollInterval = 1 ms.
-inline constexpr std::uint32_t RecoveryCycles = 100;
-
-// Epochs a recovery seize jumps before stamping itself. publishDomainRecord writes the shadow
-// before the truth, so one shadow can sit a single epoch above the truth record; 2 would clear
-// it and the rest is margin. Epochs only have to increase, so a gap costs nothing.
-inline constexpr std::uint64_t RecoverySeizeEpochGap = 8;
-
-// Orphan-sweep control-lock budget. A 0ns probe never lands under concurrent sweepers, which
-// clobber each other's interest. Safe: the heartbeat is bumped before the sweep.
-inline constexpr auto SweepControlTimeout = timing::Millis{2};
-
-// Poll cycles between ownership-record scrubs (torn-handoff adopt / AdoptFromRecord).
-// Per-domain countdown, so the cold record reads spread instead of bursting on one tick.
-inline constexpr std::uint32_t OwnershipCheckInterval = 1024;
-
-// Poll cycles between cached-scan-scope refreshes: the admission line (new joiners) and
-// the Header activeDomains bitmap. Rare events, so keep both off the per-cycle path.
-inline constexpr std::uint32_t PeriodicScanInterval = 1024;
-
-// Hot-spin window before falling back to sleep in waitForOwnership. Must exceed the handoff
-// arrival with ~3x margin: a miss drops to the ~50us nanosleep floor and stalls the convoy.
+// Lock acquire: how long a caller waits, and how it spins before it sleeps.
+namespace acquire
+{
+inline constexpr auto Timeout = timing::Secs{1};
+// Must exceed a handoff's arrival ~3x: a miss falls to the ~50us nanosleep floor.
 inline constexpr auto SpinWindow = timing::Millis{1};
-
-// REQUEST withdraw settle: after a lock() timeout drops the demand, how long to wait for an
-// in-flight grant to land. Reported as Arrived rather than stranding the domain.
-inline constexpr auto RequestWithdrawSettle = timing::Micros{10};
-
-// Hot-spin backoff: PAUSE count per poll doubles from min to max as the wait
-// drags. Max >128 inflates convoy latency (gap rivals per-hop handoff).
+// PAUSE count per poll, doubling from min to max. Above 128 the gap rivals a handoff.
 inline constexpr std::uint32_t SpinPausesMin = 1;
 inline constexpr std::uint32_t SpinPausesMax = 1;
+// REQUEST: after a timeout drops the demand, how long an in-flight grant may still land.
+inline constexpr auto WithdrawSettle = timing::Micros{10};
+}  // namespace acquire
 
-// LWW recheck window after staking the admission lease. Sized off the worst observed settle
-// (~1ms), not the p50; cold-join/crash only, so the slack costs nothing hot.
-inline constexpr auto ClaimSettle = timing::Millis{5};
-// Longest a joiner or a recovery authority may take from reading the line it stakes to flushing the
-// stake. A slower stake gives up without settling, since it may land after another's confirmation.
-inline constexpr timing::Millis StakeWindow{1};
-// An assumed bound on how long a flushed store stays invisible to another host's read.
+// Poll thread: its tick, and the periodic passes it makes (in ticks).
+namespace poll_thread
+{
+inline constexpr auto Interval = timing::Micros{10};
+// Per domain: reconcile holder belief with the record, to adopt a handoff written only there.
+inline constexpr std::uint32_t OwnershipCheckInterval = 1024;
+// Re-read the cached scan scopes: the admission line (new joiners) and the active-domain bitmap.
+inline constexpr std::uint32_t ScanRefreshInterval = 1024;
+}  // namespace poll_thread
+
+// Membership: the member-slot cache and a clean departure.
+namespace membership
+{
+// Freshness of the read-through member cache. REQUEST demand is read fresh, not from it.
+inline constexpr auto CacheTTL = timing::Micros{5};
+// A leaving peer stays Leaving this long: CacheTTL plus a granter preempted mid-grant (one timeslice).
+inline constexpr auto LeaveDrainWindow = timing::Millis{1};
+}  // namespace membership
+
+// Failure detection. Erring long is safe: declaring a live peer dead is the dangerous direction.
+namespace liveness
+{
+inline constexpr auto DeadWindow = timing::Millis{500};
+// Declared pairwise clock-skew bound, so a live but skewed peer is never declared dead.
+inline constexpr auto ClockSkewBound = timing::Millis{50};
+inline constexpr auto DeadWindowEffective = DeadWindow + ClockSkewBound + membership::CacheTTL;
+}  // namespace liveness
+
+// Last-writer-wins stakes, shared by the admission lease and the recovery claim.
+namespace stake
+{
+// Recheck delay after staking, sized off the worst observed settle (~1 ms).
+inline constexpr auto Settle = timing::Millis{5};
+// Longest a staker may take from reading the line to flushing its stake. A slower one gives up.
+inline constexpr timing::Millis Window{1};
+// Assumed bound on how long a flushed store stays invisible to another host.
 inline constexpr timing::Millis StoreVisibilityLag{2};
-static_assert(StakeWindow + StoreVisibilityLag * 2 <= ClaimSettle,
-              "a stake inside StakeWindow must land before an earlier staker's re-read");
-// An assumed bound on how long a recovery authority stalls between re-reading its claim and the
-// write that read guards. The same order as LeaseTimeout, which assumes this of admission.
-inline constexpr timing::Millis RecoveryTickStall{100};
-// A recovery stake that landed late stays this long before it is withdrawn. It may have deposed an
-// authority mid-write, and no stake may start until that write has landed.
-inline constexpr auto LateStakeHold = RecoveryTickStall + StoreVisibilityLag * 2;
-// A held lease whose nonce is unchanged this long is presumed dead and stolen. Conservative:
-// a false steal risks a double claim, and the real hold is a few reads plus two flushes.
-inline constexpr auto LeaseTimeout = timing::Millis{200};
-// Poll gap while waiting on a held lease, to notice release/handoff promptly.
-inline constexpr auto LeasePollGap = timing::Millis{2};
-// Wall-clock deadline to acquire the lease before failing (covers a full MaxPeers burst).
-inline constexpr auto LeaseAcquireDeadline = timing::Secs{5};
+}  // namespace stake
 
-}  // namespace cme
+// Admission lease on the member-slot allocator.
+namespace lease
+{
+// An unchanged nonce this old is presumed dead and stolen. Erring long avoids a double claim.
+inline constexpr auto Timeout = timing::Millis{200};
+inline constexpr auto PollGap = timing::Millis{2};
+// Covers a full MaxPeers burst.
+inline constexpr auto AcquireDeadline = timing::Secs{5};
+}  // namespace lease
+
+// Recovery of a dead peer's slot and domains.
+namespace recovery
+{
+// Consecutive quiet ticks before FINISH, so a straggler grant naming the dead peer still lands.
+inline constexpr std::uint32_t QuietCycles = 100;
+// Epochs a seize jumps: one shadow can sit a single epoch above the truth, and the rest is margin.
+inline constexpr std::uint64_t SeizeEpochGap = 8;
+// Control-lock budget for the orphan sweep. A 0 ns probe never lands under concurrent sweepers.
+inline constexpr auto SweepControlTimeout = timing::Millis{2};
+// Assumed bound on an authority's stall between re-reading its claim and the write it guards.
+inline constexpr timing::Millis TickStall{100};
+// A late stake stays this long before withdrawal, since it may have deposed an authority mid-write.
+inline constexpr auto LateStakeHold = TickStall + stake::StoreVisibilityLag * 2;
+}  // namespace recovery
+
+static_assert(stake::Window + stake::StoreVisibilityLag * 2 <= stake::Settle,
+              "a stake inside Window must land before an earlier staker's re-read");
+static_assert(recovery::QuietCycles * poll_thread::Interval >= membership::LeaveDrainWindow,
+              "the quiet span must cover the departure drain");
+
+}  // namespace cme::config

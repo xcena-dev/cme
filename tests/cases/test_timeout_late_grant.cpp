@@ -3,7 +3,7 @@
 //
 // test_timeout_late_grant.cpp -- a lock that times out strands no domain (report §12).
 //
-// A grant landing past RequestWithdrawSettle names a peer that has given up, and the orphan sweep
+// A grant landing past config::acquire::WithdrawSettle names a peer that has given up, and the orphan sweep
 // is what reclaims it. So the property is "the domain comes back either way", not "the settle
 // window always catches it". Holder and waiter carry the same window, so the two collide.
 // All four strategies: no policy may keep a domain on a peer that returned nothing.

@@ -19,7 +19,7 @@ Therefore a shadow ahead of the truth is an incomplete handoff, not a transfer.
 
 **One epoch must imply one holder.**
 There is no compare-and-swap available, so a monotonically increasing epoch stands in for it.
-A recovery seize must therefore jump clear of any in-flight shadow before stamping itself, which is what `RecoverySeizeEpochGap` in [`../../config.hpp`](../../config.hpp) is for.
+A recovery seize must therefore jump clear of any in-flight shadow before stamping itself, which is what `config::recovery::SeizeEpochGap` in [`../../config.hpp`](../../config.hpp) is for.
 Epochs only have to increase, so a gap costs nothing.
 
 The formal statement of both is in [`docs/spec/`](../../../docs/spec/), which is normative for this directory.

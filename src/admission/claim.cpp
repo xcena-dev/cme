@@ -5,8 +5,8 @@
 //
 // Joins serialise through one nonce lease so peerScanBound has a single writer. With no cross-host
 // CAS, a joiner stakes a nonce, settles and re-reads. The joiner whose nonce survived holds the lease.
-// A stake flushed more than StakeWindow after the read that found the lease free or stalled gives up.
-// A lease unchanged for LeaseTimeout is stolen, so a crash mid-claim never wedges later joiners.
+// A stake flushed more than config::stake::Window after the read that found the lease free or stalled gives up.
+// A lease unchanged for config::lease::Timeout is stolen, so a crash mid-claim never wedges later joiners.
 
 #include "admission/claim.hpp"
 
@@ -57,7 +57,7 @@ std::uint64_t getRandomNonce()
     {
         return std::nullopt;
     }
-    std::this_thread::sleep_for(ClaimSettle);
+    std::this_thread::sleep_for(config::stake::Settle);
     if (coherency::get(admissionControl, mode).nonce != nonce)  // rmb + 64B read
     {
         return std::nullopt;
@@ -65,15 +65,15 @@ std::uint64_t getRandomNonce()
     return nonce;
 }
 
-// True if @held stayed unchanged for LeaseTimeout (holder presumed dead -> steal);
+// True if @held stayed unchanged for config::lease::Timeout (holder presumed dead -> steal);
 // false if it changed (released / handed off -> recontend).
 [[nodiscard]] bool isLeaseStalled(Geometry::AdmissionControl_t* admissionControl, std::uint64_t held,
                                   CoherencyMode mode)
 {
-    const timing::Deadline until{LeaseTimeout};
+    const timing::Deadline until{config::lease::Timeout};
     while (!until.expired())
     {
-        std::this_thread::sleep_for(LeasePollGap);
+        std::this_thread::sleep_for(config::lease::PollGap);
         if (coherency::get(admissionControl, mode).nonce != held)  // rmb + 64B read
         {
             return false;
@@ -86,10 +86,10 @@ std::uint64_t getRandomNonce()
 // deadline. A stake that gave up leaves our nonce in the line, and only the steal path clears it.
 [[nodiscard]] std::uint64_t acquireLease(Geometry::AdmissionControl_t* admissionControl, CoherencyMode mode)
 {
-    const timing::Deadline deadline{LeaseAcquireDeadline};
+    const timing::Deadline deadline{config::lease::AcquireDeadline};
     while (!deadline.expired())
     {
-        const timing::Deadline freeWindow{StakeWindow};
+        const timing::Deadline freeWindow{config::stake::Window};
         const std::uint64_t held = coherency::get(admissionControl, mode).nonce;  // rmb + 64B read
 
         // (1) Free -> stake it.
@@ -109,7 +109,7 @@ std::uint64_t getRandomNonce()
         }
 
         // (3) Stalled (holder dead) -> re-confirm, then steal.
-        const timing::Deadline stealWindow{StakeWindow};
+        const timing::Deadline stealWindow{config::stake::Window};
         if (coherency::get(admissionControl, mode).nonce != held)  // rmb + 64B read
         {
             continue;  // moved since the watch -> recontend

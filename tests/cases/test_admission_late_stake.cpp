@@ -68,13 +68,13 @@ void runBody(harness::TestContext& ctx)
         line.nonce = HolderNonce;
         cme::coherency::set(control, line, coherency);
         // Past the stake window, so the joiner's stake is late however the clock is read.
-        std::this_thread::sleep_for(cme::StakeWindow * 2);
+        std::this_thread::sleep_for(cme::config::stake::Window * 2);
     }
     const timing::Stopwatch sinceRelease;
     cme::failpoint::release();
 
     // A late stake that won would return one settle after the release. Three leave room for scheduling.
-    constexpr auto WinWindow = cme::ClaimSettle * 3;
+    constexpr auto WinWindow = cme::config::stake::Settle * 3;
     std::this_thread::sleep_for(WinWindow);
     const std::int64_t claimedEarly = claimed.load(std::memory_order_acquire);
     joiner.join();
@@ -84,7 +84,7 @@ void runBody(harness::TestContext& ctx)
     ctx.check(held, "the joiner reached its stake after reading the lease free");
     ctx.check(claimedEarly == Pending, "a late stake did not take the lease the holder still held");
     ctx.check(claimedFinal >= 0, "the joiner got in once the line looked abandoned");
-    ctx.checkf(waitedMs >= timing::MillisF(cme::LeaseTimeout).count(),
+    ctx.checkf(waitedMs >= timing::MillisF(cme::config::lease::Timeout).count(),
                "the joiner waited out the stall before stealing (%.0f ms)", waitedMs);
     ctx.check(cme::coherency::get(control, coherency).nonce == 0,
               "the joiner released the lease on the way out");

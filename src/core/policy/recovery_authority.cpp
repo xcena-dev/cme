@@ -95,7 +95,7 @@ PeerId ChainRecoveryAuthorityPolicy::getRecoveryTarget(const LocalPeerState& pee
 
     // First alive peer clockwise = this node's RA target. Crashed-but-uncleaned peers stay
     // Active, so recovery is nearest-first. Bounded rather than the ceiling: admission only
-    // grows peerScanBound, so no admitted slot is skipped, and the cache lags PeriodicScanInterval
+    // grows peerScanBound, so no admitted slot is skipped, and the cache lags config::poll_thread::ScanRefreshInterval
     // at most -- orders under the silence a target must accumulate.
     const auto& liveness = *peerState.getLivenessPolicy();
     for (const PeerId candidate : peerState.getPeerRing())
@@ -126,7 +126,7 @@ bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadP
     {
         // Opened before the read, as admission does: a stake flushed after it closes may land
         // behind another authority's confirmation, so it never settles.
-        const timing::Deadline stakeWindow{StakeWindow};
+        const timing::Deadline stakeWindow{config::stake::Window};
         // Stake only when the right is up for grabs: unclaimed, held by a dead RA, or already
         // ours. A live claim means yield. The claim line is no-cache, so the lambda sees the
         // current LWW winner without a settle race.
@@ -153,7 +153,7 @@ bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadP
         }
         lateStake_ = stakeWindow.expired();
         claimTarget_ = deadPeerId;
-        claimWindow_ = timing::Deadline{lateStake_ ? LateStakeHold : ClaimSettle};
+        claimWindow_ = timing::Deadline{lateStake_ ? config::recovery::LateStakeHold : config::stake::Settle};
         return false;  // settling, or holding a late stake
     }
 

@@ -110,10 +110,10 @@ bool LocalDomainView::isHolder() const noexcept
 
 bool LocalDomainView::isTurnToCheckOwnership() noexcept
 {
-    // True once every OwnershipCheckInterval cycles, then rearms. Poll thread only.
+    // True once every config::poll_thread::OwnershipCheckInterval cycles, then rearms. Poll thread only.
     if (poll_.ownershipCheckCountdown == 0)
     {
-        poll_.ownershipCheckCountdown = OwnershipCheckInterval - 1;
+        poll_.ownershipCheckCountdown = config::poll_thread::OwnershipCheckInterval - 1;
         return true;
     }
     --poll_.ownershipCheckCountdown;

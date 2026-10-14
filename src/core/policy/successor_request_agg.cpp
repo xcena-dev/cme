@@ -185,7 +185,7 @@ void RequestAggPolicy::refreshAggregatedRequest(LocalPeerState& peerState)
     // because the survivor republishes the whole slot unconditionally below.
     if (snapshot.aggregatorPeerId != selfPeerId &&
         (!peerState.isValidPeer(snapshot.aggregatorPeerId) ||
-         !peerState.getMemberView(snapshot.aggregatorPeerId, MemberCacheTTL).active))
+         !peerState.getMemberView(snapshot.aggregatorPeerId, config::membership::CacheTTL).active))
     {
         snapshot.aggregatorPeerId = selfPeerId;
         coherency::set(record, snapshot, peerState.getCoherencyMode());
@@ -245,7 +245,7 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
     updateDemandAndSlice(peerState, domainId, true);  // the request signal + its slice
     OwnershipResult result = ownership_transfer::waitForOwnership(peerState, domainId, deadline);
     // Plain drop, no slice write. A slice late to clear attracts one grant this peer forwards on
-    // (harmless, see transferHeldDomains); a slice late to appear costs a full AcquireTimeout. The
+    // (harmless, see transferHeldDomains); a slice late to appear costs a full config::acquire::Timeout. The
     // cost is the same rmw either way, so only the raise pays it.
     request_demand::drop(peerState, domainId);
     if (result == OwnershipResult::Arrived)
@@ -256,7 +256,7 @@ OwnershipResult RequestAggPolicy::lock(LocalPeerState& peerState, DomainId domai
     // Timeout, demand already dropped so no new grant is decided. Without this settle the record can
     // name a caller that was told it did not get the domain, and under agg nothing local forwards it.
     result = ownership_transfer::waitForOwnership(peerState, domainId,
-                                                  timing::Deadline{RequestWithdrawSettle});
+                                                  timing::Deadline{config::acquire::WithdrawSettle});
     if (result == OwnershipResult::Arrived)
     {
         return result;
@@ -293,7 +293,7 @@ void RequestAggPolicy::pollCycle(LocalPeerState& peerState)
     // Mostly local-belief collect; periodic FAM reconcile adopts out-of-band ownership
     // (see RequestPolicy::pollCycle).
     const bool reconcile = (reconcileCountdown_ == 0);
-    reconcileCountdown_ = reconcile ? OwnershipCheckInterval : reconcileCountdown_ - 1;
+    reconcileCountdown_ = reconcile ? config::poll_thread::OwnershipCheckInterval : reconcileCountdown_ - 1;
     const DomainBitmap heldTransferable =
         reconcile ? ownership_transfer::reconcileAndCollectTransferable(peerState)
                   : ownership_transfer::collectTransferableLocal(peerState);

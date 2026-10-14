@@ -42,7 +42,7 @@ constexpr std::uint32_t RecoveryDeadlineMs = 20000;
 // Named in the unit both uses want, so a change of the constant's unit does not make the printed
 // label lie.
 constexpr auto LeaseTimeoutMs =
-    std::chrono::duration_cast<timing::Millis>(cme::LeaseTimeout);
+    std::chrono::duration_cast<timing::Millis>(cme::config::lease::Timeout);
 
 // What a child does to reach either boundary: both sit inside claimPeerSlot, which the open runs
 // on its way in, so the child never gets past this line.
@@ -78,12 +78,12 @@ void checkKilledHoldingLease(harness::TestContext& ctx)
     }
     const auto waited = joining.elapsed<timing::Millis>();
 
-    std::printf("%s: the next joiner got in after %" PRId64 " ms (LeaseTimeout %" PRId64 " ms)\n",
+    std::printf("%s: the next joiner got in after %" PRId64 " ms (config::lease::Timeout %" PRId64 " ms)\n",
                 cme::failpoint::readName(BeforeCommit), waited.count(), LeaseTimeoutMs.count());
 
     ctx.check(joined, "a later joiner got past the lease the crash left behind");
     ctx.check(waited >= LeaseTimeoutMs,
-              "and only after LeaseTimeout, so it stole the lease rather than finding it free");
+              "and only after config::lease::Timeout, so it stole the lease rather than finding it free");
 }
 
 // ── the slot, with the lease still on it ────────────────────────────

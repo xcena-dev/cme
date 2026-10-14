@@ -36,7 +36,7 @@ namespace
     {
         // Cached (bounded-stale) member view: amortizes the per-hop FAM read. A stale pick
         // can strand the token on a peer that just left; recovery FSM reclaims it.
-        const auto member = peerState.getMemberView(candidate, MemberCacheTTL);
+        const auto member = peerState.getMemberView(candidate, config::membership::CacheTTL);
         if (member.active && member.participating.has(domainId))
         {
             return candidate;
@@ -55,7 +55,7 @@ void transferHeldDomains(LocalPeerState& peerState, DomainBitmap heldDomains)
         }
         // Cached (bounded-stale) member view, matching findSuccessor. A stale pick can
         // strand the token on a peer that just left; recovery FSM reclaims it.
-        const auto member = peerState.getMemberView(peerIndex, MemberCacheTTL);
+        const auto member = peerState.getMemberView(peerIndex, config::membership::CacheTTL);
         if (!member.active)
         {
             continue;

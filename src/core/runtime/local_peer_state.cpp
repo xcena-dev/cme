@@ -353,7 +353,7 @@ bool LocalPeerState::isRecoveryArmed(PeerId targetPeerId) const noexcept
 
 void LocalPeerState::setRecoveryCycles(PeerId targetPeerId) noexcept
 {
-    poll_.recoveryCycles = RecoveryCycles;
+    poll_.recoveryCycles = config::recovery::QuietCycles;
     poll_.recoveryTarget = targetPeerId;
 }
 
@@ -409,7 +409,7 @@ bool LocalPeerState::tickPeriodicScan() noexcept
 {
     if (poll_.periodicScanCountdown == 0)
     {
-        poll_.periodicScanCountdown = PeriodicScanInterval - 1;
+        poll_.periodicScanCountdown = config::poll_thread::ScanRefreshInterval - 1;
         return true;
     }
     --poll_.periodicScanCountdown;

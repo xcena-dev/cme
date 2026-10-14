@@ -5,7 +5,7 @@
 # lww_settle_bench.sh -- settle-time sweep for the atomic-free LWW claim.
 #
 # Two phases over the same contender set:
-#   UC   : a file under file_backend_dir, the regime ClaimSettle has to cover
+#   UC   : a file under file_backend_dir, the regime config::stake::Settle has to cover
 #   heap : a plain DRAM line, the write-back floor the UC numbers are read against
 # The UC phase is the one that sets the constant. The heap phase says how much of
 # the UC cost is the medium rather than thread scheduling on this host.

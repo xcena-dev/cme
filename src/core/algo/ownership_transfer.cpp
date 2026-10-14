@@ -191,12 +191,12 @@ OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,
     }
 
     const timing::Stopwatch waited;
-    const auto cpuStart = OBSERVE_CPU_TIME();       // syscall only under stats/profile; else zero
-    const timing::Deadline spinWindow{SpinWindow};  // hot phase boundary (time-based)
+    const auto cpuStart = OBSERVE_CPU_TIME();                        // syscall only under stats/profile; else zero
+    const timing::Deadline spinWindow{config::acquire::SpinWindow};  // hot phase boundary (time-based)
 
     // Adaptive spin backoff: start tight (catch a near token fast), widen the
     // inter-poll gap as the wait drags (cuts cacheline/FAM traffic).
-    spin::Backoff backoff{SpinPausesMin, SpinPausesMax};
+    spin::Backoff backoff{config::acquire::SpinPausesMin, config::acquire::SpinPausesMax};
 
     // Poll our group's shadow rather than the shared truth: spreading the wait across
     // shadows avoids a read storm on one line. epoch>last also rejects a stale read.
@@ -339,7 +339,7 @@ void unholdDomain(LocalPeerState& peerState, DomainId domainId)
 
 bool canTransferDomain(LocalPeerState& peerState, DomainId domainId) noexcept
 {
-    // No sweep pin: the orphan-sweep lands via SweepControlTimeout even while ORDER keeps
+    // No sweep pin: the orphan-sweep lands via config::recovery::SweepControlTimeout even while ORDER keeps
     // forwarding control, so the token need not be frozen on the RA.
     return peerState.getDomain(domainId).canTransferOwnership();
 }
