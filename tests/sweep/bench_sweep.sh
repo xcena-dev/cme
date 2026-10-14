@@ -49,9 +49,9 @@ if [[ ! -x "$BIN" ]]; then
     exit 1
 fi
 
-# Snapshot the binary so a concurrent rebuild of $BIN can't change what we
-# measure mid-sweep. Run from the copy; delete it on any exit (normal/ctrl-c).
-SNAP="$(mktemp /tmp/cme-fairness-snap.XXXXXX)"
+# Snapshot the binary beside itself, so a concurrent rebuild can't change what we measure and the copy
+# still finds config.yaml, which the harness looks up from the binary's own path.
+SNAP="$(mktemp "$(dirname "$BIN")/.$(basename "$BIN").snap.XXXXXX")"
 cp "$BIN" "$SNAP"
 chmod +x "$SNAP"
 trap 'rm -f "$SNAP"' EXIT
