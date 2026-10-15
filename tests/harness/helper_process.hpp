@@ -22,6 +22,8 @@
 #include <cstdlib>
 #include <exception>
 
+#include "helper_util.hpp"
+
 namespace harness
 {
 
@@ -90,6 +92,33 @@ inline void reapChildren(std::uint32_t count)
     static_cast<void>(::wait(&status));
     return WIFSIGNALED(status) &&
            WTERMSIG(status) == SIGKILL;  // NOLINT(misc-include-cleaner) POSIX, via <csignal>
+}
+
+// One word per signal in a scratch buffer shared by the processes, indexed by the case's signal enum.
+template <typename T_Signal>
+void raiseSignal(std::uint32_t* words, T_Signal signal, std::uint32_t value = 1)
+{
+    __atomic_store_n(&words[static_cast<std::uint32_t>(signal)], value, __ATOMIC_RELEASE);
+}
+
+template <typename T_Signal>
+[[nodiscard]] std::uint32_t readSignal(const std::uint32_t* words, T_Signal signal)
+{
+    return __atomic_load_n(&words[static_cast<std::uint32_t>(signal)], __ATOMIC_ACQUIRE);
+}
+
+// A raised signal is seen within one step, and the cases sequence holds only a few ms long around it.
+inline constexpr std::uint32_t SignalPollStepMs = 1;
+
+template <typename T_Signal>
+[[nodiscard]] bool awaitSignal(const std::uint32_t* words, T_Signal signal, std::uint32_t deadlineMs)
+{
+    return waitUntil(
+        [words, signal]
+        {
+            return readSignal(words, signal) != 0;
+        },
+        deadlineMs, SignalPollStepMs);
 }
 
 }  // namespace harness

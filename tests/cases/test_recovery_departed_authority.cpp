@@ -15,12 +15,10 @@
 #include "cme/shared.hpp"
 #include "common/timing.hpp"
 #include "core/layout/geometry.hpp"
-#include "core/policy/recovery_authority_layout.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
 #include "observe/failpoint.hpp"
 #include "test_context.hpp"
-#include "util/coherency.hpp"
 
 namespace test
 {
@@ -70,45 +68,23 @@ enum class Role : std::uint32_t
     Count,
 };
 
-void raiseSignal(std::uint32_t* words, Signal signal)
-{
-    __atomic_store_n(&words[static_cast<std::uint32_t>(signal)], 1u, __ATOMIC_RELEASE);
-}
-
-[[nodiscard]] bool awaitSignal(const std::uint32_t* words, Signal signal, std::uint32_t deadlineMs)
-{
-    return harness::waitUntil(
-        [words, signal]
-        {
-            return __atomic_load_n(&words[static_cast<std::uint32_t>(signal)], __ATOMIC_ACQUIRE) != 0;
-        },
-        deadlineMs, StepMs);
-}
-
-[[nodiscard]] cme::PeerId readClaimAuthor(const cme::Geometry& region, cme::PeerId target)
-{
-    const auto claim = cme::coherency::get(cme::RecoveryAuthorityLayout{region}.getClaim(target),
-                                           harness::currentRun().coherency());
-    return static_cast<cme::PeerId>(claim.recoveryAuthority);
-}
-
 // Leaves from a second thread, because the destructor joins the poll thread parked at the hold, and
 // lets that thread go only once the leave has asked it to stop.
 void runAuthority(std::uint32_t* words)
 {
-    if (!awaitSignal(words, Signal::AuthorityOpen, ChildWaitMs))
+    if (!harness::awaitSignal(words, Signal::AuthorityOpen, ChildWaitMs))
     {
         return;
     }
     cme::failpoint::hold(cme::failpoint::Boundary::TakeoverMidLoop);
     std::optional<cme::Session> session{harness::openSession()};
-    raiseSignal(words, Signal::AuthorityOpened);
+    harness::raiseSignal(words, Signal::AuthorityOpened);
     if (!cme::failpoint::awaitHeld(timing::Millis{HoldWaitMs}))
     {
         cme::failpoint::release();
         return;
     }
-    raiseSignal(words, Signal::AuthorityHeld);
+    harness::raiseSignal(words, Signal::AuthorityHeld);
 
     std::thread leaver{[&session]
                        {
@@ -117,14 +93,14 @@ void runAuthority(std::uint32_t* words)
     harness::sleepMs(StopMarginMs);
     cme::failpoint::release();
     leaver.join();
-    raiseSignal(words, Signal::AuthorityGone);
-    static_cast<void>(awaitSignal(words, Signal::CaseDone, ChildWaitMs));
+    harness::raiseSignal(words, Signal::AuthorityGone);
+    static_cast<void>(harness::awaitSignal(words, Signal::CaseDone, ChildWaitMs));
 }
 
 // Leaks its session and its Guard, so no leave runs: the slot stays Active and the lane held.
 void runDoomed(std::uint32_t* words)
 {
-    if (!awaitSignal(words, Signal::DoomedOpen, ChildWaitMs))
+    if (!harness::awaitSignal(words, Signal::DoomedOpen, ChildWaitMs))
     {
         return;
     }
@@ -132,9 +108,9 @@ void runDoomed(std::uint32_t* words)
     auto* session = new cme::Session{harness::openSession()};
     session->joinDomain(HeldLane);
     static_cast<void>(new cme::Guard{session->lock(HeldLane)});
-    raiseSignal(words, Signal::DoomedHolds);
+    harness::raiseSignal(words, Signal::DoomedHolds);
     // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
-    static_cast<void>(awaitSignal(words, Signal::DoomedDie, ChildWaitMs));
+    static_cast<void>(harness::awaitSignal(words, Signal::DoomedDie, ChildWaitMs));
 }
 
 void runRole(Role role, std::uint32_t* words)
@@ -182,24 +158,24 @@ void runBody(harness::TestContext& ctx)
                                                              runRole(static_cast<Role>(index), words);
                                                          });
 
-    raiseSignal(words, Signal::AuthorityOpen);
-    const bool authorityUp = awaitSignal(words, Signal::AuthorityOpened, PeerWaitMs);
-    raiseSignal(words, Signal::DoomedOpen);
-    const bool doomedUp = awaitSignal(words, Signal::DoomedHolds, PeerWaitMs);
+    harness::raiseSignal(words, Signal::AuthorityOpen);
+    const bool authorityUp = harness::awaitSignal(words, Signal::AuthorityOpened, PeerWaitMs);
+    harness::raiseSignal(words, Signal::DoomedOpen);
+    const bool doomedUp = harness::awaitSignal(words, Signal::DoomedHolds, PeerWaitMs);
     if (!ctx.check(authorityUp && doomedUp && harness::hasMemberStatus(region, AuthoritySlot, Status::Active) &&
                        harness::readDomainRecord(region, HeldDomain).getHolder() == DoomedSlot,
                    "the authority and the doomed peer took the expected slots, and the doomed peer holds the lane"))
     {
-        raiseSignal(words, Signal::CaseDone);
+        harness::raiseSignal(words, Signal::CaseDone);
         harness::reapChildren(spawned);
         return;
     }
 
-    raiseSignal(words, Signal::DoomedDie);
-    const bool authorityHeld = awaitSignal(words, Signal::AuthorityHeld, HoldWaitMs);
-    const bool authorityGone = awaitSignal(words, Signal::AuthorityGone, PeerWaitMs);
+    harness::raiseSignal(words, Signal::DoomedDie);
+    const bool authorityHeld = harness::awaitSignal(words, Signal::AuthorityHeld, HoldWaitMs);
+    const bool authorityGone = harness::awaitSignal(words, Signal::AuthorityGone, PeerWaitMs);
     const bool doomedRecovering = harness::hasMemberStatus(region, DoomedSlot, Status::Recovering);
-    const cme::PeerId claimAuthor = readClaimAuthor(region, DoomedSlot);
+    const cme::PeerId claimAuthor = harness::readClaimAuthor(region, DoomedSlot);
     const bool authoritySlotFree = harness::hasMemberStatus(region, AuthoritySlot, Status::None);
 
     auto newcomer = harness::openSession();
@@ -213,7 +189,7 @@ void runBody(harness::TestContext& ctx)
     std::printf("  doomed slot %s within %u ms of the newcomer\n", resumed ? "freed" : "still Recovering",
                 ResumeWaitMs);
 
-    raiseSignal(words, Signal::CaseDone);
+    harness::raiseSignal(words, Signal::CaseDone);
     harness::reapChildren(spawned);
 
     ctx.check(authorityHeld, "the authority seized the doomed peer and stopped inside its takeover");

@@ -31,6 +31,7 @@
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
+#include "core/policy/recovery_authority_layout.hpp"
 #include "core/types.hpp"
 #include "observe/latency.hpp"
 #include "test_context.hpp"
@@ -173,6 +174,30 @@ hasMemberStatus(const cme::Geometry& region, cme::PeerId peerId,
                 cme::Geometry::Member_t::Status status)
 {
     return readMemberSlot(region, peerId).hasStatus(status);
+}
+
+// The first Active slot that is neither skip id, or NoPeer.
+[[nodiscard]] inline cme::PeerId findActiveSlot(const cme::Geometry& region,
+                                                cme::PeerId skipFirst = cme::NoPeer,
+                                                cme::PeerId skipSecond = cme::NoPeer)
+{
+    for (cme::PeerId slot = 0; slot < region.getPeerCount(); ++slot)
+    {
+        if (slot != skipFirst && slot != skipSecond &&
+            hasMemberStatus(region, slot, cme::Geometry::Member_t::Status::Active))
+        {
+            return slot;
+        }
+    }
+    return cme::NoPeer;
+}
+
+// The authority the recovery claim on @target names.
+[[nodiscard]] inline cme::PeerId readClaimAuthor(const cme::Geometry& region, cme::PeerId target)
+{
+    const auto claim = cme::coherency::get(cme::RecoveryAuthorityLayout{region}.getClaim(target),
+                                           currentRun().coherency());
+    return static_cast<cme::PeerId>(claim.recoveryAuthority);
 }
 
 [[nodiscard]] inline bool

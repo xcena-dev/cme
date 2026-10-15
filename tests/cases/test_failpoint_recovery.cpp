@@ -48,20 +48,6 @@ constexpr std::uint32_t AuthorityLifetimeMs = 30000;
 // Two, not three: a round pays a grace window twice over, once per death.
 constexpr std::uint32_t Rounds = 2;
 
-// The Active slot, or NoPeer. Called when the parent holds none and every child is reaped, so the
-// one Active slot left is the peer that died in it.
-[[nodiscard]] cme::PeerId findActiveSlot(cme::Geometry& region)
-{
-    for (cme::PeerId slot = 0; slot < MaxPeers; ++slot)
-    {
-        if (harness::hasMemberStatus(region, slot, Status::Active))
-        {
-            return slot;
-        }
-    }
-    return cme::NoPeer;
-}
-
 // The parent seeds the region and then leaves it, so it holds no slot for the rest of the round and
 // reads through openBoundRegion alone. Which peer the RA policy picks then cannot depend on it, and
 // the children are sequenced so that only one candidate is ever alive to pick.
@@ -88,7 +74,8 @@ constexpr std::uint32_t Rounds = 2;
                 static_cast<void>(new cme::Guard{session->lock(HeldLane)});
             }));
 
-    const cme::PeerId doomed = findActiveSlot(region);
+    // The parent holds no slot and the child is reaped, so the one Active slot left is the dead peer's.
+    const cme::PeerId doomed = harness::findActiveSlot(region);
     if (cme::isNoPeer(doomed))
     {
         std::printf("  the doomed peer left no Active slot; this round set up nothing\n");

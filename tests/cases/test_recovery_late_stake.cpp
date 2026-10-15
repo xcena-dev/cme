@@ -57,40 +57,6 @@ enum class Signal : std::uint32_t
 constexpr std::uint32_t Reached = 1;
 constexpr std::uint32_t Missed = 2;
 
-void raiseSignal(std::uint32_t* words, Signal signal, std::uint32_t value = 1)
-{
-    __atomic_store_n(&words[static_cast<std::uint32_t>(signal)], value, __ATOMIC_RELEASE);
-}
-
-[[nodiscard]] std::uint32_t peekSignal(const std::uint32_t* words, Signal signal)
-{
-    return __atomic_load_n(&words[static_cast<std::uint32_t>(signal)], __ATOMIC_ACQUIRE);
-}
-
-[[nodiscard]] bool awaitSignal(const std::uint32_t* words, Signal signal, std::uint32_t deadlineMs)
-{
-    return harness::waitUntil(
-        [words, signal]
-        {
-            return peekSignal(words, signal) != 0;
-        },
-        deadlineMs, StepMs);
-}
-
-// The first Active slot that is neither @first nor @second, or NoPeer.
-[[nodiscard]] cme::PeerId findActiveSlot(cme::Geometry& region, cme::PeerId first = cme::NoPeer,
-                                         cme::PeerId second = cme::NoPeer)
-{
-    for (cme::PeerId slot = 0; slot < MaxPeers; ++slot)
-    {
-        if (slot != first && slot != second && harness::hasMemberStatus(region, slot, Status::Active))
-        {
-            return slot;
-        }
-    }
-    return cme::NoPeer;
-}
-
 // Whether some live domain's truth names @peerId.
 [[nodiscard]] bool truthNames(cme::Geometry& region, cme::PeerId peerId)
 {
@@ -134,7 +100,7 @@ void raiseSignal(std::uint32_t* words, Signal signal, std::uint32_t value = 1)
 // The early authority. It joins only when told, so the late one picked its target before it existed.
 void runEarlyAuthority(std::uint32_t* words)
 {
-    if (!awaitSignal(words, Signal::EarlyStart, ChildWaitMs))
+    if (!harness::awaitSignal(words, Signal::EarlyStart, ChildWaitMs))
     {
         return;
     }
@@ -143,14 +109,14 @@ void runEarlyAuthority(std::uint32_t* words)
         [words]
         {
             const bool held = cme::failpoint::awaitHeld(timing::Millis{HoldWaitMs});
-            raiseSignal(words, Signal::EarlyHeld, held ? Reached : Missed);
-            static_cast<void>(awaitSignal(words, Signal::EarlyGo, ChildWaitMs));
+            harness::raiseSignal(words, Signal::EarlyHeld, held ? Reached : Missed);
+            static_cast<void>(harness::awaitSignal(words, Signal::EarlyGo, ChildWaitMs));
             cme::failpoint::release();
         });
     // Departs only after CaseDone: its leave rewrites the records the parent checks.
     const auto session = harness::openSession();
     watcher.join();
-    static_cast<void>(awaitSignal(words, Signal::CaseDone, ChildWaitMs));
+    static_cast<void>(harness::awaitSignal(words, Signal::CaseDone, ChildWaitMs));
 }
 
 }  // namespace
@@ -178,7 +144,7 @@ void runBody(harness::TestContext& ctx)
             session->joinDomain(HeldLane);
             static_cast<void>(new cme::Guard{session->lock(HeldLane)});
         }));
-    const cme::PeerId doomed = findActiveSlot(region);
+    const cme::PeerId doomed = harness::findActiveSlot(region);
     if (!ctx.check(!cme::isNoPeer(doomed), "the doomed peer left an Active slot behind"))
     {
         return;
@@ -201,18 +167,18 @@ void runBody(harness::TestContext& ctx)
     cme::failpoint::hold(cme::failpoint::Boundary::RecoveryBeforeStake);
     auto lateSession = harness::openSession();
     const bool lateHeld = cme::failpoint::awaitHeld(timing::Millis{HoldWaitMs});
-    const cme::PeerId late = findActiveSlot(region, doomed);
+    const cme::PeerId late = harness::findActiveSlot(region, doomed);
 
-    raiseSignal(words, Signal::EarlyStart);
-    const bool earlyHeld = awaitSignal(words, Signal::EarlyHeld, HoldWaitMs) &&
-                           peekSignal(words, Signal::EarlyHeld) == Reached;
-    const cme::PeerId early = findActiveSlot(region, doomed, late);
+    harness::raiseSignal(words, Signal::EarlyStart);
+    const bool earlyHeld = harness::awaitSignal(words, Signal::EarlyHeld, HoldWaitMs) &&
+                           harness::readSignal(words, Signal::EarlyHeld) == Reached;
+    const cme::PeerId early = harness::findActiveSlot(region, doomed, late);
 
     cme::failpoint::release();
     harness::sleepMs(EarlyStallMs);
     const bool lateActedEarly = truthNames(region, late);
 
-    raiseSignal(words, Signal::EarlyGo);
+    harness::raiseSignal(words, Signal::EarlyGo);
     const bool earlyWrote = harness::waitUntil(
         [&region, early]
         {
@@ -228,7 +194,7 @@ void runBody(harness::TestContext& ctx)
     std::printf("  doomed %u, late authority %u, early authority %u\n", doomed, late, early);
     const bool doubled = findDoubledEpoch(region);
 
-    raiseSignal(words, Signal::CaseDone);
+    harness::raiseSignal(words, Signal::CaseDone);
     harness::reapChildren(spawned);
 
     ctx.check(lateHeld, "the late authority reached its stake after reading the claim free");

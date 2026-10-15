@@ -14,8 +14,8 @@ The library reads no configuration and takes no flags; the harness is where both
 | [`test_context.hpp`](test_context.hpp) | The three above in the one order that works, plus the verdict a case records against and the entry point that runs one. It also publishes the run for the duration, which is where the helpers below get it. Also a named shm segment for a forked child to report through. |
 | [`helper.hpp`](helper.hpp) | The three below together, so a case includes one name and gets all of `harness`. |
 | [`helper_util.hpp`](helper_util.hpp) | What a case needs that has nothing to do with cme: randomness, a timestamped log line, waiting for a predicate to hold and holding one across a window, running a fixed set of threads to completion, catching a single exception type, and one summary statistic. No cme header, no `TestContext`. |
-| [`helper_process.hpp`](helper_process.hpp) | Forking a case into several processes over one region, and collecting them afterwards. POSIX only. |
-| [`helper_cme.hpp`](helper_cme.hpp) | The library calls every case makes the same way: formatting a region, opening one at each tier, seeding it with domains, asking it what it holds, and reading a member slot or a domain record past the public API. Each takes only what the case chooses, since the uri, the strategy and the coherency mode come from the run. |
+| [`helper_process.hpp`](helper_process.hpp) | Forking a case into several processes over one region, and collecting them afterwards, plus one-word-per-signal flags in a shared buffer to raise, read and await between them. POSIX only. |
+| [`helper_cme.hpp`](helper_cme.hpp) | The library calls every case makes the same way: formatting a region, opening one at each tier, seeding it with domains, asking it what it holds, and reading a member slot, a domain record or a recovery claim past the public API, or finding the first Active slot. Each takes only what the case chooses, since the uri, the strategy and the coherency mode come from the run. |
 | [`args.hpp`](args.hpp) | `--flag value` lookup over `argv`, with no dependency on libcme. |
 
 The order in `TestContext` is the point of it.

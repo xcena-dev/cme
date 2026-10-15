@@ -30,7 +30,6 @@ constexpr const char* HeldLane = "lane0";
 constexpr std::uint32_t HoldWaitMs = 2000;
 constexpr std::uint32_t PeerWaitMs = 4000;
 constexpr std::uint32_t ChildWaitMs = 10000;
-constexpr std::uint32_t StepMs = 1;
 // Past the release, so the held pass has dropped the belief, and well inside the next pass.
 constexpr std::uint32_t DropSettleMs = 5;
 // Far below the acquire timeout, and ample for a peer the record already names.
@@ -51,31 +50,11 @@ enum class Signal : std::uint32_t
 constexpr std::uint32_t RelockOk = 1;
 constexpr std::uint32_t RelockRefused = 2;
 
-void raiseSignal(std::uint32_t* words, Signal signal, std::uint32_t value = 1)
-{
-    __atomic_store_n(&words[static_cast<std::uint32_t>(signal)], value, __ATOMIC_RELEASE);
-}
-
-[[nodiscard]] std::uint32_t readSignal(const std::uint32_t* words, Signal signal)
-{
-    return __atomic_load_n(&words[static_cast<std::uint32_t>(signal)], __ATOMIC_ACQUIRE);
-}
-
-[[nodiscard]] bool awaitSignal(const std::uint32_t* words, Signal signal, std::uint32_t deadlineMs)
-{
-    return harness::waitUntil(
-        [words, signal]
-        {
-            return readSignal(words, signal) != 0;
-        },
-        deadlineMs, StepMs);
-}
-
 // Arms the hold only after its join, which took the control lock, so the one read naming another holder
 // is the lane's.
 void runChild(std::uint32_t* words)
 {
-    if (!awaitSignal(words, Signal::ChildOpen, ChildWaitMs))
+    if (!harness::awaitSignal(words, Signal::ChildOpen, ChildWaitMs))
     {
         return;
     }
@@ -85,21 +64,21 @@ void runChild(std::uint32_t* words)
     if (!cme::failpoint::awaitHeld(timing::Millis{HoldWaitMs}))
     {
         cme::failpoint::release();
-        raiseSignal(words, Signal::ChildMissing);
+        harness::raiseSignal(words, Signal::ChildMissing);
         return;
     }
-    raiseSignal(words, Signal::ChildHeld);
+    harness::raiseSignal(words, Signal::ChildHeld);
 
     {
         const auto guard = session.lock(HeldLane);
     }
-    raiseSignal(words, Signal::ChildTook);
+    harness::raiseSignal(words, Signal::ChildTook);
 
     cme::failpoint::release();
     harness::sleepMs(DropSettleMs);
     const bool relocked = harness::canLock(session, HeldLane, RelockBudget);
-    raiseSignal(words, Signal::ChildRelock, relocked ? RelockOk : RelockRefused);
-    static_cast<void>(awaitSignal(words, Signal::CaseDone, ChildWaitMs));
+    harness::raiseSignal(words, Signal::ChildRelock, relocked ? RelockOk : RelockRefused);
+    static_cast<void>(harness::awaitSignal(words, Signal::CaseDone, ChildWaitMs));
 }
 
 }  // namespace
@@ -130,15 +109,15 @@ void runBody(harness::TestContext& ctx)
     auto holder = harness::openSession();
     holder.createDomain(HeldLane);
 
-    raiseSignal(words, Signal::ChildOpen);
-    const bool childHeld = awaitSignal(words, Signal::ChildHeld, PeerWaitMs);
-    const bool childTook = childHeld && awaitSignal(words, Signal::ChildTook, PeerWaitMs);
-    const bool relockReported = childTook && awaitSignal(words, Signal::ChildRelock, PeerWaitMs);
-    const std::uint32_t relock = readSignal(words, Signal::ChildRelock);
+    harness::raiseSignal(words, Signal::ChildOpen);
+    const bool childHeld = harness::awaitSignal(words, Signal::ChildHeld, PeerWaitMs);
+    const bool childTook = childHeld && harness::awaitSignal(words, Signal::ChildTook, PeerWaitMs);
+    const bool relockReported = childTook && harness::awaitSignal(words, Signal::ChildRelock, PeerWaitMs);
+    const std::uint32_t relock = harness::readSignal(words, Signal::ChildRelock);
     std::printf("  child relock after the held drop: %s\n",
                 relock == RelockOk ? "locked" : (relock == RelockRefused ? "refused" : "not reported"));
 
-    raiseSignal(words, Signal::CaseDone);
+    harness::raiseSignal(words, Signal::CaseDone);
     harness::reapChildren(spawned);
 
     ctx.check(childHeld, "the child's reconcile pass stopped on a read naming the parent");
