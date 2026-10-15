@@ -44,6 +44,10 @@ public:
     // detector window. One read + local clock; no accumulated observer state.
     [[nodiscard]] virtual bool hasFailed(const LocalPeerState& peerState, PeerId peerId) const = 0;
 
+    // Same predicate on a slot the caller already read, so a check inside an rmw judges the very
+    // stamp it is about to overwrite.
+    [[nodiscard]] virtual bool hasFailed(const Geometry::Member_t& member) const = 0;
+
 protected:
     LivenessPolicy() = default;
 };
@@ -57,6 +61,7 @@ public:
     [[nodiscard]] bool isAlive(const LocalPeerState& peerState, PeerId peerId) const override;
     [[nodiscard]] bool isAlive(const Geometry::Member_t& member) const override;
     [[nodiscard]] bool hasFailed(const LocalPeerState& peerState, PeerId peerId) const override;
+    [[nodiscard]] bool hasFailed(const Geometry::Member_t& member) const override;
 };
 
 // Factory: returns HeartbeatLivenessPolicy; future kinds selected here.

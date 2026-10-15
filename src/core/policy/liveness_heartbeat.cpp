@@ -7,6 +7,7 @@
 // is stateless -- last self-stamp older than the dead window (γ.4). Successor designation
 // (γ.3) belongs to ChainRecoveryAuthorityPolicy, not here.
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 
@@ -19,6 +20,19 @@
 
 namespace cme
 {
+
+namespace
+{
+
+// No age means the stamp is at or ahead of our clock, so the target's clock runs ahead and its witness
+// is fresh. A never-stamped slot reads as an enormous age, hence dead, as it should on a valid peer.
+[[nodiscard]] bool isPastDeadWindow(std::uint64_t lastSeenNanos)
+{
+    const std::optional<timing::Nanos> age = timing::WallStamp{lastSeenNanos}.age();
+    return age.has_value() && *age > config::liveness::DeadWindowEffective;
+}
+
+}  // namespace
 
 bool HeartbeatLivenessPolicy::isAlive(const LocalPeerState& peerState, PeerId peerId) const
 {
@@ -45,13 +59,12 @@ bool HeartbeatLivenessPolicy::hasFailed(const LocalPeerState& peerState, PeerId 
     {
         return false;
     }
-    const timing::WallStamp lastSeen{peerState.getMemberView(peerId, config::membership::CacheTTL).lastSeenNanos};
+    return isPastDeadWindow(peerState.getMemberView(peerId, config::membership::CacheTTL).lastSeenNanos);
+}
 
-    // No age means the stamp sits at or ahead of our clock: the target's own clock runs ahead, so
-    // its witness is fresh rather than stale. A slot that never stamped reads as an enormous age
-    // and so as dead, which is what an unstamped slot on a peer we consider valid is.
-    const std::optional<timing::Nanos> age = lastSeen.age();
-    return age.has_value() && *age > config::liveness::DeadWindowEffective;
+bool HeartbeatLivenessPolicy::hasFailed(const Geometry::Member_t& member) const
+{
+    return isPastDeadWindow(member.lastSeenNanos);
 }
 
 std::unique_ptr<LivenessPolicy> makeLivenessPolicy()

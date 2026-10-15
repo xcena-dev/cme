@@ -7,8 +7,8 @@
 // ClaimRecovery / TakeoverOwnership / CompleteRecovery. The 2-phase LWW claim lives in
 // RecoveryAuthorityPolicy::claim, spread non-blockingly across ticks; the failure grace
 // lives in LivenessPolicy::hasFailed, which is a single stateless comparison of the target's
-// last self-stamp against config::liveness::DeadWindowEffective -- the only re-check is claim()'s confirm one
-// config::stake::Settle later, so a stall need not be continuous for longer than that.
+// last self-stamp against config::liveness::DeadWindowEffective. The confirm tick re-checks it
+// config::stake::Settle later, and the seize re-checks status and stamp on the slot it overwrites.
 
 #include "core/algo/recovery.hpp"
 
@@ -17,6 +17,7 @@
 #include "config.hpp"
 #include "core/algo/ownership_transfer.hpp"
 #include "core/layout/geometry.hpp"
+#include "core/policy/liveness.hpp"
 #include "core/policy/recovery_authority.hpp"
 #include "core/policy/successor_policy.hpp"
 #include "core/runtime/local_peer_state.hpp"
@@ -32,22 +33,21 @@ namespace cme::recovery
 namespace
 {
 
-// Clear the dead peer's participation, which stops ORDER-family grants here; REQUEST-family
-// grants gate on the demand line and stop at FINISH instead. Idempotent, no concurrent writer.
-// Seize the dead peer's slot: clear participation so no holder grants to it again, and stamp
-// Recovering, which drops it from isAlive and from re-admission. One rmw, not two -- both fields are
-// in the same slot, and a crash between two writes would leave one of them unapplied. RA is the sole
-// writer of a dead peer's slot.
-void seizeDeadPeerSlot(LocalPeerState& peerState, PeerId deadPeerId)
+// One rmw clears participation and stamps Recovering, so a crash cannot apply only one. Refuses a None
+// slot or a fresh stamp: another authority's finish freed the id, or a new peer was admitted into it.
+[[nodiscard]] bool seizeDeadPeerSlot(LocalPeerState& peerState, PeerId deadPeerId)
 {
-    coherency::rmwIfTrue(
+    const auto& liveness = *peerState.getLivenessPolicy();
+    return coherency::rmwIfTrue(
         peerState.getMemberSlot(deadPeerId), peerState.getCoherencyMode(),
-        [](auto* member)
+        [&liveness](auto* member)
         {
-            if (!member->isValidMagic())
+            if (!member->isValidMagic() || member->hasStatus(Geometry::Member_t::Status::None) ||
+                !liveness.hasFailed(*member))
             {
                 return false;
             }
+            // Stops ORDER-family grants; REQUEST-family grants gate on the demand line and stop at FINISH.
             member->storeParticipatingDomains({});
             member->setStatus(Geometry::Member_t::Status::Recovering);
             return true;
@@ -168,7 +168,13 @@ void serviceRecovery(LocalPeerState& peerState)
 
     if (!peerState.isRecoveryArmed(targetPeerId))
     {
-        seizeDeadPeerSlot(peerState, targetPeerId);
+        if (!seizeDeadPeerSlot(peerState, targetPeerId))
+        {
+            // The id was freed or re-admitted after hasFailed read it: withdraw as for a revived target.
+            recoveryAuthority.resetClaim(peerState, targetPeerId);
+            peerState.resetRecoveryCycles();
+            return;
+        }
         peerState.setRecoveryCycles(targetPeerId);
         OBSERVE_EVENT(Event::RecoveryClaimed, peerState, targetPeerId);
     }
