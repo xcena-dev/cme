@@ -532,6 +532,7 @@ void printConfig(const Opts_t& opt)
 
 void printPerPeerTotals(const std::vector<PeerResult_t>& results)
 {
+    constexpr double NanosPerMilli = 1e6;
     const bool countersLive = hasStatsCounters(results);
     std::printf("\nper-peer totals%s:\n", countersLive ? "" : " (wait, hold and spin need a CME_STATS build)");
     for (std::uint32_t peerIndex = 0; peerIndex < results.size(); ++peerIndex)
@@ -540,7 +541,7 @@ void printPerPeerTotals(const std::vector<PeerResult_t>& results)
         if (!countersLive)
         {
             std::printf("  peer %u: acq=%" PRIu64 " wall=%.1fms dl=%u rc=%d\n", peerIndex, result.totalAcq,
-                        static_cast<double>(result.wallNs) / 1e6, result.deadlineHits.load(), result.returnCode);
+                        static_cast<double>(result.wallNs) / NanosPerMilli, result.deadlineHits.load(), result.returnCode);
             continue;
         }
         const auto avgWaitUs =
@@ -552,7 +553,7 @@ void printPerPeerTotals(const std::vector<PeerResult_t>& results)
         std::printf("  peer %u: acq=%" PRIu64 " wait_n=%" PRIu64
                     " avg_wait=%.1fus avg_hold=%.1fus wall=%.1fms spin=%.1f%% dl=%u rc=%d\n",
                     peerIndex, result.totalAcq, result.waitCount, avgWaitUs, avgHoldUs,
-                    static_cast<double>(result.wallNs) / 1e6, spinPct, result.deadlineHits.load(),
+                    static_cast<double>(result.wallNs) / NanosPerMilli, spinPct, result.deadlineHits.load(),
                     result.returnCode);
     }
 }

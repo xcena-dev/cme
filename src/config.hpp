@@ -36,6 +36,11 @@ inline constexpr auto Interval = timing::Micros{10};
 inline constexpr auto OwnershipCheckInterval = timing::Millis{50};
 // Re-read the cached scan scopes: the admission line (new joiners) and the active-domain bitmap.
 inline constexpr auto ScanRefreshInterval = timing::Millis{50};
+// Rounds of both periods that fit in one acquire::Timeout, so a waiter that misses a round still
+// sees the next one well inside its budget.
+inline constexpr std::uint32_t RoundsPerAcquire = 4;
+static_assert((OwnershipCheckInterval + ScanRefreshInterval) * RoundsPerAcquire <= acquire::Timeout,
+              "a waiter must see a scan refresh and a reconcile well within one acquire");
 }  // namespace poll_thread
 
 // Membership: the member-slot cache and a clean departure.
@@ -65,6 +70,8 @@ inline constexpr auto Settle = timing::Millis{5};
 inline constexpr timing::Millis Window{1};
 // Assumed bound on how long a flushed store stays invisible to another host.
 inline constexpr timing::Millis StoreVisibilityLag{2};
+static_assert(Window + StoreVisibilityLag * 2 <= Settle,
+              "a stake inside Window must land before an earlier staker's re-read");
 }  // namespace stake
 
 // Admission lease on the member-slot allocator.
@@ -90,13 +97,8 @@ inline constexpr auto SweepControlTimeout = timing::Millis{2};
 inline constexpr timing::Millis TickStall{100};
 // A late stake stays this long before withdrawal, since it may have deposed an authority mid-write.
 inline constexpr auto LateStakeHold = TickStall + stake::StoreVisibilityLag * 2;
-}  // namespace recovery
-
-static_assert(stake::Window + stake::StoreVisibilityLag * 2 <= stake::Settle,
-              "a stake inside Window must land before an earlier staker's re-read");
-static_assert(recovery::QuietCycles * poll_thread::Interval >= membership::LeaveDrainWindow,
+static_assert(QuietCycles * poll_thread::Interval >= membership::LeaveDrainWindow,
               "the quiet span must cover the departure drain");
-static_assert((poll_thread::OwnershipCheckInterval + poll_thread::ScanRefreshInterval) * 4 <= acquire::Timeout,
-              "a waiter must see a scan refresh and a reconcile well within one acquire");
+}  // namespace recovery
 
 }  // namespace cme::config
