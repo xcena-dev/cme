@@ -304,12 +304,15 @@ void writeCsvRow(const Opts_t& opt, DriveState_t& state)
     {
         sum += static_cast<double>(sample);
     }
-    const double meanUs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size()) / 1000.0;
+    const double meanNs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
+    const double meanUs = timing::toMicros(meanNs);
+    const double p50Us = timing::toMicros(harness::percentile(samples, 0.50));
+    const double p90Us = timing::toMicros(harness::percentile(samples, 0.90));
+    const double p99Us = timing::toMicros(harness::percentile(samples, 0.99));
     if (FILE* out = std::fopen(opt.csvPath, "a"))
     {
-        std::fprintf(out, "%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", opt.numPeers, opt.numDomains,
-                     meanUs, harness::percentile(samples, 0.50) / 1000.0, harness::percentile(samples, 0.90) / 1000.0,
-                     harness::percentile(samples, 0.99) / 1000.0, samples.size());
+        std::fprintf(out, "%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n",
+                     opt.numPeers, opt.numDomains, meanUs, p50Us, p90Us, p99Us, samples.size());
         std::fclose(out);
     }
 }

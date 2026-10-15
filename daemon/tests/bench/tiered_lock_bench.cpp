@@ -484,12 +484,14 @@ void report(const Config_t& chosen, Run_t& shared)
     }
 
     // Appended, because the sweep writes the header once and then collects a row per cell.
+    const double meanUs = timing::toMicros(mean);
+    const double p50Us = timing::toMicros(percentile(everyAcquire, 0.50));
+    const double p90Us = timing::toMicros(percentile(everyAcquire, 0.90));
+    const double p99Us = timing::toMicros(percentile(everyAcquire, 0.99));
     if (std::FILE* out = std::fopen(chosen.csv.c_str(), "a"))
     {
-        std::fprintf(out, "%u,%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", chosen.nodes, chosen.threadsPerNode,
-                     chosen.domains, mean / 1000.0, percentile(everyAcquire, 0.50) / 1000.0,
-                     percentile(everyAcquire, 0.90) / 1000.0,
-                     percentile(everyAcquire, 0.99) / 1000.0, samples);
+        std::fprintf(out, "%u,%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", chosen.nodes, chosen.threadsPerNode, chosen.domains,
+                     meanUs, p50Us, p90Us, p99Us, samples);
         static_cast<void>(std::fclose(out));
     }
 }

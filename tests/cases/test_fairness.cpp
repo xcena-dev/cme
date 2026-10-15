@@ -544,10 +544,10 @@ void printPerPeerTotals(const std::vector<PeerResult_t>& results)
                         static_cast<double>(result.wallNs) / NanosPerMilli, result.deadlineHits.load(), result.returnCode);
             continue;
         }
-        const auto avgWaitUs =
-            result.waitCount ? static_cast<double>(result.waitTime) / static_cast<double>(result.waitCount) / 1000.0 : 0.0;
-        const auto avgHoldUs =
-            result.totalAcq ? static_cast<double>(result.lockHoldTime) / static_cast<double>(result.totalAcq) / 1000.0 : 0.0;
+        const double avgWaitNs = result.waitCount ? static_cast<double>(result.waitTime) / static_cast<double>(result.waitCount) : 0.0;
+        const double avgWaitUs = timing::toMicros(avgWaitNs);
+        const double avgHoldNs = result.totalAcq ? static_cast<double>(result.lockHoldTime) / static_cast<double>(result.totalAcq) : 0.0;
+        const double avgHoldUs = timing::toMicros(avgHoldNs);
         const auto spinPct =
             result.waitTime ? static_cast<double>(result.spinTime) / static_cast<double>(result.waitTime) * 100.0 : 0.0;
         std::printf("  peer %u: acq=%" PRIu64 " wait_n=%" PRIu64
@@ -592,18 +592,18 @@ void printLatencyDistribution(const Opts_t& opt, const std::vector<PeerResult_t>
     const auto pct = [&](double fraction) -> double
     {
         const auto index = static_cast<std::size_t>(fraction * static_cast<double>(count - 1));
-        return static_cast<double>(allLat[index]) / 1000.0;
+        return timing::toMicros(static_cast<double>(allLat[index]));
     };
     std::uint64_t sum = 0;
     for (const auto sample : allLat)
     {
         sum += sample;
     }
+    const double meanNs = static_cast<double>(sum) / static_cast<double>(count);
+    const double meanUs = timing::toMicros(meanNs);
     std::printf(
-        "\nacquire latency (us, n=%zu): mean=%.3f p50=%.3f p90=%.3f "
-        "p99=%.3f p999=%.3f max=%.3f\n",
-        count, static_cast<double>(sum) / static_cast<double>(count) / 1000.0, pct(0.50), pct(0.90), pct(0.99),
-        pct(0.999), static_cast<double>(allLat.back()) / 1000.0);
+        "\nacquire latency (us, n=%zu): mean=%.3f p50=%.3f p90=%.3f p99=%.3f p999=%.3f max=%.3f\n",
+        count, meanUs, pct(0.50), pct(0.90), pct(0.99), pct(0.999), timing::toMicros(static_cast<double>(allLat.back())));
 
     if (opt.latCsv != nullptr)
     {

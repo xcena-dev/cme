@@ -356,10 +356,10 @@ int runLatencySweep(const Opts_t& opt, Region_t& region)
         sum += static_cast<double>(sample);
     }
     const double meanNs = samples.empty() ? 0.0 : sum / static_cast<double>(samples.size());
-    const double meanUs = meanNs / 1000.0;
-    const double p50 = harness::percentile(samples, 0.50) / 1000.0;
-    const double p90 = harness::percentile(samples, 0.90) / 1000.0;
-    const double p99 = harness::percentile(samples, 0.99) / 1000.0;
+    const double meanUs = timing::toMicros(meanNs);
+    const double p50 = timing::toMicros(harness::percentile(samples, 0.50));
+    const double p90 = timing::toMicros(harness::percentile(samples, 0.90));
+    const double p99 = timing::toMicros(harness::percentile(samples, 0.99));
     const double tput = wallSec > 0 ? static_cast<double>(samples.size()) / wallSec : 0.0;
 
     std::printf("\n=== mutex baseline (process-shared pthread_mutex, shm) ===\n");

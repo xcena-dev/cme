@@ -44,8 +44,16 @@ using Secs = std::chrono::seconds;
 
 // Fractional, for a report that wants the part below the unit. The integral ones above truncate it
 // away, and a caller that divided an integral count by 1000 to get there lost it before dividing.
+using NanosF = std::chrono::duration<double, std::nano>;
+using MicrosF = std::chrono::duration<double, std::micro>;
 using MillisF = std::chrono::duration<double, std::milli>;
 using SecsF = std::chrono::duration<double>;
+
+// A nanosecond count that is already a double, such as a mean or a percentile, in microseconds.
+[[nodiscard]] constexpr double toMicros(double nanos) noexcept
+{
+    return MicrosF{NanosF{nanos}}.count();
+}
 
 // A duration as the raw count a shared word or a C interface in that unit takes. constexpr, so a
 // configuration constant converts once at compile time instead of on every comparison against it.

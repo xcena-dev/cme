@@ -223,12 +223,15 @@ void reportLatency(const Config_t& cfg, std::vector<std::uint64_t>& acqLatNs)
     {
         return;
     }
+    const double meanUs = timing::toMicros(meanNs);
+    const double p50Us = timing::toMicros(harness::percentile(acqLatNs, 0.50));
+    const double p90Us = timing::toMicros(harness::percentile(acqLatNs, 0.90));
+    const double p99Us = timing::toMicros(harness::percentile(acqLatNs, 0.99));
     if (std::FILE* out = std::fopen(csv.c_str(), "a"))
     {
-        std::fprintf(out, "%u,%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n", cfg.numPeers, cfg.threadsPerPeer,
-                     cfg.numDomains, meanNs / 1000.0, harness::percentile(acqLatNs, 0.50) / 1000.0,
-                     harness::percentile(acqLatNs, 0.90) / 1000.0, harness::percentile(acqLatNs, 0.99) / 1000.0,
-                     acqLatNs.size());
+        std::fprintf(out, "%u,%u,%u,%.3f,%.3f,%.3f,%.3f,%zu\n",
+                     cfg.numPeers, cfg.threadsPerPeer, cfg.numDomains, meanUs,
+                     p50Us, p90Us, p99Us, acqLatNs.size());
         std::fclose(out);
     }
 }
