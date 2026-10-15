@@ -3,7 +3,9 @@
 //
 // latency.cpp -- global lane registry + JSONL dump for CME_LATENCY.
 
-#include "observe/latency.hpp"
+// Its own header, so the include stays whatever the build says. With CME_LATENCY off the rest of
+// this file compiles to nothing and include-cleaner then reads the include as unused.
+#include "observe/latency.hpp"  // NOLINT(misc-include-cleaner)
 
 #if defined(CME_LATENCY)
 
