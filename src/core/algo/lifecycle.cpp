@@ -13,6 +13,7 @@
 #include "core/algo/ownership_transfer.hpp"
 #include "core/domain_bitmap.hpp"
 #include "core/layout/geometry.hpp"
+#include "core/policy/recovery_authority.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/failpoint.hpp"
@@ -236,6 +237,10 @@ void leaveMembership(LocalPeerState& peerState) noexcept
         }
         peerState.getDomain(domainId).resetOwnershipPins();
     }
+
+    // A recovery abandoned by the poll stop leaves our claim on its target. The next occupant of this id
+    // would read as that claim's live author, so nobody resumes the target unless the claim goes first.
+    peerState.getRecoveryAuthorityPolicy()->retractClaimsBy(peerState, selfPeerId);
 
     // Participation goes with None, same cacheline and same write: admission reserves this slot by
     // stamping Active without touching participation, so bits left here would let a holder grant to

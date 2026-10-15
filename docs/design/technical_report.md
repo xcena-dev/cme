@@ -562,6 +562,12 @@ Holding the claim ([§10.4](#104-recovery-authority)), the RA runs a fixed seque
 4. **Commit last.** Setting the *MemberSlot* status to `Free` (`Member_t::Status::None` in the implementation) is the single commit point, and it doubles as the **readmit gate** — admission reuses only `Free` slots, so the dead peer's ghost identity cannot be revived through slot reuse before the scrubs above complete.
    The RA then retracts its own claim word ([§10.4](#104-recovery-authority)).
    Because `Free` is written last and every earlier step is idempotent and re-runnable, an RA that dies mid-recovery leaves a resumable prefix: a successor RA re-runs the sequence from the top ([§8.4](#84-abstractions-and-limits)).
+   An RA can also leave cleanly mid-recovery, 
+   because a leave stops the poll thread after a short drain.
+   The leaving RA retracts every claim word it authored before its own slot reads `Free`, 
+   so the target it abandoned is resumable in the same way.
+   The next joiner may reuse that id, 
+   and a claim still naming it would read as a live RA and strand the target.
 
 An RA is a peer, so it too can die mid-recovery.
 The dead RA is itself recovered like any peer, while membership re-derivation hands the original dead peer a new RA that re-runs the idempotent sequence.

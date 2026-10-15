@@ -242,6 +242,7 @@ cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
 cme_test_exe(cme-admission-late-stake-test test_admission_late_stake.cpp)
 cme_test_exe(cme-recovery-late-stake-test test_recovery_late_stake.cpp)
 cme_test_exe(cme-recovery-readmitted-target-test test_recovery_readmitted_target.cpp)
+cme_test_exe(cme-recovery-departed-authority-test test_recovery_departed_authority.cpp)
 cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
 cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
 cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
@@ -449,6 +450,11 @@ cme_case(recovery_late_stake TARGET cme-recovery-late-stake-test STRATEGY reques
 # A confirmed authority held before its seize while its target's slot is freed and re-admitted.
 # Skips without CME_FAILPOINT.
 cme_case(recovery_readmitted_target TARGET cme-recovery-readmitted-target-test STRATEGY request
+    BACKENDS shm SHM_TIMEOUT 60)
+
+# An authority that leaves cleanly mid-takeover, then a new peer admitted into its slot.
+# Skips without CME_FAILPOINT.
+cme_case(recovery_departed_authority TARGET cme-recovery-departed-authority-test STRATEGY request
     BACKENDS shm SHM_TIMEOUT 60)
 
 # A holder killed while handing over, on either side of the record write. All four, because which
