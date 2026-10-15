@@ -51,13 +51,24 @@ void adoptOwnership(LocalDomainView& domain, std::uint64_t newEpoch) noexcept
 void reconcileHolderBelief(LocalPeerState& peerState, DomainId domainId)
 {
     auto& domain = peerState.getDomain(domainId);
-    if (coherency::get(peerState.getDomainRecord(domainId), peerState.getCoherencyMode()).getHolder() == peerState.getPeerId())
+    const auto isNamedHolder = [&peerState, domainId]
+    {
+        const auto record = coherency::get(peerState.getDomainRecord(domainId), peerState.getCoherencyMode());
+        return record.getHolder() == peerState.getPeerId();
+    };
+    if (isNamedHolder())
     {
         domain.becomeHolder();
+        return;
     }
-    else
+    CME_FAILPOINT_REACH(failpoint::Boundary::ReconcileBeforeLose);
+    domain.loseHolder();
+    // Our worker may have adopted the domain since the read above, and the drop must not outlive that
+    // adopt. The fence keeps the second read behind the drop, so a record naming us now restores it.
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+    if (isNamedHolder())
     {
-        domain.loseHolder();
+        domain.becomeHolder();
     }
 }
 
