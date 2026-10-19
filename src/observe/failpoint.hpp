@@ -34,10 +34,12 @@ enum class Boundary : std::uint32_t
 
     FormatBeforeHeader,  // slots are down, the header magic is not
 
-    AdmissionBeforeStake,   // the lease read free or stalled, the stake not yet written
-    AdmissionBeforeCommit,  // the lease is held, no member slot reserved
-    AdmissionAfterCommit,   // the slot reads Active, the lease is still held
-    JoinBeforeBaseline,     // JoinMembership: slot Active, domains not baselined
+    AdmissionBeforeStake,        // the lease read free or stalled, the stake not yet written
+    AdmissionBeforeWithdraw,     // a late stake held its hold, its nonce not yet withdrawn
+    AdmissionReleaseAfterCheck,  // the line read as carrying our nonce, the clear not yet written
+    AdmissionBeforeCommit,       // the lease is held, no member slot reserved
+    AdmissionAfterCommit,        // the slot reads Active, the lease is still held
+    JoinBeforeBaseline,          // JoinMembership: slot Active, domains not baselined
 
     CreateBeforeActivate,    // the record is Active, the scan-scope bitmap is not
     DeleteBeforeFree,        // participation retracted, the record not yet Free
@@ -74,6 +76,10 @@ enum class Boundary : std::uint32_t
             return "format.before_header";
         case Boundary::AdmissionBeforeStake:
             return "admission.before_stake";
+        case Boundary::AdmissionBeforeWithdraw:
+            return "admission.before_withdraw";
+        case Boundary::AdmissionReleaseAfterCheck:
+            return "admission.release_after_check";
         case Boundary::AdmissionBeforeCommit:
             return "admission.before_commit";
         case Boundary::AdmissionAfterCommit:

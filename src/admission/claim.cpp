@@ -3,10 +3,9 @@
 //
 // claim.cpp -- peer-slot claim (Session::open path).
 //
-// Joins serialise through one nonce lease so peerScanBound has a single writer. With no cross-host
-// CAS, a joiner stakes a nonce, settles and re-reads. The joiner whose nonce survived holds the lease.
-// A stake flushed more than config::stake::Window after the read that found the lease free or stalled gives up.
-// A lease unchanged for config::lease::Timeout is stolen, so a crash mid-claim never wedges later joiners.
+// Joins serialise through one nonce lease so peerScanBound has a single writer. The lease is a
+// stake::Claim over a random nonce per attempt: staked, settled and re-read, held and withdrawn when
+// late. A nonce unchanged for config::lease::Timeout is stolen, so a crash mid-claim never wedges joiners.
 
 #include "admission/claim.hpp"
 
@@ -19,6 +18,7 @@
 #include "cme/shared.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
+#include "core/algo/stake_claim.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "observe/failpoint.hpp"
@@ -43,99 +43,87 @@ std::uint64_t getRandomNonce()
     return nonce;
 }
 
-// Stake a fresh nonce, settle, re-read: the nonce if it survived. The caller rmb'd the line just
-// after opening @window, and a stake flushed once @window has closed gives up without settling.
-[[nodiscard]] std::optional<std::uint64_t> stakeLease(Geometry::AdmissionControl_t* admissionControl,
-                                                      const timing::Deadline& window, CoherencyMode mode)
-{
-    CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionBeforeStake);
-    // Fresh per stake, so a joiner watching a nonce we abandoned sees this stake as a change.
-    const std::uint64_t nonce = getRandomNonce();
-    admissionControl->nonce = nonce;
-    coherency::wmb(admissionControl, sizeof(*admissionControl), mode);
-    if (window.expired())
-    {
-        return std::nullopt;
-    }
-    std::this_thread::sleep_for(config::stake::Settle);
-    if (coherency::get(admissionControl, mode).nonce != nonce)  // rmb + 64B read
-    {
-        return std::nullopt;
-    }
-    return nonce;
-}
+// The lease holder's token, zero while the lease is free.
+using NonceField = stake::FieldWord<Geometry::AdmissionControl_t, std::uint64_t, &Geometry::AdmissionControl_t::nonce>;
 
-// True if @held stayed unchanged for config::lease::Timeout (holder presumed dead -> steal);
-// false if it changed (released / handed off -> recontend).
-[[nodiscard]] bool isLeaseStalled(Geometry::AdmissionControl_t* admissionControl, std::uint64_t held,
-                                  CoherencyMode mode)
-{
-    const timing::Deadline until{config::lease::Timeout};
-    while (!until.expired())
-    {
-        std::this_thread::sleep_for(config::lease::PollGap);
-        if (coherency::get(admissionControl, mode).nonce != held)  // rmb + 64B read
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-// Acquire the membership lease (steal-on-stall) and return the nonce that holds it. Throws on
-// deadline. A stake that gave up leaves our nonce in the line, and only the steal path clears it.
-[[nodiscard]] std::uint64_t acquireLease(Geometry::AdmissionControl_t* admissionControl, CoherencyMode mode)
-{
-    const timing::Deadline deadline{config::lease::AcquireDeadline};
-    while (!deadline.expired())
-    {
-        const timing::Deadline freeWindow{config::stake::Window};
-        const std::uint64_t held = coherency::get(admissionControl, mode).nonce;  // rmb + 64B read
-
-        // (1) Free -> stake it.
-        if (held == 0)
-        {
-            if (const auto nonce = stakeLease(admissionControl, freeWindow, mode))
-            {
-                return *nonce;
-            }
-            continue;  // lost the stake race, or staked too late to settle
-        }
-
-        // (2) Held -> watch; recontend if the holder frees it.
-        if (!isLeaseStalled(admissionControl, held, mode))
-        {
-            continue;  // holder progressed -> recontend
-        }
-
-        // (3) Stalled (holder dead) -> re-confirm, then steal.
-        const timing::Deadline stealWindow{config::stake::Window};
-        if (coherency::get(admissionControl, mode).nonce != held)  // rmb + 64B read
-        {
-            continue;  // moved since the watch -> recontend
-        }
-        if (const auto nonce = stakeLease(admissionControl, stealWindow, mode))
-        {
-            return *nonce;
-        }
-    }
-    throw NoFreeSlotError{"cme: membership lease not acquired before deadline"};
-}
-
+// Clears the line only while it still carries @nonce, so another joiner's stake is never erased.
 void releaseLease(Geometry::AdmissionControl_t* admissionControl, std::uint64_t nonce,
                   CoherencyMode mode) noexcept
 {
-    coherency::rmwIfTrue(
-        admissionControl, mode,
-        [nonce](auto* control)
+    NonceField{admissionControl, mode, 0}.retract(nonce, failpoint::Boundary::AdmissionReleaseAfterCheck);
+}
+
+// The lease line as the claim procedure sees it: a fresh random nonce per attempt, free at zero,
+// and open to a steal once one nonce has stood for config::lease::Timeout.
+class LeaseWord
+{
+public:
+    using Value = std::uint64_t;
+
+    // A late stake may have overwritten a holder mid-claim, so it stays until that holder's last write lands.
+    static constexpr auto LateHold = config::lease::LateStakeHold;
+    static constexpr std::optional<timing::Millis> StallTimeout{config::lease::Timeout};
+
+    LeaseWord(Geometry::AdmissionControl_t* admissionControl, CoherencyMode mode) noexcept
+        : field_{admissionControl, mode, 0},
+          mode_{mode}
+    {
+    }
+
+    [[nodiscard]] Value read() const
+    {
+        return field_.read();
+    }
+
+    [[nodiscard]] static bool isFree(Value nonce) noexcept
+    {
+        return nonce == 0;
+    }
+
+    // Fresh per stake, so a joiner watching a nonce we abandoned sees this stake as a change.
+    [[nodiscard]] static Value makeOwn()
+    {
+        return getRandomNonce();
+    }
+
+    // Only the nonce is stored, not a copy of the line: the holder writes peerScanBound in this line
+    // too, and writing back an older copy would undo it.
+    [[nodiscard]] bool publish(Value nonce) noexcept
+    {
+        CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionBeforeStake);
+        auto* const control = field_.getLine();
+        control->nonce = nonce;
+        coherency::wmb(control, sizeof(*control), mode_);
+        return true;
+    }
+
+    void retract(Value nonce) noexcept
+    {
+        CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionBeforeWithdraw);
+        releaseLease(field_.getLine(), nonce, mode_);
+    }
+
+private:
+    NonceField field_;
+    CoherencyMode mode_;
+};
+
+// Acquire the membership lease and return the nonce that holds it. Throws on deadline. A stake that
+// gave up has cleared its own nonce, unless it died first and left it to a steal.
+[[nodiscard]] std::uint64_t acquireLease(Geometry::AdmissionControl_t* admissionControl, CoherencyMode mode)
+{
+    LeaseWord word{admissionControl, mode};
+    stake::Claim<LeaseWord::Value> claim;
+    const timing::Deadline deadline{config::lease::AcquireDeadline};
+    while (!deadline.expired())
+    {
+        if (claim.tick(word) == stake::Outcome::Won)
         {
-            if (control->nonce != nonce)
-            {
-                return false;
-            }
-            control->nonce = 0u;
-            return true;
-        });
+            return claim.getMine();
+        }
+        std::this_thread::sleep_for(claim.getNextWait(config::lease::PollGap));
+    }
+    throw NoFreeSlotError{"cme: membership lease not acquired before deadline"};
 }
 
 // Caller holds the lease. Reserve the lowest free slot: Active marks it so a concurrent

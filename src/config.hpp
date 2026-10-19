@@ -82,6 +82,15 @@ inline constexpr auto Timeout = timing::Millis{200};
 inline constexpr auto PollGap = timing::Millis{2};
 // Covers a full MaxPeers burst.
 inline constexpr auto AcquireDeadline = timing::Secs{5};
+// Assumed bound on a lease writer's stall: a holder between its confirmation and its last write,
+// or a late staker between finding its own nonce and clearing it.
+inline constexpr timing::Millis WriterStall{50};
+// A late stake stays this long before withdrawal, since it may have overwritten a holder mid-claim.
+inline constexpr auto LateStakeHold = WriterStall + stake::StoreVisibilityLag * 2;
+static_assert(stake::Settle + WriterStall + stake::StoreVisibilityLag < Timeout,
+              "a holder's claim must land before a watcher steals its nonce");
+static_assert(LateStakeHold + WriterStall + stake::StoreVisibilityLag < Timeout,
+              "a late stake's hold and withdrawal must land before a watcher steals it");
 }  // namespace lease
 
 // Recovery of a dead peer's slot and domains.

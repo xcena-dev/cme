@@ -1,6 +1,6 @@
 # src/core/algo/ — the algorithms
 
-These four pairs hold the mechanism that the policies in [`../policy/`](../policy/) plug into.
+These files hold the mechanism that the policies in [`../policy/`](../policy/) plug into.
 The split is deliberate: the invariants live here, so a policy can be swapped without putting them at risk.
 
 | | |
@@ -9,6 +9,7 @@ The split is deliberate: the invariants live here, so a policy can be swapped wi
 | `ownership_transfer.{hpp,cpp}` | The strategy-agnostic primitives: publish a domain record, wait for ownership, take a domain over. Every policy reaches ownership through these, and none of them writes an ownership record itself. |
 | `lifecycle.{hpp,cpp}` | Membership: join, leave, rejoin. Membership changes while the region is live, so this is not setup code. |
 | `recovery.{hpp,cpp}` | The recovery state machine, run from the poll thread. Detect a dead peer, claim the right to recover it, seize what it held, then declare its slot free. |
+| `stake_claim.hpp` | The claim procedure for one word that several hosts may write at once: stake, settle and re-read, and hold then withdraw a stake that landed late. The admission lease and the recovery claim both run it, each with its own value and its own rule for reopening a held word. |
 
 ## Two rules worth knowing before editing
 

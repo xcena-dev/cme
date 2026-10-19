@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "common/timing.hpp"
+#include "core/algo/stake_claim.hpp"
 #include "core/types.hpp"
 
 namespace cme
@@ -88,11 +88,7 @@ public:
 
 private:
     PeerId claimTarget_{NoPeer};  // dead peer we are settling, won, or holding a late stake on
-    bool lateStake_{false};       // the stake on claimTarget_ landed late: held, then withdrawn
-
-    // Settle, or the late-stake hold. A zero budget, so it reads as expired until a claim opens a
-    // real one; claimTarget_ says whether a window is open.
-    timing::Deadline claimWindow_{timing::Nanos::zero()};
+    stake::Claim<PeerId> stake_;  // the claim procedure on claimTarget_'s slot
 };
 
 // Factory: returns ChainRecoveryAuthorityPolicy; future kinds selected here.

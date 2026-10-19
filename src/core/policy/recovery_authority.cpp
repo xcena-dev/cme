@@ -11,15 +11,16 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "common/timing.hpp"
 #include "config.hpp"
+#include "core/algo/stake_claim.hpp"
 #include "core/policy/liveness.hpp"
 #include "core/policy/recovery_authority_layout.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
 #include "observe/failpoint.hpp"
-#include "util/coherency.hpp"
 #include "util/endian.hpp"
 
 namespace cme
@@ -28,12 +29,14 @@ namespace cme
 namespace
 {
 
-// Named rather than spelled out at all five call sites: the layout is a pointer cast, so
-// building one per call costs nothing, and this keeps the reads reading as claim lookups.
-[[nodiscard]] RecoveryAuthorityLayout::RecoveryClaim_t*
-getClaimSlot(const LocalPeerState& peerState, PeerId deadPeerId) noexcept
+// The recovering RA's id, NoPeer while nobody holds the claim.
+using ClaimField = stake::FieldWord<RecoveryAuthorityLayout::RecoveryClaim_t, PeerId,
+                                    &RecoveryAuthorityLayout::RecoveryClaim_t::recoveryAuthority>;
+
+// The layout is a pointer cast, so building one per call costs nothing.
+[[nodiscard]] ClaimField getClaimField(const LocalPeerState& peerState, PeerId deadPeerId) noexcept
 {
-    return RecoveryAuthorityLayout{peerState}.getClaim(deadPeerId);
+    return ClaimField{RecoveryAuthorityLayout{peerState}.getClaim(deadPeerId), peerState.getCoherencyMode(), NoPeer};
 }
 
 // The recorded RA no longer owns the claim: retracted, or itself failed. Uses the heartbeat
@@ -49,38 +52,68 @@ getClaimSlot(const LocalPeerState& peerState, PeerId deadPeerId) noexcept
 
 // Stuck in Recovering because the RA that staked it died: the slot names a failed or absent
 // RA, so nobody is completing it. Selectable for resume -- the FSM is idempotent.
+// An unwritten slot reads as NoPeer, so it counts as stranded too: no claim backs its Recovering.
 [[nodiscard]] bool isRecoveryStranded(const LocalPeerState& peerState, PeerId deadPeerId)
 {
-    const auto recoveryClaim = coherency::get(getClaimSlot(peerState, deadPeerId), peerState.getCoherencyMode());
-    if (!recoveryClaim.isValidMagic())
+    return isClaimantGone(peerState, getClaimField(peerState, deadPeerId).read());
+}
+
+// One dead peer's claim slot as the claim procedure sees it. The value is this RA's own id, and the
+// slot is free when unclaimed, already ours, or held by an RA the heartbeat FD has given up on.
+class RecoveryClaimWord
+{
+public:
+    using Value = PeerId;
+
+    // A late stake may have deposed an authority mid-write, so it stays until that write has landed.
+    static constexpr auto LateHold = config::recovery::LateStakeHold;
+    // The recorded authority's death reopens the claim, never time alone.
+    static constexpr std::optional<timing::Millis> StallTimeout{};
+
+    RecoveryClaimWord(const LocalPeerState& peerState, PeerId deadPeerId) noexcept
+        : peerState_{peerState},
+          field_{getClaimField(peerState, deadPeerId)}
     {
-        return true;  // no live claim record backing the Recovering status
     }
-    return isClaimantGone(peerState, static_cast<PeerId>(recoveryClaim.recoveryAuthority));
-}
 
-[[nodiscard]] bool isOwnClaim(const LocalPeerState& peerState, PeerId target)
-{
-    const auto claim = coherency::get(getClaimSlot(peerState, target), peerState.getCoherencyMode());
-    return claim.isValidMagic() && claim.isAuthoredBy(peerState.getPeerId());
-}
+    [[nodiscard]] Value read() const
+    {
+        return field_.read();
+    }
 
-// Withdraw our stake on @target. Only a word we authored: a later LWW writer's claim stands.
-void retractOwnClaim(const LocalPeerState& peerState, PeerId target)
-{
-    const auto self = peerState.getPeerId();
-    coherency::rmwIfTrue(
-        getClaimSlot(peerState, target), peerState.getCoherencyMode(),
-        [self](auto* recoveryClaim)
-        {
-            if (!recoveryClaim->isValidMagic() || !recoveryClaim->isAuthoredBy(self))
+    [[nodiscard]] bool isFree(Value recordedRA) const
+    {
+        return recordedRA == peerState_.getPeerId() || isClaimantGone(peerState_, recordedRA);
+    }
+
+    [[nodiscard]] Value makeOwn() const noexcept
+    {
+        return peerState_.getPeerId();
+    }
+
+    // Judged again on the copy the write is made from. The claim line is no-cache, so that copy is
+    // the current LWW winner without a settle race, and a live RA's claim is yielded to.
+    [[nodiscard]] bool publish(Value self)
+    {
+        return field_.publishIfFree(
+            self,
+            [this](PeerId recordedRA)
             {
-                return false;
-            }
-            recoveryClaim->retract();
-            return true;
-        });
-}
+                return isFree(recordedRA);
+            },
+            failpoint::Boundary::RecoveryBeforeStake);
+    }
+
+    // Only a claim we authored: a later LWW writer's claim stands.
+    void retract(Value self) const noexcept
+    {
+        field_.retract(self);
+    }
+
+private:
+    const LocalPeerState& peerState_;
+    ClaimField field_;
+};
 
 }  // namespace
 
@@ -120,69 +153,17 @@ PeerId ChainRecoveryAuthorityPolicy::getRecoveryTarget(const LocalPeerState& pee
 
 bool ChainRecoveryAuthorityPolicy::claim(LocalPeerState& peerState, PeerId deadPeerId)
 {
-    const auto self = peerState.getPeerId();
-
-    if (claimTarget_ == NoPeer)
-    {
-        // Opened before the read, as admission does: a stake flushed after it closes may land
-        // behind another authority's confirmation, so it never settles.
-        const timing::Deadline stakeWindow{config::stake::Window};
-        // Stake only when the right is up for grabs: unclaimed, held by a dead RA, or already
-        // ours. A live claim means yield. The claim line is no-cache, so the lambda sees the
-        // current LWW winner without a settle race.
-        const bool wrote = coherency::rmwIfTrue(
-            getClaimSlot(peerState, deadPeerId), peerState.getCoherencyMode(),
-            [&](auto* recoveryClaim)
-            {
-                if (!recoveryClaim->isValidMagic())
-                {
-                    return false;  // never stake through an invalid slot
-                }
-                const auto recordedRA = static_cast<PeerId>(recoveryClaim->recoveryAuthority);
-                if (recordedRA != self && !isClaimantGone(peerState, recordedRA))
-                {
-                    return false;  // a live RA holds the claim -> yield, no write
-                }
-                CME_FAILPOINT_REACH(failpoint::Boundary::RecoveryBeforeStake);
-                recoveryClaim->recoveryAuthority = self;
-                return true;
-            });
-        if (!wrote)
-        {
-            return false;  // yielded to a live claim or invalid slot; retry next tick
-        }
-        lateStake_ = stakeWindow.expired();
-        claimTarget_ = deadPeerId;
-        claimWindow_ = timing::Deadline{lateStake_ ? config::recovery::LateStakeHold : config::stake::Settle};
-        return false;  // settling, or holding a late stake
-    }
-
-    if (!claimWindow_.expired())
-    {
-        return false;
-    }
-
-    // A late stake stays until the authority it may have deposed has finished the write it was
-    // making, so no other stake starts meanwhile. Then it goes, and the claim is open again.
-    if (lateStake_)
-    {
-        resetClaim(peerState);
-        return false;
-    }
-
-    // Settle window elapsed: confirm win/loss by re-reading the slot (a later
-    // cross-host LWW write may have overwritten us).
-    if (isOwnClaim(peerState, deadPeerId))
-    {
-        return true;  // won
-    }
-    claimTarget_ = NoPeer;
-    return false;  // lost
+    // getRecoveryTarget hands back claimTarget_ while staked, so a tick never switches targets
+    // mid-stake. Staked or not after the tick decides whether it stays latched.
+    RecoveryClaimWord word{peerState, deadPeerId};
+    const bool won = stake_.tick(word) == stake::Outcome::Won;
+    claimTarget_ = stake_.isStaked() ? deadPeerId : NoPeer;
+    return won;
 }
 
 bool ChainRecoveryAuthorityPolicy::isClaimHeld(const LocalPeerState& peerState, PeerId deadPeerId) const
 {
-    return isOwnClaim(peerState, deadPeerId);
+    return getClaimField(peerState, deadPeerId).isMine(peerState.getPeerId());
 }
 
 void ChainRecoveryAuthorityPolicy::resetClaim(LocalPeerState& peerState)
@@ -190,10 +171,10 @@ void ChainRecoveryAuthorityPolicy::resetClaim(LocalPeerState& peerState)
     // Retract, then drop the latch so getRecoveryTarget falls back to the ring.
     if (claimTarget_ != NoPeer)
     {
-        retractOwnClaim(peerState, claimTarget_);
+        RecoveryClaimWord word{peerState, claimTarget_};
+        stake_.reset(word);
     }
     claimTarget_ = NoPeer;
-    lateStake_ = false;
 }
 
 void ChainRecoveryAuthorityPolicy::resetClaim(LocalPeerState& peerState, PeerId target)
@@ -213,17 +194,7 @@ void ChainRecoveryAuthorityPolicy::retractClaimsBy(LocalPeerState& peerState, Pe
     const std::uint32_t maxPeers = peerState.getMaxPeers();
     for (std::uint32_t deadPeerId = 0; deadPeerId < maxPeers; ++deadPeerId)
     {
-        coherency::rmwIfTrue(
-            getClaimSlot(peerState, static_cast<PeerId>(deadPeerId)), peerState.getCoherencyMode(),
-            [recoveredPeerId](auto* recoveryClaim)
-            {
-                if (!recoveryClaim->isValidMagic() || !recoveryClaim->isAuthoredBy(recoveredPeerId))
-                {
-                    return false;
-                }
-                recoveryClaim->retract();
-                return true;
-            });
+        getClaimField(peerState, static_cast<PeerId>(deadPeerId)).retract(recoveredPeerId);
     }
 }
 

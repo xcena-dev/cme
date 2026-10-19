@@ -762,6 +762,7 @@ Two things cannot have one pre-assigned writer, because the whole point is that 
 For these the implementation drops to last-writer-wins (LWW) over a single word — atomic-free, since there is no cross-host CAS — and makes the race *outcome* safe rather than preventing the race.
 Neither is a break taken by choice: the single-writer rule of [§9.1](#91-one-writer-per-cacheline) cannot hold here — the situation forces contention, as each bullet explains.
 Both are confined to one word.
+Both run one claim procedure, and they differ only in the value a candidate stakes and in the rule that reopens a word another candidate holds.
 
 - **Admission — the nonce lease.** Once a peer is a member it owns its *MemberSlot* outright, a single writer by [§9.1](#91-one-writer-per-cacheline).
   Claiming that slot in the first place happens *before* membership: the joiner owns nothing yet, so it cannot `lock`, and several joiners may reach for the same free slots at once.
@@ -769,6 +770,7 @@ Both are confined to one word.
   The joiner stakes a random nonce, waits one settle interval, then re-reads: if its nonce survived it holds the lease, if not it lost and retries.
   A stake flushed more than a fixed stake window after the read that found the lease free gives up without settling.
   Such a stake could land after another joiner had already confirmed ([§11.4](#114-the-lww-settle-window)).
+  The joiner that gave up holds its stake for a fixed hold, then clears its own nonce if the line still carries it.
   A lease left unchanged for a fixed steal window is presumed dead and stolen, so a crash mid-claim never wedges later joiners.
   Holding the lease, the joiner reserves the lowest free slot.
 - **Recovery — the claim.** Which peer is a target's RA is derived from membership — under a ring-order policy, for instance, its ring neighbour — and membership shifts as peers join and leave.
@@ -1313,13 +1315,17 @@ The joiner checks the timer once its stake is flushed.
 A stake flushed more than 1 ms after that read gives up without settling.
 A stake that passes becomes visible less than 1 ms plus two store-visibility lags after the stake it raced was flushed.
 The 5 ms settle outlasts that span as long as a flushed store becomes visible to other hosts within 2 ms.
-A stake that gave up may still overwrite a holder's nonce.
-Later joiners then wait out the steal window before they get in.
+A stake that gave up may still overwrite a holder's nonce while the holder is reserving its slot.
+Withdrawn at once, it would let another joiner in before the holder's last write lands.
+So the joiner holds it for 50 ms plus two store-visibility lags, then clears its own nonce if the line still carries it.
+The hold assumes a holder never stalls longer than 50 ms between its confirmation and its last write.
+The steal window outlasts the hold, a withdrawer's stall of the same bound and one visibility lag, so a watcher never steals a nonce that is about to be cleared.
+A joiner that dies during its hold leaves its nonce to the steal window, as a crashed holder does.
 The recovery claim times its stake the same way.
 A late stake there may overwrite a confirmed RA that is about to write a record.
 Withdrawn at once, it would let a new RA take over before that write lands, leaving one domain with two holders.
 So it is held for 100 ms plus two store-visibility lags, during which every other contender yields, and then withdrawn.
-Like admission's steal window, the hold assumes the deposed RA never stalls longer than the hold between re-reading its claim and writing ([§10.4](#104-recovery-authority)).
+Like admission's hold, this one assumes the deposed RA never stalls longer than the hold between re-reading its claim and writing ([§10.4](#104-recovery-authority)).
 
 ### 11.5 Recovery latency
 
