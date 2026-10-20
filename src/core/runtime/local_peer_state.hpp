@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -185,13 +186,24 @@ public:
     void setParticipation(DomainId domainId) noexcept;
     void clearParticipation(DomainId domainId) noexcept;
 
-    // DRAM self-shadow of this peer's REQUEST demand bits; the policy owns the FAM region.
-    // @publish runs under the mutex, serialising the demand-line write against other workers.
+    // DRAM self-shadow of this peer's REQUEST demand bits; the policy owns the FAM region. A bit
+    // stands while any thread of this peer still waits, so one waiter giving up keeps another's request.
     template <typename T_Publish>
     void updateSelfPending(DomainId domainId, bool requesting, T_Publish&& publish) noexcept
     {
+        // The count and the publish share the mutex: a drop to zero landing after a raise from zero
+        // would otherwise leave the waiter that raised it with no bit standing.
         const std::lock_guard<std::mutex> guard(pendingDomainsMutex_);
+        std::uint32_t& waiters = pendingWaiters_[domainId];
         if (requesting)
+        {
+            ++waiters;
+        }
+        else if (waiters > 0)
+        {
+            --waiters;
+        }
+        if (waiters > 0)
         {
             selfPending_.set(domainId);
         }
@@ -206,6 +218,7 @@ public:
     void clearSelfPending(T_Publish&& publish) noexcept
     {
         const std::lock_guard<std::mutex> guard(pendingDomainsMutex_);
+        pendingWaiters_.fill(0);
         selfPending_ = DomainBitmap{};
         publish(selfPending_);
     }
@@ -299,6 +312,8 @@ private:
     DomainBitmap selfPending_;        // DRAM shadow of this peer's REQUEST demand bits (poll-read via isPendingDomain)
     std::mutex pendingDomainsMutex_;  // serialises this peer's worker threads' pending writes
     std::mutex controlSectionMutex_;  // serialises this peer's threads inside a control section
+    // This peer's threads waiting per domain; selfPending_ holds a bit while its count is not zero.
+    std::array<std::uint32_t, MaxDomains> pendingWaiters_{};
 
     struct
     {

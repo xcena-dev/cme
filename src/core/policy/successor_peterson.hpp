@@ -5,7 +5,8 @@
 //
 // Winning the tournament root == holding the domain, so the worker owns the whole lifecycle
 // and pollCycle stays empty. No doorbell raise, no holder crown wait. The tree needs a
-// power-of-two leaf count (peerCount rounds up) and assumes one contending thread per peer.
+// power-of-two leaf count (peerCount rounds up) and one climber per leaf, so a peer's threads
+// climb a domain one at a time and share the win.
 
 #pragma once
 
@@ -31,8 +32,8 @@ public:
     ~PetersonPolicy() override;  // out-of-line: unique_ptr<incomplete TournamentLock>
 
     // ── ops ────────────────────────────────────────────────────────
-    // timeout bounds the climb; 0 = single-probe trylock, which is what keeps orphan
-    // reclaim's tryLock(Control, 0ns) non-blocking. On timeout the partial climb rolls back.
+    // timeout bounds the climb and the wait behind a sibling thread's climb; 0 = single-probe
+    // trylock. On timeout the partial climb rolls back.
     OwnershipResult lock(LocalPeerState& peerState, DomainId domainId,
                          const timing::Deadline& deadline) override;
     void unlock(LocalPeerState& peerState, DomainId domainId) override;

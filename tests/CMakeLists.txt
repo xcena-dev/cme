@@ -240,6 +240,7 @@ cme_test_exe(cme-format-interrupted-test test_format_interrupted.cpp)
 cme_test_exe(cme-pid-reuse-test test_pid_reuse.cpp)
 cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
 cme_test_exe(cme-admission-late-stake-test test_admission_late_stake.cpp)
+cme_test_exe(cme-local-waiters-test test_local_waiters.cpp)
 cme_test_exe(cme-recovery-late-stake-test test_recovery_late_stake.cpp)
 cme_test_exe(cme-recovery-readmitted-target-test test_recovery_readmitted_target.cpp)
 cme_test_exe(cme-recovery-departed-authority-test test_recovery_departed_authority.cpp)
@@ -409,6 +410,11 @@ cme_case(ceiling_region TARGET cme-ceiling-region-test STRATEGY request SHM_TIME
 # agg_recovery checks for the aggregator record. request only -- Order and Peterson have no demand
 # region, so the case would assert nothing there.
 cme_case(demand_scrub TARGET cme-demand-scrub-test STRATEGY request)
+
+# Two threads of one peer waiting on one domain: the short wait times out, the long wait is still
+# granted on release. All four policies: REQUEST and RequestAgg share a demand bit across a peer's
+# threads, and Peterson one leaf.
+cme_case(local_waiters TARGET cme-local-waiters-test STRATEGIES SHM_TIMEOUT 60)
 
 # R3 for the remaining policy: recovery clears a dead climber's tournament announce. peterson only
 # -- the other three lay out no tree, so the successor area holds something else and the case's

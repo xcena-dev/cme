@@ -55,6 +55,7 @@ A case registered with all four strategies appears four times per backend.
 | Exclusion | `test_fairness_smoke.cpp` | `fairness_smoke` | ORDER and REQUEST round-trip at two sizes; no timeout, per-peer spread within bound |
 | Exclusion | `test_fairness.cpp` | `fairness_order_sym`, `fairness_request_sym` | N x T x D contended workload; max-min per-peer spread within `--bound * mean` |
 | Exclusion | `test_reconcile_stale_belief.cpp` | `reconcile_stale_belief` (shm, request) | A reconcile pass holding a truth read from before its own worker adopted the domain must not leave that peer unable to lock the domain the record names it holder of. Skips without `CME_FAILPOINT` |
+| Exclusion | `test_local_waiters.cpp` | `local_waiters` x4 strategies | Two threads of one peer wait on one domain another peer holds. The short wait must time out rather than get in while the holder keeps the domain, and the long wait must still be granted when the holder releases, not run out its budget |
 | Admission | `test_admission_race.cpp` | `admission_race` | N processes claim peer slots at once, slots >= N: distinct slots, no spurious NoFreeSlot |
 | Admission | `test_admission_stress.cpp` | `admission_stress` | The same protocol over many rounds behind a spin barrier, exact-fit and over-subscribed. The only lock-free multi-writer race in cme |
 | Admission | `test_readmit_gate.cpp` | `readmit_gate` (request) | C1: a dead peer's slot is re-claimable only after recovery marks it None |

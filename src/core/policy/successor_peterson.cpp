@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "cme/shared.hpp"
@@ -108,14 +109,28 @@ void unlockNode(PetersonNode_t& node, PetersonNode_t::Role role, CoherencyMode m
 
 struct PetersonState_t
 {
-    PetersonState_t(std::uint8_t* areaBase, std::uint32_t maxNumPeers, PeerId tid,
-                    CoherencyMode mode) noexcept
+    // This peer's side of one domain's tree. The leaf takes one climber, so the mutex queues this peer's
+    // threads, and won says whether one of them holds the root now. won changes only under the mutex.
+    struct DomainClimb_t
+    {
+        std::timed_mutex mutex;
+        bool won{false};
+    };
+
+    PetersonState_t(std::uint8_t* areaBase, std::uint32_t maxNumPeers, std::uint32_t numDomains,
+                    PeerId tid, CoherencyMode mode)
         : nodes_{reinterpret_cast<PetersonNode_t*>(areaBase)},
           nodesPerDomain_{roundUpPow2(maxNumPeers) - 1},
           maxNumPeers_{maxNumPeers},
           path_{buildClimbPath(maxNumPeers, tid)},
+          climbs_{std::make_unique<DomainClimb_t[]>(numDomains)},
           mode_{mode}
     {
+    }
+
+    [[nodiscard]] DomainClimb_t& getClimb(DomainId domain) noexcept
+    {
+        return climbs_[domain];
     }
 
     // Climb leaf -> root, bounded by @deadline. On a level timeout, release the
@@ -177,7 +192,8 @@ private:
     std::uint32_t nodesPerDomain_;  // (numThreads-1); domain d's tree base = d*this
     std::uint32_t maxNumPeers_;     // for reconstructing any peer's climb path
     std::vector<ClimbStep_t> path_;
-    CoherencyMode mode_;  // this peer's regime, captured at bind
+    std::unique_ptr<DomainClimb_t[]> climbs_;  // one per domain, indexed by DomainId
+    CoherencyMode mode_;                       // this peer's regime, captured at bind
 };
 
 // ── PetersonPolicy ──────────────────────────────────────────────────
@@ -187,8 +203,8 @@ PetersonPolicy::~PetersonPolicy() = default;
 
 void PetersonPolicy::bind(LocalPeerState& peerState) noexcept
 {
-    state_ = std::make_unique<PetersonState_t>(peerState.getSuccessorAreaBase(),
-                                               peerState.getMaxPeers(), peerState.getPeerId(),
+    state_ = std::make_unique<PetersonState_t>(peerState.getSuccessorAreaBase(), peerState.getMaxPeers(),
+                                               peerState.getNumDomains(), peerState.getPeerId(),
                                                peerState.getCoherencyMode());
 }
 
@@ -202,12 +218,21 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
         return OwnershipResult::NotArrived;
     }
 
-    // Reentrant only: the tournament is the lock and the record only shadows it, so record
-    // residency must not admit anyone. > 1, not > 0, since the hold above already counts one.
+    // Pinned before the climb lock, so an unlock deciding whether to leave the tree sees this thread.
     OBSERVE_LATENCY_BEGIN(Resident);
-    auto& domain = peerState.getDomain(domainId);
     ownership_transfer::holdDomain(peerState, domainId);
-    if (domain.getOwnershipPinCount() > 1)
+    auto& climb = state_->getClimb(domainId);
+    std::unique_lock<std::timed_mutex> climbGuard{climb.mutex, std::defer_lock};
+    const auto left = deadline.remaining();
+    if (!(left ? climbGuard.try_lock_for(*left) : climbGuard.try_lock()))
+    {
+        ownership_transfer::unholdDomain(peerState, domainId);
+        return OwnershipResult::NotArrived;
+    }
+
+    // A sibling thread holds the root: the turn is this peer's, and a peer's threads do not exclude
+    // each other. Record residency alone admits no one, since the tournament is the lock.
+    if (climb.won)
     {
         OBSERVE_LATENCY_END(Resident, peerState, domainId);
         return OwnershipResult::Arrived;
@@ -220,6 +245,7 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
         ownership_transfer::unholdDomain(peerState, domainId);
         return OwnershipResult::NotArrived;
     }
+    climb.won = true;
 
     // Tournament win = holder, and the prior holder vacated before release(), so the record
     // is the frontier. Passing it as the takeover base skips a shadow scan on the hot path.
@@ -234,6 +260,10 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 {
     OBSERVE_LATENCY_BEGIN(Unlock);
     auto& domain = peerState.getDomain(domainId);
+    // The pins are read under the climb lock: a sibling pinned before the read shares the win and keeps
+    // the root, and one pinned after it finds the tree left and climbs.
+    const auto climbGuard = state_ ? std::unique_lock<std::timed_mutex>{state_->getClimb(domainId).mutex}
+                                   : std::unique_lock<std::timed_mutex>{};
     const auto pins = domain.getOwnershipPinCount();
 
     // The outermost unlock leaves the slot's tournament, and so does one that finds no pin left.
@@ -248,6 +278,7 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
         if (state_)
         {
             state_->release(domainId);
+            state_->getClimb(domainId).won = false;
         }
         OBSERVE_LATENCY_END(Release, peerState, domainId);
     }
