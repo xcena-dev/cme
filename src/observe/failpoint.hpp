@@ -49,6 +49,7 @@ enum class Boundary : std::uint32_t
     TransferBeforePublish,  // PublishOwnership: belief dropped, record unwritten
     TransferBeforeTruth,    // the shadow is written, the truth copy is not
     ReconcileBeforeLose,    // the truth read named another holder, the belief not yet dropped
+    ScanBeforeRefresh,      // a scan refresh is due, the cached scan scopes not yet re-read
 
     // Leaving published and the poll thread still up, which is the only stretch where a grant that
     // arrives anyway is still forwarded. LeaveBeforeHandoff is past the poll stop, so it is not this.
@@ -100,6 +101,8 @@ enum class Boundary : std::uint32_t
             return "transfer.before_truth";
         case Boundary::ReconcileBeforeLose:
             return "reconcile.before_lose";
+        case Boundary::ScanBeforeRefresh:
+            return "scan.before_refresh";
         case Boundary::LeaveInDrain:
             return "leave.in_drain";
         case Boundary::LeaveBeforeHandoff:

@@ -247,6 +247,7 @@ cme_test_exe(cme-recovery-late-stake-test test_recovery_late_stake.cpp)
 cme_test_exe(cme-recovery-readmitted-target-test test_recovery_readmitted_target.cpp)
 cme_test_exe(cme-recovery-departed-authority-test test_recovery_departed_authority.cpp)
 cme_test_exe(cme-reconcile-stale-belief-test test_reconcile_stale_belief.cpp)
+cme_test_exe(cme-delete-late-joiner-test test_delete_late_joiner.cpp)
 cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
 cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
 cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
@@ -478,6 +479,10 @@ cme_case(recovery_departed_authority TARGET cme-recovery-departed-authority-test
 # domain. Skips without CME_FAILPOINT.
 cme_case(reconcile_stale_belief TARGET cme-reconcile-stale-belief-test STRATEGY request
     BACKENDS shm SHM_TIMEOUT 60)
+
+# A delete tried while the deleter's scan refresh is held and a later joiner takes part in the domain.
+# Each policy hands the control lock over its own way. Skips without CME_FAILPOINT, and under order.
+cme_case(delete_late_joiner TARGET cme-delete-late-joiner-test STRATEGIES BACKENDS shm SHM_TIMEOUT 60)
 
 # A holder killed while handing over, on either side of the record write. All four, because which
 # of them even reaches transferOwnership differs: Peterson vacates on release where the others hand

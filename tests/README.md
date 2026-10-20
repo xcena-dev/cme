@@ -66,6 +66,7 @@ A case registered with all four strategies appears four times per backend.
 | Registry | `test_held_domain_refusal.cpp` | `held_domain_refusal` (shm) x4 strategies | delete and leave refuse a domain the peer still holds a Guard on, and go through once it is released |
 | Registry | `test_domain_incarnation.cpp` | `domain_incarnation` (request) | A reused domain slot is a new incarnation: `generation` rises, `epoch` is not reset, the old name resolves to nothing, and a peer holding the old view is refused until it re-joins |
 | Registry | `test_create_race.cpp` | `create_race` | N processes createDomain at once; the control lock serialises the registry, so none is lost |
+| Registry | `test_delete_late_joiner.cpp` | `delete_late_joiner` (shm) x4 strategies | A delete refuses while a peer that joined after the deleter's last scan refresh takes part in the domain. Skips without `CME_FAILPOINT`, and under order, whose token stops at the held deleter |
 | Registry | `test_participation.cpp` | `participation` | Opt-in participation: join, leave, rejoin, sole-participant leave refused, unknown name |
 | Admission | `test_slot_inherit.cpp` | `slot_inherit` (request) | A member slot's next occupant inherits no participation from the peer that left cleanly. `readmit_gate` covers the dead-peer route to the same bits |
 | Recovery | `test_recovery.cpp` | `recovery` x4 strategies | Scripted timeline: freeze, thaw, leave, rejoin, multi-freeze, 10 s churn |

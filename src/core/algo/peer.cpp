@@ -67,6 +67,7 @@ void pollThreadLoop(Peer* peer, LocalPeerState* state)
         // admission and Header lines cold. pollCycle reads the same latch.
         if (state->tickPeriodicScan())
         {
+            CME_FAILPOINT_REACH(failpoint::Boundary::ScanBeforeRefresh);
             state->refreshPeerScanBound();
             state->refreshActiveDomains();
         }

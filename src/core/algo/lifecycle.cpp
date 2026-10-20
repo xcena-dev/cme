@@ -58,7 +58,7 @@ namespace
 // participation-only -- getFallbackHolderOnLeave is the separate "anyone alive" question.
 [[nodiscard]] PeerId getSuccessorOnLeave(LocalPeerState& peerState, DomainId domainId)
 {
-    for (const PeerId peerId : peerState.getPeerRing())
+    for (const PeerId peerId : peerState.loadPeerRing())
     {
         const auto memberSlot = peerState.loadMemberSnapshot(peerId);  // get (rmb)
         if (memberSlot.hasStatus(Geometry::Member_t::Status::Active) &&
@@ -76,7 +76,7 @@ namespace
 // that later dies is a recovery target -- a departed (None) slot never is.
 [[nodiscard]] PeerId getFallbackHolderOnLeave(LocalPeerState& peerState)
 {
-    for (const PeerId peerId : peerState.getPeerRing())
+    for (const PeerId peerId : peerState.loadPeerRing())
     {
         if (peerState.loadMemberSnapshot(peerId).hasStatus(Geometry::Member_t::Status::Active))
         {
@@ -106,7 +106,7 @@ namespace
 [[nodiscard]] bool hasOtherParticipant(LocalPeerState& peerState, DomainId domainId)
 {
     const PeerId selfPeerId = peerState.getPeerId();
-    for (const PeerId peerId : peerState.getPeerIdRange())
+    for (const PeerId peerId : peerState.loadPeerIdRange())
     {
         if (peerId == selfPeerId)
         {

@@ -194,6 +194,12 @@ std::uint32_t LocalPeerState::getAggregatorGroups() const noexcept
     return config_.aggregatorGroups;
 }
 
+std::uint32_t LocalPeerState::loadPeerScanBound() const noexcept
+{
+    const std::uint32_t bound = coherency::get(region_.peerBound, getCoherencyMode()).peerScanBound;  // rmb + 64B read
+    return bound != 0 ? bound : getMaxPeers();
+}
+
 void LocalPeerState::setSuccessorPolicy(std::unique_ptr<SuccessorPolicy> successor) noexcept
 {
     policy_.successor = std::move(successor);
@@ -396,7 +402,7 @@ void LocalPeerState::clearOrphanSweep() noexcept
 
 void LocalPeerState::refreshPeerScanBound() noexcept
 {
-    peerScanBound_ = coherency::get(region_.peerBound, getCoherencyMode()).peerScanBound;  // rmb + 64B read
+    peerScanBound_ = loadPeerScanBound();
 }
 
 void LocalPeerState::refreshActiveDomains() noexcept

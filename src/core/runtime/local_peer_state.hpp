@@ -164,6 +164,17 @@ public:
     {
         return {peerId_, getPeerScanBound()};
     }
+    // The bound line read fresh, for a leave or delete check that must count a peer admitted since
+    // the last refresh. Only the poll thread writes the cache.
+    [[nodiscard]] std::uint32_t loadPeerScanBound() const noexcept;
+    [[nodiscard]] IdRange<PeerId> loadPeerIdRange() const noexcept
+    {
+        return {PeerId{0}, loadPeerScanBound()};
+    }
+    [[nodiscard]] IdRing<PeerId> loadPeerRing() const noexcept
+    {
+        return {peerId_, loadPeerScanBound()};
+    }
 
     // ── policy oracles (SWOT Layer 0) + per-domain state ─────────
     void setSuccessorPolicy(std::unique_ptr<SuccessorPolicy> successor) noexcept;
