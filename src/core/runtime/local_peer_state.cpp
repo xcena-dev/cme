@@ -72,7 +72,7 @@ void LocalPeerState::setRegionPointers(const Geometry& geometry, CoherencyMode m
 {
     region_.coherencyMode = mode;
     region_.header = geometry.getHeader();
-    region_.admissionControl = geometry.getAdmissionControl();
+    region_.peerBound = geometry.getPeerBound();
     region_.domainRecords = geometry.getDomainRecord(0);
     region_.members = geometry.getMemberSlot(0);
     region_.recoveryAuthorityArea = geometry.getRecoveryAuthorityAreaBase();
@@ -396,8 +396,7 @@ void LocalPeerState::clearOrphanSweep() noexcept
 
 void LocalPeerState::refreshPeerScanBound() noexcept
 {
-    // Re-read the cached membership extent from the admission line (one cacheline).
-    peerScanBound_ = coherency::get(region_.admissionControl, getCoherencyMode()).peerScanBound;  // rmb + 64B read
+    peerScanBound_ = coherency::get(region_.peerBound, getCoherencyMode()).peerScanBound;  // rmb + 64B read
 }
 
 void LocalPeerState::refreshActiveDomains() noexcept

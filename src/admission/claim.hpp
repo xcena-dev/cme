@@ -3,9 +3,8 @@
 //
 // claim.hpp -- peer-slot claim (Session::open path).
 //
-// Atomic-free: joins serialise through a nonce lease on the admission-control
-// line (stake/settle/re-read, steal-on-stall), so the claimer reserves the lowest
-// free slot and grows peerScanBound as the lease's sole writer.
+// Atomic-free: joins serialise through the admission lease, whose holder alone writes the
+// admission plane.
 
 #pragma once
 

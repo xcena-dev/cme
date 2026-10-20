@@ -104,9 +104,9 @@ constexpr std::uint32_t LandPollMs = 1;
             member->setStatus(Status::Active);
             return true;
         });
-    auto* control = region.getAdmissionControl();
-    control->peerScanBound = HolderSlot + 1;
-    cme::coherency::wmb(control, sizeof(*control), coherency);
+    auto* bound = region.getPeerBound();
+    bound->peerScanBound = HolderSlot + 1;
+    cme::coherency::wmb(bound, sizeof(*bound), coherency);
     return reserved;
 }
 
@@ -142,6 +142,7 @@ void checkWithdrawAfterHolder(harness::TestContext& ctx)
     const double waitedMs = sinceLate.elapsed<timing::MillisF>().count();
     const std::int64_t claimedFinal = claimed.load(std::memory_order_acquire);
     const auto finalLine = cme::coherency::get(control, coherency);
+    const auto finalBound = cme::coherency::get(region.getPeerBound(), coherency);
 
     ctx.check(lateNonce != 0, "the joiner reached its stake after reading the lease free, and staked late");
     ctx.check(claimedEarly == Pending, "a late stake did not take the lease the holder still held");
@@ -154,7 +155,7 @@ void checkWithdrawAfterHolder(harness::TestContext& ctx)
                "the joiner held its late stake and withdrew it rather than waiting out a steal (%.0f ms)",
                waitedMs);
     ctx.check(finalLine.nonce == 0, "the joiner released the lease on the way out");
-    ctx.check(finalLine.peerScanBound == JoinerSlot + 1,
+    ctx.check(finalBound.peerScanBound == JoinerSlot + 1,
               "the scan bound covers the holder's slot and the joiner's");
 }
 
@@ -191,6 +192,7 @@ void checkDelayedWithdraw(harness::TestContext& ctx)
     const std::int64_t late = lateClaimed.load(std::memory_order_acquire);
     const std::int64_t watched = watcherClaimed.load(std::memory_order_acquire);
     const auto finalLine = cme::coherency::get(control, coherency);
+    const auto finalBound = cme::coherency::get(region.getPeerBound(), coherency);
 
     const auto isAboveHolder = [](std::int64_t slot)
     {
@@ -204,7 +206,7 @@ void checkDelayedWithdraw(harness::TestContext& ctx)
               "delayed withdraw: both joiners got in, each on its own slot above the holder's");
     ctx.checkf(watcherMs < timing::MillisF(cme::config::lease::Timeout).count(),
                "delayed withdraw: the watcher got in on the clear, not by a steal (%.0f ms)", watcherMs);
-    ctx.check(finalLine.nonce == 0 && finalLine.peerScanBound == Peers,
+    ctx.check(finalLine.nonce == 0 && finalBound.peerScanBound == Peers,
               "delayed withdraw: the lease is free and the scan bound covers every slot");
 }
 
@@ -237,6 +239,7 @@ void checkStopBeforeWithdraw(harness::TestContext& ctx)
 
     lateJoiner.join();
     const auto finalLine = cme::coherency::get(control, coherency);
+    const auto finalBound = cme::coherency::get(region.getPeerBound(), coherency);
 
     ctx.check(lateNonce != 0, "stopped joiner: the first joiner staked late");
     ctx.check(holderReserved, "stopped joiner: the holder reserved its slot inside the hold");
@@ -248,7 +251,7 @@ void checkStopBeforeWithdraw(harness::TestContext& ctx)
     ctx.check(lateGone, "stopped joiner: the steal and release moved the line off the late nonce");
     ctx.check(lateClaimed.load(std::memory_order_acquire) == static_cast<std::int64_t>(ResumedSlot),
               "stopped joiner: once resumed it cleared nothing and took the next slot");
-    ctx.check(finalLine.nonce == 0 && finalLine.peerScanBound == Peers,
+    ctx.check(finalLine.nonce == 0 && finalBound.peerScanBound == Peers,
               "stopped joiner: the lease is free and the scan bound covers every slot");
 }
 

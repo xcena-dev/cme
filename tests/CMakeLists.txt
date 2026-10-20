@@ -241,6 +241,8 @@ cme_test_exe(cme-pid-reuse-test test_pid_reuse.cpp)
 cme_test_exe(cme-failpoint-admission-test test_failpoint_admission.cpp)
 cme_test_exe(cme-admission-late-stake-test test_admission_late_stake.cpp)
 cme_test_exe(cme-local-waiters-test test_local_waiters.cpp)
+cme_test_exe(cme-peer-scan-test test_peer_scan.cpp)
+cme_test_exe(cme-peer-bound-test test_peer_bound.cpp)
 cme_test_exe(cme-recovery-late-stake-test test_recovery_late_stake.cpp)
 cme_test_exe(cme-recovery-readmitted-target-test test_recovery_readmitted_target.cpp)
 cme_test_exe(cme-recovery-departed-authority-test test_recovery_departed_authority.cpp)
@@ -309,6 +311,14 @@ cme_case(participation TARGET cme-participation-test SHM_TIMEOUT 60)
 cme_case(domain_lifecycle TARGET cme-domain-lifecycle-test SHM_TIMEOUT 60)
 cme_case(create_race TARGET cme-create-race-test SHM_TIMEOUT 60)
 cme_case(admission_stress TARGET cme-admission-stress-test)
+
+# The scan bound on its own admission line: a joiner is granted, a burst of joiners is granted, a frozen peer
+# below the bound is recovered. All four policies, since each walks the peer ring differently.
+cme_case(peer_scan TARGET cme-peer-scan-test STRATEGIES SHM_TIMEOUT 60)
+
+# The peer bound through join and leave churn: one past the highest slot in use after every join, unmoved
+# by a leave, over every slot after joiners admitted together. Policy-blind: admission alone writes it.
+cme_case(peer_bound TARGET cme-peer-bound-test SHM_TIMEOUT 60)
 
 # The shipped tool, exec'd. Every backend, because what it wraps is Session::format and whether a
 # region already answers is a question each medium answers differently: an shm object may not exist

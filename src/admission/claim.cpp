@@ -86,8 +86,6 @@ public:
         return getRandomNonce();
     }
 
-    // Only the nonce is stored, not a copy of the line: the holder writes peerScanBound in this line
-    // too, and writing back an older copy would undo it.
     [[nodiscard]] bool publish(Value nonce) noexcept
     {
         CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionBeforeStake);
@@ -153,17 +151,31 @@ private:
     throw NoFreeSlotError{"cme: no free peer slot"};
 }
 
-// Grow peerScanBound to cover @peerId so membership scans reach the new slot. Monotone;
-// the caller's lease makes it the sole writer.
-void growPeerScanBound(Geometry::AdmissionControl_t* admissionControl, PeerId peerId,
-                       CoherencyMode mode)
+// The caller holds the lease, and only admission takes a slot out of None, so a slot read free here stays
+// free until the next joiner looks.
+void adjustPeerScanBound(const Geometry& geometry, PeerId peerId, CoherencyMode mode)
 {
-    const std::uint32_t bound = static_cast<std::uint32_t>(peerId) + 1;
-    if (bound > admissionControl->peerScanBound)
+    std::uint32_t bound = static_cast<std::uint32_t>(peerId) + 1;
+    for (std::uint32_t slotsAbove = geometry.getPeerCount(); slotsAbove > bound; --slotsAbove)
     {
-        admissionControl->peerScanBound = bound;
-        coherency::wmb(admissionControl, sizeof(*admissionControl), mode);
+        const auto member = coherency::get(geometry.getMemberSlot(slotsAbove - 1), mode);
+        if (member.isValidMagic() && !member.hasStatus(Geometry::Member_t::Status::None))
+        {
+            bound = slotsAbove;
+            break;
+        }
     }
+    coherency::rmwIfTrue(
+        geometry.getPeerBound(), mode,
+        [bound](auto* line)
+        {
+            if (line->peerScanBound == bound)
+            {
+                return false;
+            }
+            line->peerScanBound = bound;
+            return true;
+        });
 }
 
 }  // namespace
@@ -179,7 +191,7 @@ PeerId claimPeerSlot(const Geometry& geometry)
     try
     {
         const PeerId peerId = reserveMemberSlot(geometry, mode);
-        growPeerScanBound(admissionControl, peerId, mode);
+        adjustPeerScanBound(geometry, peerId, mode);
         CME_FAILPOINT_REACH(failpoint::Boundary::AdmissionAfterCommit);
         releaseLease(admissionControl, nonce, mode);
         return peerId;

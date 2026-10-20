@@ -127,9 +127,7 @@ PeerId ChainRecoveryAuthorityPolicy::getRecoveryTarget(const LocalPeerState& pee
     }
 
     // First alive peer clockwise = this node's RA target. Crashed-but-uncleaned peers stay
-    // Active, so recovery is nearest-first. Bounded rather than the ceiling: admission only
-    // grows peerScanBound, so no admitted slot is skipped, and the cache lags config::poll_thread::ScanRefreshInterval
-    // at most -- orders under the silence a target must accumulate.
+    // Active, so recovery is nearest-first.
     const auto& liveness = *peerState.getLivenessPolicy();
     for (const PeerId candidate : peerState.getPeerRing())
     {

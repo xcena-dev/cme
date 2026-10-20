@@ -276,8 +276,7 @@ public:
     // The poll loop runs both scan-scope refreshes on true. Mutate-on-query.
     bool tickPeriodicScan() noexcept;
 
-    // Cold-line re-reads driven by the periodic-scan gate: the admission line (membership
-    // extent) and the Header activeDomains bitmap. Also seed the caches once at attach.
+    // Cold-line re-reads driven by the periodic-scan gate. Also seed the caches once at attach.
     void refreshPeerScanBound() noexcept;
     void refreshActiveDomains() noexcept;
 
@@ -291,7 +290,7 @@ private:
     std::mutex selfMemberMutex_;       // serialises this peer's threads changing and publishing selfMember_
     std::atomic<bool> active_{false};
 
-    std::uint32_t peerScanBound_{0};  // cached AdmissionControl_t::peerScanBound; bounds peer scans
+    std::uint32_t peerScanBound_{0};  // cached peer scan bound
 
     // Lazy read-through DRAM cache of member fields; see getMemberView. Sized maxPeers at
     // setConfig. Each field <=8B aligned -> tear-free relaxed atomics (lock-free multi-writer).
@@ -318,7 +317,7 @@ private:
     struct
     {
         Geometry::Header_t* header{nullptr};  // region base (activeDomains bitmap)
-        Geometry::AdmissionControl_t* admissionControl{nullptr};
+        Geometry::PeerBound_t* peerBound{nullptr};
         Geometry::DomainRecord_t* domainRecords{nullptr};
         Geometry::Member_t* members{nullptr};
         // policy-private regions

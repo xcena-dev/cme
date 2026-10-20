@@ -152,8 +152,9 @@ void Geometry::format(const FormatOpts_t& opts)
         }
     }
 
-    // Admission-control line: magic only; memset left nonce=0 (unlocked) and peerScanBound=0.
+    // Admission lines: magic only; memset left the rest zero.
     geometry.getAdmissionControl()->magic = AdmissionControl_t::Magic;
+    geometry.getPeerBound()->magic = PeerBound_t::Magic;
 
     // RA-policy-private claim region (per-peer claim slots): magic + no-RA sentinel.
     if (const auto raPolicy = makeRecoveryAuthorityPolicy())
@@ -320,6 +321,8 @@ void Geometry::buildLayout(std::uint32_t domainCount, std::uint32_t peerCount,
 
     admissionControlBase_ = base + cursor;
     cursor += sizeof(AdmissionControl_t);
+    peerBoundBase_ = base + cursor;
+    cursor += sizeof(PeerBound_t);
 
     // Replicated: getRecordsPerDomain copies per domain (1 truth + 1 shadow per group).
     domainRecordBase_ = base + cursor;
@@ -353,6 +356,7 @@ void Geometry::clearLayout() noexcept
     domainCount_ = 0;
     peerCount_ = 0;
     admissionControlBase_ = nullptr;
+    peerBoundBase_ = nullptr;
     domainRecordBase_ = nullptr;
     membershipBase_ = nullptr;
     recoveryAuthorityAreaBase_ = nullptr;
@@ -375,8 +379,8 @@ bool Geometry::isLayoutAligned() const noexcept
         return false;
     }
     for (const std::uint8_t* sectionBase :
-         {admissionControlBase_, domainRecordBase_, membershipBase_, recoveryAuthorityAreaBase_,
-          successorAreaBase_, profileBase_})
+         {admissionControlBase_, peerBoundBase_, domainRecordBase_, membershipBase_,
+          recoveryAuthorityAreaBase_, successorAreaBase_, profileBase_})
     {
         if (sectionBase != nullptr && !aligned(sectionBase))
         {

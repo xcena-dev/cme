@@ -98,17 +98,32 @@ public:
         }
     };
 
-    // Admission plane: a nonce lease serialises peer-slot allocation atomic-free, and
-    // peerScanBound caps membership scans. Kept off the control plane's lines so a lock-free
-    // joiner and a control-lock holder never share a cacheline.
+    // Admission plane: a nonce lease serialises peer-slot allocation atomic-free. The line holds the
+    // nonce alone, off the control plane, so a late stake's whole-line flush has no other field to undo.
     struct AdmissionControl_t
     {
         static constexpr std::uint32_t Magic = 0x434D4F43u;  // "CMOC"
 
+        endian::Field_t<std::uint32_t> magic;  //  0
+        std::uint8_t padding[4];               //  4: aligns the nonce
+        endian::Field_t<std::uint64_t> nonce;  //  8: lease holder token; 0 = unlocked
+        std::uint8_t reserved[48];             // 16..63
+
+        [[nodiscard]] bool isValidMagic() const noexcept
+        {
+            return static_cast<std::uint32_t>(magic) == Magic;
+        }
+    };
+
+    // Admission plane, second line. Kept off the nonce line, so a stake that lands late there cannot
+    // undo it.
+    struct PeerBound_t
+    {
+        static constexpr std::uint32_t Magic = 0x434D5042u;  // "CMPB"
+
         endian::Field_t<std::uint32_t> magic;          //  0
-        endian::Field_t<std::uint32_t> peerScanBound;  //  4: claimed-slot ceiling; bounds peer scans
-        endian::Field_t<std::uint64_t> nonce;          //  8: lease holder token; 0 = unlocked
-        std::uint8_t reserved[48];                     // 16..63
+        endian::Field_t<std::uint32_t> peerScanBound;  //  4: bounds peer scans
+        std::uint8_t reserved[56];                     //  8..63
 
         [[nodiscard]] bool isValidMagic() const noexcept
         {
@@ -246,6 +261,7 @@ public:
 
     static_assert(sizeof(Header_t) == CacheLineBytes, "Header_t must be one cacheline");
     static_assert(sizeof(AdmissionControl_t) == CacheLineBytes, "AdmissionControl_t must be one cacheline");
+    static_assert(sizeof(PeerBound_t) == CacheLineBytes, "PeerBound_t must be one cacheline");
     static_assert(sizeof(DomainRecord_t) == CacheLineBytes, "DomainRecord_t must be one cacheline");
     static_assert(sizeof(Member_t) == CacheLineBytes, "Member_t must be one cacheline");
 
@@ -282,7 +298,7 @@ public:
     computeAreaSize(std::uint32_t domainCount, std::uint32_t peerCount, Strategy strategy,
                     std::uint32_t aggregatorGroups) noexcept
     {
-        return sizeof(Header_t) + sizeof(AdmissionControl_t) +
+        return sizeof(Header_t) + sizeof(AdmissionControl_t) + sizeof(PeerBound_t) +
                static_cast<std::uint64_t>(domainCount) * getRecordsPerDomain(peerCount) * sizeof(DomainRecord_t) +
                static_cast<std::uint64_t>(peerCount) * sizeof(Member_t) +
                getRecoveryAuthorityAreaSize(peerCount) +
@@ -351,6 +367,10 @@ public:
     {
         return reinterpret_cast<AdmissionControl_t*>(admissionControlBase_);
     }
+    [[nodiscard]] PeerBound_t* getPeerBound() const noexcept
+    {
+        return reinterpret_cast<PeerBound_t*>(peerBoundBase_);
+    }
     // Authoritative truth copy (index 0 of this domain's replicated block).
     [[nodiscard]] DomainRecord_t* getDomainRecord(std::uint32_t domainIndex) const noexcept
     {
@@ -408,6 +428,7 @@ private:
     std::uint32_t peerCount_{0};
     Strategy strategy_{Strategy::Request};
     std::uint8_t* admissionControlBase_{nullptr};
+    std::uint8_t* peerBoundBase_{nullptr};
     std::uint8_t* domainRecordBase_{nullptr};
     std::uint8_t* membershipBase_{nullptr};
     std::uint8_t* recoveryAuthorityAreaBase_{nullptr};
