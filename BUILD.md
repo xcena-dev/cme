@@ -15,6 +15,9 @@ c++ $(pkg-config --cflags libcme) myapp.cpp $(pkg-config --libs libcme)
 ```
 
 Requires a C++17 compiler.
+The file backend loads ROOF's shared library with `dlopen` when it first needs it.
+It compiles those calls when `roof/abi.hpp` is found at configure time (under `CMAKE_PREFIX_PATH` or the system include path), and skips them when the header or the library is missing.
+Neither is linked.
 Nothing else is needed for the default build, and the plotting scripts in [`../tests/sweep/`](tests/sweep/) are the only part that wants Python and matplotlib.
 
 ## CMake options

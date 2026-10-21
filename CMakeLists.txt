@@ -184,7 +184,17 @@ target_link_libraries(cme PUBLIC
     cme_isa
     Threads::Threads
     rt              # shm_open, clock_gettime
+    ${CMAKE_DL_LIBS}  # dlopen of the file backend's filesystem library
 )
+
+# The file backend reaches ROOF through a C table it loads with dlopen. All it takes at build time is
+# the header that describes the table, found under CMAKE_PREFIX_PATH or the system include path;
+# without it the backend builds and skips those calls.
+find_path(ROOF_INCLUDE_DIR roof/abi.hpp)
+if(ROOF_INCLUDE_DIR)
+    target_include_directories(cme PRIVATE ${ROOF_INCLUDE_DIR})
+    target_compile_definitions(cme PRIVATE CME_HAVE_ROOF_ABI)
+endif()
 
 # ── Subdirectories ──────────────────────────────────────────────────────
 # The app warning set, carried as an INTERFACE target rather than a plain
@@ -259,6 +269,7 @@ endif()
 message(STATUS "  observe     : stats=${CME_STATS} profile=${CME_PROFILE} logging=${CME_LOGGING} latency=${CME_LATENCY}")
 message(STATUS "  sanitize    : ${CME_SANITIZE}")
 message(STATUS "  failpoint   : ${CME_FAILPOINT}")
+message(STATUS "  roof abi    : ${ROOF_INCLUDE_DIR}")
 if(CME_COVERAGE)
     message(STATUS "  coverage    : ON (-O0; reachability, not timing)")
 endif()
