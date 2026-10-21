@@ -43,6 +43,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -264,18 +265,18 @@ struct PeerArgs_t
     const Opts_t* opts;
     cme::Geometry* region;
     cme::PeerId peerId;
-    std::atomic<std::uint32_t>* startBarrier;
-    std::atomic<std::uint32_t>* warmupBarrier;
-    std::atomic<std::uint32_t>* endBarrier;
+    ordered::Published<std::uint32_t>* startBarrier;
+    ordered::Published<std::uint32_t>* warmupBarrier;
+    ordered::Published<std::uint32_t>* endBarrier;
     PeerResult_t* result;
 };
 
 // Count-up gate. Membership must stay static across every phase boundary, so nobody
 // leaves until all @participants have arrived.
-void awaitBarrier(std::atomic<std::uint32_t>& counter, std::uint32_t participants) noexcept
+void awaitBarrier(ordered::Published<std::uint32_t>& counter, std::uint32_t participants) noexcept
 {
-    counter.fetch_add(1, std::memory_order_acq_rel);
-    while (counter.load(std::memory_order_acquire) < participants)
+    counter.add(1);
+    while (counter.load() < participants)
     {
         std::this_thread::yield();
     }
@@ -461,9 +462,9 @@ void runPeer(PeerArgs_t arg)
 
 void runPeers(const Opts_t& opt, cme::Geometry& region, std::vector<PeerResult_t>& results)
 {
-    std::atomic<std::uint32_t> startBarrier{0};
-    std::atomic<std::uint32_t> warmupBarrier{0};
-    std::atomic<std::uint32_t> endBarrier{0};
+    ordered::Published<std::uint32_t> startBarrier{0};
+    ordered::Published<std::uint32_t> warmupBarrier{0};
+    ordered::Published<std::uint32_t> endBarrier{0};
 
     std::vector<std::thread> peers;
     peers.reserve(opt.numPeers);

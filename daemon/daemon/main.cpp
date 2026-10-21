@@ -8,7 +8,6 @@
 // sigaction is POSIX and <csignal> does not declare it, so the C header is the one that has it.
 #include <signal.h>  // NOLINT(modernize-deprecated-headers)
 
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -16,6 +15,7 @@
 #include <string_view>
 #include <vector>
 
+#include "common/ordered.hpp"
 #include "daemon/control/handler.hpp"
 #include "daemon/domain/manager.hpp"
 #include "daemon/observe/failpoint.hpp"
@@ -49,9 +49,9 @@ public:
     // before any loop is published is remembered rather than lost.
     static void stop() noexcept
     {
-        asked_.store(true, std::memory_order_release);
+        asked_.store(true);
 
-        const cmed::daemon::ControlHandler* const control = handler_.load(std::memory_order_acquire);
+        const cmed::daemon::ControlHandler* const control = handler_.load();
         if (control != nullptr)
         {
             control->stop();
@@ -71,11 +71,11 @@ private:
     // also ends it.
     explicit StopSignal(const cmed::daemon::ControlHandler& control) noexcept
     {
-        handler_.store(&control, std::memory_order_release);
+        handler_.store(&control);
 
         // A stop that landed before this store found nothing to reach, so it is applied here instead.
         // Ending a loop that has not begun is fine: the eventfd it posts to is already there.
-        if (asked_.load(std::memory_order_acquire))
+        if (asked_.load())
         {
             control.stop();
         }
@@ -83,16 +83,16 @@ private:
 
     ~StopSignal() noexcept
     {
-        handler_.store(nullptr, std::memory_order_release);
+        handler_.store(nullptr);
     }
 
 private:
     // A pointer and not the loop itself: one run publishes one loop and takes it back on the way out.
-    inline static std::atomic<const cmed::daemon::ControlHandler*> handler_{nullptr};
+    inline static ordered::Published<const cmed::daemon::ControlHandler*> handler_{nullptr};
 
     // Whether a stop has been asked for at all. Never cleared: one run is what this process does, so a
     // stop asked before that run began is still a stop asked of it.
-    inline static std::atomic<bool> asked_{false};
+    inline static ordered::Published<bool> asked_{false};
 };
 
 extern "C" void onStopSignal(int)

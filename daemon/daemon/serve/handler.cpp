@@ -56,7 +56,7 @@ void ServeHandler::runDispatcher()
 {
     auto& waiting = dispatching_.area->domain.pending;
 
-    while (common_.running.load(std::memory_order_acquire))
+    while (common_.running.load())
     {
         common_.beat();
         dispatching_.events.bump(observe::DispatchEvent::Passes);
@@ -108,7 +108,7 @@ void ServeHandler::runDispatcher()
 
         // The flag clears before the knock, so a read that saw the knock sees the flag too and does not
         // sleep out a timeout on the very knock meant to end it.
-        if (!common_.running.load(std::memory_order_acquire))
+        if (!common_.running.load())
         {
             return;
         }
@@ -127,7 +127,7 @@ void ServeHandler::runDispatcher()
 // dispatcher that stopped taking passes stops the pings while this thread keeps ticking.
 void ServeHandler::runMaintainer()
 {
-    while (common_.running.load(std::memory_order_acquire))
+    while (common_.running.load())
     {
         // On the thread that never blocks. A turn whose hold ran out has to go back even while a worker
         // waits on an acquire for a different domain.
@@ -163,7 +163,7 @@ void ServeHandler::runMaintainer()
 
 void ServeHandler::stop() noexcept
 {
-    common_.running.store(false, std::memory_order_release);
+    common_.running.store(false);
 
     // The knock and not only a wake, because a pass passes the doorbell it read to the kernel. A wake
     // alone lands on a queue this thread may not have joined yet, and is then lost.

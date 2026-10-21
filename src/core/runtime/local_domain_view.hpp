@@ -7,9 +7,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 
 namespace cme
@@ -55,13 +55,13 @@ private:
 
     struct
     {
-        std::atomic<std::uint32_t> count{0};
+        ordered::Published<std::uint32_t> count{0};
         timing::TimePoint startTimestamp{};
     } pin_;
 
     struct
     {
-        std::atomic<bool> isHolder{false};
+        ordered::Published<bool> isHolder{false};
     } ownership_;
 
     struct

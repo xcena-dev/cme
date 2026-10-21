@@ -34,6 +34,7 @@
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
 #include "common/args.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -61,8 +62,8 @@ constexpr double TimeoutMs = 15000.0;
 // thread can even name it.
 struct BenchSlot_t : harness::PeerSlot_t
 {
-    bool isDead{false};              // this peer is the one that crashes while holding every domain
-    std::atomic<bool> ready{false};  // the peer has joined and, if dead, holds all its guards
+    bool isDead{false};                     // this peer is the one that crashes while holding every domain
+    ordered::Published<bool> ready{false};  // the peer has joined and, if dead, holds all its guards
 };
 
 // One peer thread. The dead peer locks all N domains into simultaneous pinned guards, publishes
@@ -87,7 +88,7 @@ void worker(BenchSlot_t* slot)
             {
                 held.push_back(peer->lock(domainId));
             }
-            slot->ready.store(true, std::memory_order_release);
+            slot->ready.store(true);
             while (!slot->frozen.load(std::memory_order_acquire) && !slot->stop.load())
             {
                 std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
@@ -100,7 +101,7 @@ void worker(BenchSlot_t* slot)
             return;  // never release the guards (crash model); leak intentionally on stop
         }
 
-        slot->ready.store(true, std::memory_order_release);
+        slot->ready.store(true);
         cme::DomainId domainId = 1;
         while (!slot->stop.load(std::memory_order_acquire))
         {
@@ -186,7 +187,7 @@ struct Phases_t
     // Dead peer first: it must hold all N (pinned) before survivors contend, so its
     // poll thread never grants a held domain away.
     slots[deadPeer]->runner = std::thread{worker, slots[deadPeer].get()};
-    while (!slots[deadPeer]->ready.load(std::memory_order_acquire))
+    while (!slots[deadPeer]->ready.load())
     {
         std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
     }
@@ -199,7 +200,7 @@ struct Phases_t
     }
     for (std::unique_ptr<BenchSlot_t>& slot : slots)
     {
-        while (!slot->ready.load(std::memory_order_acquire))
+        while (!slot->ready.load())
         {
             std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
         }

@@ -20,6 +20,12 @@ class Relaxed
 {
 public:
     // ── ctor / dtor ────────────────────────────────────────────────────
+    // Zero, so an array of words, which builds each element by default, starts known.
+    constexpr Relaxed() noexcept
+        : value_{T{}}
+    {
+    }
+
     constexpr explicit Relaxed(T initial) noexcept
         : value_{initial}
     {
@@ -36,6 +42,17 @@ public:
         value_.store(value, std::memory_order_relaxed);
     }
 
+    // Each returns the value before the change, as std::atomic does.
+    T add(T delta) noexcept
+    {
+        return value_.fetch_add(delta, std::memory_order_relaxed);
+    }
+
+    T subtract(T delta) noexcept
+    {
+        return value_.fetch_sub(delta, std::memory_order_relaxed);
+    }
+
 private:
     std::atomic<T> value_;
 };
@@ -47,6 +64,12 @@ class Published
 {
 public:
     // ── ctor / dtor ────────────────────────────────────────────────────
+    // Zero, so an array of words, which builds each element by default, starts known.
+    constexpr Published() noexcept
+        : value_{T{}}
+    {
+    }
+
     constexpr explicit Published(T initial) noexcept
         : value_{initial}
     {
@@ -66,6 +89,41 @@ public:
     void reset(T value) noexcept
     {
         value_.store(value, std::memory_order_relaxed);
+    }
+
+    // A read-modify-write takes what the last store handed over and hands over what came before it,
+    // so each is acq_rel. Each returns the value before the change, as std::atomic does.
+    T add(T delta) noexcept
+    {
+        return value_.fetch_add(delta, std::memory_order_acq_rel);
+    }
+
+    T subtract(T delta) noexcept
+    {
+        return value_.fetch_sub(delta, std::memory_order_acq_rel);
+    }
+
+    T setBits(T bits) noexcept
+    {
+        return value_.fetch_or(bits, std::memory_order_acq_rel);
+    }
+
+    T clearBits(T bits) noexcept
+    {
+        return value_.fetch_and(~bits, std::memory_order_acq_rel);
+    }
+
+    T exchange(T value) noexcept
+    {
+        return value_.exchange(value, std::memory_order_acq_rel);
+    }
+
+    // Compare-and-swap, strong, so a single try never fails without a reason. On failure @expected
+    // takes the value found, read with acquire.
+    [[nodiscard]] bool cas(T& expected, T desired) noexcept
+    {
+        return value_.compare_exchange_strong(expected, desired, std::memory_order_acq_rel,
+                                              std::memory_order_acquire);
     }
 
 private:

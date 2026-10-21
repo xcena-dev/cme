@@ -8,12 +8,12 @@
 // the faster joiner is played by hand: its nonce goes in while the joiner is held, its slot and bound
 // after. Two more holds stretch the late joiner's withdrawal, or stop it before the withdrawal.
 
-#include <atomic>
 #include <cstdint>
 #include <thread>
 
 #include "admission/claim.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
@@ -46,18 +46,18 @@ constexpr std::uint32_t LandWaitMs = 2000;
 constexpr std::uint32_t LandPollMs = 1;
 
 // claimPeerSlot on a thread of its own, which stores the slot it got, or Threw, in @claimed.
-[[nodiscard]] std::thread startJoiner(const cme::Geometry& region, std::atomic<std::int64_t>& claimed)
+[[nodiscard]] std::thread startJoiner(const cme::Geometry& region, ordered::Published<std::int64_t>& claimed)
 {
     return std::thread(
         [&region, &claimed]
         {
             try
             {
-                claimed.store(cme::admission::claimPeerSlot(region), std::memory_order_release);
+                claimed.store(cme::admission::claimPeerSlot(region));
             }
             catch (...)
             {
-                claimed.store(Threw, std::memory_order_release);
+                claimed.store(Threw);
             }
         });
 }
@@ -120,7 +120,7 @@ void checkWithdrawAfterHolder(harness::TestContext& ctx)
     const cme::Geometry region = harness::createRegion(Domains, Peers);
     auto* control = region.getAdmissionControl();
 
-    std::atomic<std::int64_t> claimed{Pending};
+    ordered::Published<std::int64_t> claimed{Pending};
     // Armed before the joiner starts, so the reach cannot beat the arm.
     cme::failpoint::hold(Boundary::AdmissionBeforeStake);
     std::thread joiner = startJoiner(region, claimed);
@@ -130,17 +130,17 @@ void checkWithdrawAfterHolder(harness::TestContext& ctx)
     // A late stake that won would return one settle after it landed. Three leave room for scheduling.
     constexpr auto WinWindow = cme::config::stake::Settle * 3;
     std::this_thread::sleep_for(WinWindow);
-    const std::int64_t claimedEarly = claimed.load(std::memory_order_acquire);
+    const std::int64_t claimedEarly = claimed.load();
 
     // Half the writer stall on, so the holder's last write lands inside the late stake's hold.
     constexpr auto HolderTail = cme::config::lease::WriterStall / 2;
     std::this_thread::sleep_for(HolderTail);
     const bool holderReserved = finishHolderClaim(region, coherency);
-    const std::int64_t claimedAfterHolder = claimed.load(std::memory_order_acquire);
+    const std::int64_t claimedAfterHolder = claimed.load();
 
     joiner.join();
     const double waitedMs = sinceLate.elapsed<timing::MillisF>().count();
-    const std::int64_t claimedFinal = claimed.load(std::memory_order_acquire);
+    const std::int64_t claimedFinal = claimed.load();
     const auto finalLine = cme::coherency::get(control, coherency);
     const auto finalBound = cme::coherency::get(region.getPeerBound(), coherency);
 
@@ -168,8 +168,8 @@ void checkDelayedWithdraw(harness::TestContext& ctx)
     const cme::Geometry region = harness::createRegion(Domains, Peers);
     auto* control = region.getAdmissionControl();
 
-    std::atomic<std::int64_t> lateClaimed{Pending};
-    std::atomic<std::int64_t> watcherClaimed{Pending};
+    ordered::Published<std::int64_t> lateClaimed{Pending};
+    ordered::Published<std::int64_t> watcherClaimed{Pending};
     cme::failpoint::hold(Boundary::AdmissionBeforeStake);
     std::thread lateJoiner = startJoiner(region, lateClaimed);
     const std::uint64_t lateNonce = landLate(region, coherency);
@@ -182,15 +182,15 @@ void checkDelayedWithdraw(harness::TestContext& ctx)
     const bool stalled = cme::failpoint::awaitHeld(HoldWait);
     constexpr auto WithdrawStall = cme::config::lease::WriterStall / 2;
     std::this_thread::sleep_for(WithdrawStall);
-    const bool watcherOut = watcherClaimed.load(std::memory_order_acquire) == Pending;
+    const bool watcherOut = watcherClaimed.load() == Pending;
     const bool lateStood = cme::coherency::get(control, coherency).nonce == lateNonce;
     cme::failpoint::release();
 
     watcher.join();
     const double watcherMs = sinceWatch.elapsed<timing::MillisF>().count();
     lateJoiner.join();
-    const std::int64_t late = lateClaimed.load(std::memory_order_acquire);
-    const std::int64_t watched = watcherClaimed.load(std::memory_order_acquire);
+    const std::int64_t late = lateClaimed.load();
+    const std::int64_t watched = watcherClaimed.load();
     const auto finalLine = cme::coherency::get(control, coherency);
     const auto finalBound = cme::coherency::get(region.getPeerBound(), coherency);
 
@@ -221,8 +221,8 @@ void checkStopBeforeWithdraw(harness::TestContext& ctx)
     const cme::Geometry region = harness::createRegion(Domains, Peers);
     auto* control = region.getAdmissionControl();
 
-    std::atomic<std::int64_t> lateClaimed{Pending};
-    std::atomic<std::int64_t> watcherClaimed{Pending};
+    ordered::Published<std::int64_t> lateClaimed{Pending};
+    ordered::Published<std::int64_t> watcherClaimed{Pending};
     cme::failpoint::hold(Boundary::AdmissionBeforeStake);
     std::thread lateJoiner = startJoiner(region, lateClaimed);
     const std::uint64_t lateNonce = landLate(region, coherency);
@@ -244,12 +244,12 @@ void checkStopBeforeWithdraw(harness::TestContext& ctx)
     ctx.check(lateNonce != 0, "stopped joiner: the first joiner staked late");
     ctx.check(holderReserved, "stopped joiner: the holder reserved its slot inside the hold");
     ctx.check(stopped, "stopped joiner: the late joiner stopped before withdrawing its nonce");
-    ctx.check(watcherClaimed.load(std::memory_order_acquire) == static_cast<std::int64_t>(WatcherSlot),
+    ctx.check(watcherClaimed.load() == static_cast<std::int64_t>(WatcherSlot),
               "stopped joiner: the watcher got in, on the slot above the holder's");
     ctx.checkf(watcherMs >= timing::MillisF(cme::config::lease::Timeout).count(),
                "stopped joiner: the watcher got in by stealing the nonce left behind (%.0f ms)", watcherMs);
     ctx.check(lateGone, "stopped joiner: the steal and release moved the line off the late nonce");
-    ctx.check(lateClaimed.load(std::memory_order_acquire) == static_cast<std::int64_t>(ResumedSlot),
+    ctx.check(lateClaimed.load() == static_cast<std::int64_t>(ResumedSlot),
               "stopped joiner: once resumed it cleared nothing and took the next slot");
     ctx.check(finalLine.nonce == 0 && finalBound.peerScanBound == Peers,
               "stopped joiner: the lease is free and the scan bound covers every slot");

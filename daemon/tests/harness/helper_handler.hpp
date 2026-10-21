@@ -10,9 +10,9 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "harness/helper_area.hpp"
@@ -32,20 +32,20 @@ public:
     {
         if (domainId < MaxDomains)
         {
-            perDomain_[domainId].fetch_add(1, std::memory_order_release);
+            perDomain_[domainId].add(1);
         }
-        served_.fetch_add(1, std::memory_order_release);
+        served_.add(1);
     }
 
     // For a case that measures a second round on one recorder, where a running total would hide
     // whether the second round served anything at all.
     void forget() noexcept
     {
-        for (std::atomic<std::uint32_t>& count : perDomain_)
+        for (ordered::Published<std::uint32_t>& count : perDomain_)
         {
-            count.store(0, std::memory_order_release);
+            count.store(0);
         }
-        served_.store(0, std::memory_order_release);
+        served_.store(0);
     }
 
     // ── settling ───────────────────────────────────────────────────
@@ -63,12 +63,12 @@ public:
     // ── accessors ──────────────────────────────────────────────────
     [[nodiscard]] std::uint32_t served() const noexcept
     {
-        return served_.load(std::memory_order_acquire);
+        return served_.load();
     }
 
     [[nodiscard]] std::uint32_t servedFor(std::uint32_t domainId) const noexcept
     {
-        return domainId < MaxDomains ? perDomain_[domainId].load(std::memory_order_acquire) : 0;
+        return domainId < MaxDomains ? perDomain_[domainId].load() : 0;
     }
 
     // One bit per domain the handler saw, for a case whose assertion is that no other domain did.
@@ -86,8 +86,8 @@ public:
     }
 
 private:
-    std::array<std::atomic<std::uint32_t>, MaxDomains> perDomain_{};
-    std::atomic<std::uint32_t> served_{0};
+    std::array<ordered::Published<std::uint32_t>, MaxDomains> perDomain_{};
+    ordered::Published<std::uint32_t> served_{0};
 };
 
 }  // namespace cmed::harness

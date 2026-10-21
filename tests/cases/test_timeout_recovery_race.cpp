@@ -9,7 +9,6 @@
 // next acquire return instantly on a view recovery has already overwritten.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 
@@ -75,7 +74,7 @@ void runBody(harness::TestContext& ctx)
     const bool held = harness::waitUntil(
         [&workers]
         {
-            return workers[Holder].holding.load(std::memory_order_acquire);
+            return workers[Holder].holding.load();
         },
         HoldDeadlineMs, 1);
     if (!ctx.check(held, "a worker held the domain when the kill landed"))

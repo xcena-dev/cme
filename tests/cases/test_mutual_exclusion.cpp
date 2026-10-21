@@ -64,13 +64,13 @@ void checkHeldDomainStaysHeld(harness::TestContext& ctx)
     const bool held = harness::waitUntil(
         [&holder]
         {
-            return holder[0].holding.load(std::memory_order_acquire);
+            return holder[0].holding.load();
         },
         HoldDeadlineMs, 1);
     if (held)
     {
         auto guard = prober.tryLock(SharedDomain, timing::Millis{ProbeMs});
-        intruded = guard && holder[0].holding.load(std::memory_order_acquire);
+        intruded = guard && holder[0].holding.load();
     }
     harness::joinPeerWorkers(holder, 1);
 

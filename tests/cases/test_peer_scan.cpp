@@ -9,7 +9,6 @@
 // the slots still in use. It also prints how long a new session waits for its first grant.
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -17,6 +16,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/algo/peer.hpp"
@@ -108,10 +108,10 @@ void runBody(harness::TestContext& ctx)
                 harness::percentile(grantMicros, 1.0) / MicrosPerMilli);
 
     // Each joiner stays until all are granted, so the burst holds every slot at once and sets the bound over all.
-    std::atomic<std::uint32_t> burstGranted{0};
+    ordered::Published<std::uint32_t> burstGranted{0};
     const auto isBurstGranted = [&]
     {
-        return burstGranted.load(std::memory_order_acquire) == BurstJoiners;
+        return burstGranted.load() == BurstJoiners;
     };
     harness::runThreads(BurstJoiners,
                         [&](std::uint32_t /*index*/)
@@ -122,7 +122,7 @@ void runBody(harness::TestContext& ctx)
                                 joiner.joinDomain(LaneName);
                                 if (harness::canLock(joiner, LaneName, GrantBudget))
                                 {
-                                    burstGranted.fetch_add(1, std::memory_order_acq_rel);
+                                    burstGranted.add(1);
                                 }
                                 static_cast<void>(harness::waitUntil(isBurstGranted, BurstHoldMs));
                             }
@@ -131,7 +131,7 @@ void runBody(harness::TestContext& ctx)
                                 harness::log("burst join failed: %s", failure.what());
                             }
                         });
-    ctx.check(burstGranted.load(std::memory_order_relaxed) == BurstJoiners,
+    ctx.check(burstGranted.load() == BurstJoiners,
               "joiners arriving together were all granted the domain");
 
     // Leaked, as a crash leaves it: no destructor touches the slot recovery frees. Frozen, its poll

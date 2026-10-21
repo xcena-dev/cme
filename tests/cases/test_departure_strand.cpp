@@ -11,7 +11,6 @@
 //
 // --iters sets the iteration count (default DefaultIters); raise it for a long run.
 
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +18,7 @@
 #include <thread>
 
 #include "common/args.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -89,7 +89,7 @@ void runBody(harness::TestContext& ctx)
 
         // Publishes the record naming the leaver while the departure waits inside the drain, which
         // is what a landed grant leaves behind. Releases either way, so a miss costs the hold cap.
-        std::atomic<bool> placed{false};
+        ordered::Published<bool> placed{false};
         std::thread granter(
             [&]
             {
@@ -99,7 +99,7 @@ void runBody(harness::TestContext& ctx)
                     record.holder = Leaver;
                     record.epoch = record.epoch + 1;
                     cme::coherency::set(recordSlot, record, ctx.coherency());
-                    placed.store(true, std::memory_order_release);
+                    placed.store(true);
                 }
                 cme::failpoint::release();
             });
@@ -110,7 +110,7 @@ void runBody(harness::TestContext& ctx)
         // Only judge once the departure is complete: the slot reads None, so the record naming this
         // peer can never be recovered by anything.
         const auto member = cme::coherency::get(leaverSlot, ctx.coherency());
-        if (!placed.load(std::memory_order_acquire))
+        if (!placed.load())
         {
             ++missed;
         }

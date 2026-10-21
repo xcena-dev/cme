@@ -178,8 +178,8 @@ void bumpHeartbeat(LocalPeerState& peerState)
     const auto& telemetry = peerState.getTelemetry();
     auto* profileSlot = peerState.getProfileSlot(peerState.getPeerId());
     publishProfile(peerState.getCoherencyMode(), profileSlot,
-                   telemetry.ownership.time.spin.load(std::memory_order_relaxed),
-                   telemetry.ownership.time.wait.load(std::memory_order_relaxed));
+                   telemetry.ownership.time.spin.load(),
+                   telemetry.ownership.time.wait.load());
 }
 
 OwnershipResult waitForOwnership(LocalPeerState& peerState, DomainId domainId,

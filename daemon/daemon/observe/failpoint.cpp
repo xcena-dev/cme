@@ -13,13 +13,13 @@
 
 #include <unistd.h>
 
-#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <string_view>
 #include <vector>
 
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 
@@ -28,24 +28,24 @@ namespace cmed::failpoint
 namespace
 {
 
-// Relaxed both ways: the arm happens before the work that reaches the boundary, and no other state
-// is being published through this.
-std::atomic<Boundary> g_armedBoundary{Boundary::None};
-std::atomic<bool> g_holdRather{false};
+// Relaxed: the arm happens before the work that reaches the boundary, and no other state is being
+// published through these.
+ordered::Relaxed<Boundary> g_armedBoundary{Boundary::None};
+ordered::Relaxed<bool> g_holdRather{false};
 
-// The two halves of the handshake. Release ordering on each store, since what the other thread has
-// to see with the word is the record write that went with it.
-std::atomic<bool> g_reachedHold{false};
-std::atomic<bool> g_letGo{false};
+// The two halves of the handshake. Published, since what the other thread has to see with the word
+// is the record write that went with it.
+ordered::Published<bool> g_reachedHold{false};
+ordered::Published<bool> g_letGo{false};
 
 }  // namespace
 
 void hold(Boundary boundary) noexcept
 {
-    g_reachedHold.store(false, std::memory_order_relaxed);
-    g_letGo.store(false, std::memory_order_relaxed);
-    g_holdRather.store(true, std::memory_order_relaxed);
-    g_armedBoundary.store(boundary, std::memory_order_relaxed);
+    g_reachedHold.reset(false);
+    g_letGo.reset(false);
+    g_holdRather.store(true);
+    g_armedBoundary.store(boundary);
 }
 
 bool awaitHeld(timing::Nanos within) noexcept
@@ -56,24 +56,24 @@ bool awaitHeld(timing::Nanos within) noexcept
     return poll::waitUntil(
         []
         {
-            return g_reachedHold.load(std::memory_order_acquire);
+            return g_reachedHold.load();
         },
         within, LookGap);
 }
 
 void release() noexcept
 {
-    g_letGo.store(true, std::memory_order_release);
+    g_letGo.store(true);
 }
 
 void reach(Boundary boundary) noexcept
 {
-    if (g_armedBoundary.load(std::memory_order_relaxed) != boundary)
+    if (g_armedBoundary.load() != boundary)
     {
         return;
     }
 
-    if (!g_holdRather.load(std::memory_order_relaxed))
+    if (!g_holdRather.load())
     {
         // Said before the raise, on unbuffered stderr: SIGKILL is uncatchable, so a case that sees no
         // line here knows the boundary went unvisited rather than guessing it from the signal.
@@ -88,11 +88,11 @@ void reach(Boundary boundary) noexcept
     constexpr timing::Millis HeldCap{5000};
     constexpr timing::Micros LookGap{10};
 
-    g_reachedHold.store(true, std::memory_order_release);
+    g_reachedHold.store(true);
     const bool freed = poll::waitUntil(
         []
         {
-            return g_letGo.load(std::memory_order_acquire);
+            return g_letGo.load();
         },
         HeldCap, LookGap);
     if (!freed)
@@ -147,8 +147,8 @@ bool arm(const std::vector<std::string_view>& arguments) noexcept
             return false;
         }
 
-        g_holdRather.store(false, std::memory_order_relaxed);
-        g_armedBoundary.store(named, std::memory_order_relaxed);
+        g_holdRather.store(false);
+        g_armedBoundary.store(named);
         return true;
     }
     return true;

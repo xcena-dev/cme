@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <thread>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -50,9 +51,9 @@ constexpr std::uint32_t ReclaimDeadlineMs = 5000;
 struct HolderThread_t
 {
     std::thread runner;
-    std::atomic<bool> stop{false};
-    std::atomic<bool> grip{false};     // main raises it to ask for one grip
-    std::atomic<bool> holding{false};  // the runner raises it once it has the domain
+    ordered::Published<bool> stop{false};
+    ordered::Published<bool> grip{false};     // main raises it to ask for one grip
+    ordered::Published<bool> holding{false};  // the runner raises it once it has the domain
     std::atomic<std::uint32_t> grips{0};
 };
 
@@ -60,9 +61,9 @@ void runHolder(HolderThread_t* holder, cme::Geometry* region)
 {
     cme::Peer peer = harness::makePeer(*region, Holder);
     peer.joinDomain(Contested);
-    while (!holder->stop.load(std::memory_order_acquire))
+    while (!holder->stop.load())
     {
-        if (!holder->grip.exchange(false, std::memory_order_acq_rel))
+        if (!holder->grip.exchange(false))
         {
             harness::sleepMs(1);
             continue;
@@ -72,11 +73,11 @@ void runHolder(HolderThread_t* holder, cme::Geometry* region)
         {
             continue;  // could not take it this round; the round below reads holding as false
         }
-        holder->holding.store(true, std::memory_order_release);
+        holder->holding.store(true);
         harness::sleepMs(HoldMs);
         // Cleared before the release, so a reader that sees it true is certain the guard below
         // is still alive. The other order reports the gap between the two as an overlap.
-        holder->holding.store(false, std::memory_order_release);
+        holder->holding.store(false);
         guard.reset();  // release timed to land on the waiter's deadline
         holder->grips.fetch_add(1, std::memory_order_relaxed);
     }
@@ -103,7 +104,7 @@ void checkTimeoutLeavesNoResidue(harness::TestContext& ctx)
     const bool held = harness::waitUntil(
         [&keeper]
         {
-            return keeper[0].holding.load(std::memory_order_acquire);
+            return keeper[0].holding.load();
         },
         ReclaimDeadlineMs, 1);
 
@@ -163,11 +164,11 @@ void runBody(harness::TestContext& ctx)
     {
         // Polled at 1 ms, not waitUntil's 200 ms default: the grip is HoldMs wide, so a step
         // coarser than it misses the window every round and the round below sets up nothing.
-        holder.grip.store(true, std::memory_order_release);
+        holder.grip.store(true);
         if (!harness::waitUntil(
                 [&holder]
                 {
-                    return holder.holding.load(std::memory_order_acquire);
+                    return holder.holding.load();
                 },
                 ReclaimDeadlineMs, 1))
         {
@@ -179,7 +180,7 @@ void runBody(harness::TestContext& ctx)
         // Read the grip after the attempt returns, not before it starts. Seeing the round begin
         // inside a grip says nothing about what the attempt met, and a round that met an empty
         // domain judges neither the deadline nor the record.
-        const bool gripAlive = holder.holding.load(std::memory_order_acquire);
+        const bool gripAlive = holder.holding.load();
         if (guard)
         {
             if (gripAlive)
@@ -206,7 +207,7 @@ void runBody(harness::TestContext& ctx)
         reclaimed.reset();
     }
 
-    holder.stop.store(true, std::memory_order_release);
+    holder.stop.store(true);
     holder.runner.join();
 
     std::printf(

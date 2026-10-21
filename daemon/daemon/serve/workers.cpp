@@ -12,6 +12,7 @@
 
 #include "cmed/errors.hpp"
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/domain/manager.hpp"
 #include "daemon/observe/counters.hpp"
@@ -46,7 +47,7 @@ namespace
 struct alignas(CachelineBytes) Worker_t
 {
     // The one domain handed to it, taken by the exchange that empties this again.
-    std::atomic<std::uint32_t> domainId{protocol::NoDomain};
+    ordered::Published<std::uint32_t> domainId{protocol::NoDomain};
 
     // Bumped with every hand-over and by the stop, and the word this worker's sleep keys on.
     std::atomic<std::uint32_t> handed{0};
@@ -78,7 +79,7 @@ struct Shared_t
     // that may block, which is why it happens on this thread and not on the dispatcher's.
     DomainManager* domains;
 
-    const std::atomic<bool>& running;
+    const ordered::Published<bool>& running;
 
     // The domain it drops when it is done, and the word it offers its seat in when it has nothing.
     bitmap::AtomicBits<MaxDomains>& inFlight;
@@ -95,13 +96,13 @@ void runWorker(Worker_t& worker, const Shared_t& shared)
     // is what covers a wake that raced the wait rather than the ordinary path.
     constexpr auto IdleWait = timing::Millis{50};
 
-    while (shared.running.load(std::memory_order_acquire))
+    while (shared.running.load())
     {
         // Read before the offer, so a hand-over landing between the offer and the wait has moved the
         // word and the wait refuses to start.
         const auto seen = worker.handed.load(std::memory_order_acquire);
 
-        const auto domainId = worker.domainId.exchange(protocol::NoDomain, std::memory_order_acq_rel);
+        const auto domainId = worker.domainId.exchange(protocol::NoDomain);
         if (domainId == protocol::NoDomain)
         {
             // Idempotent, so a worker that only timed out offers itself again for nothing rather than
@@ -146,7 +147,7 @@ DomainWorkers::~DomainWorkers() noexcept
 {
     // The flag before the words, which is the order a worker reads them in: one that saw the wake sees
     // the flag too. Every worker, because that is where each of them sleeps.
-    state_.running.store(false, std::memory_order_release);
+    state_.running.store(false);
     for (std::uint32_t index = 0; index < pool_.count; ++index)
     {
         auto& worker = pool_.workers[index];
@@ -189,7 +190,7 @@ bool DomainWorkers::assign(std::uint32_t domainId)
     // The domain first, then the word, then the wake: a worker that reads the word must find the domain
     // already there. One waiter on this word, so the wake reaches that worker and no other.
     auto& worker = pool_.workers[seat];
-    worker.domainId.store(domainId, std::memory_order_release);
+    worker.domainId.store(domainId);
     worker.handed.fetch_add(1, std::memory_order_seq_cst);
 
     // The bump first, then this read: a worker not yet in the sleep finds the word already moved, and

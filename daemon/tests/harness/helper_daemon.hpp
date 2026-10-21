@@ -10,13 +10,13 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <thread>
 #include <utility>
 
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "harness/helper_area.hpp"
 #include "harness/helper_handler.hpp"
@@ -97,7 +97,7 @@ public:
 
     ~StubDaemon()
     {
-        running_.store(false, std::memory_order_release);
+        running_.store(false);
         util::wakeAllWaiters(resolveDoorbellWord(*area_));
         worker_.join();
     }
@@ -173,7 +173,7 @@ private:
     // them as the ring arrives, so this answers on the thread that drained the bit.
     void run()
     {
-        while (running_.load(std::memory_order_acquire))
+        while (running_.load())
         {
             const std::uint32_t seen = area_->readDoorbell();
 
@@ -191,7 +191,7 @@ private:
                 continue;
             }
 
-            if (!running_.load(std::memory_order_acquire))
+            if (!running_.load())
             {
                 return;
             }
@@ -246,7 +246,7 @@ private:
     protocol::SharedArea_t* area_;
     ServePolicy policy_;
 
-    std::atomic<bool> running_{true};
+    ordered::Published<bool> running_{true};
     DomainRecorder grants_;
     DomainRecorder refusals_;
     DomainRecorder releases_;

@@ -39,6 +39,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -153,11 +154,11 @@ int parseOpts(int argc, char** argv, Opts_t& opt)
 // order below are load-bearing -- see runAcquireLane/oneAcquire.
 struct Baton_t
 {
-    std::atomic<int> turn{-1};  // peer id whose turn it is (-1 = idle)
-    std::atomic<bool> stopThreads{false};
-    std::atomic<bool> turnDone{false};
+    ordered::Published<int> turn{-1};  // peer id whose turn it is (-1 = idle)
+    ordered::Published<bool> stopThreads{false};
+    ordered::Published<bool> turnDone{false};
     std::atomic<std::uint64_t> resultNs{0};
-    std::atomic<bool> resultTimeout{false};
+    ordered::Relaxed<bool> resultTimeout{false};
 };
 
 // This peer's turn: time the acquire, publish the sample, then hand the baton back. The
@@ -171,15 +172,15 @@ void serveOneTurn(Baton_t& baton, cme::Peer* self, cme::DomainId domain)
         {
             auto guard = self->lock(domain);
             baton.resultNs.store(static_cast<std::uint64_t>(waited.elapsed().count()));
-            baton.resultTimeout.store(false, std::memory_order_relaxed);
+            baton.resultTimeout.store(false);
         }  // released here -- domain takeable by the next peer
     }
     catch (const cme::LockTimeoutError&)
     {
-        baton.resultTimeout.store(true, std::memory_order_relaxed);
+        baton.resultTimeout.store(true);
     }
-    baton.turn.store(-1, std::memory_order_release);
-    baton.turnDone.store(true, std::memory_order_release);
+    baton.turn.store(-1);
+    baton.turnDone.store(true);
 }
 
 // One peer's lane: spin on its own baton slot and serve every turn until told to stop.
@@ -187,9 +188,9 @@ void runAcquireLane(Baton_t& baton, cme::Peer* self, cme::DomainId domain, cme::
 {
     while (true)
     {
-        while (baton.turn.load(std::memory_order_acquire) != static_cast<int>(pid))
+        while (baton.turn.load() != static_cast<int>(pid))
         {
-            if (baton.stopThreads.load(std::memory_order_acquire))
+            if (baton.stopThreads.load())
             {
                 return;
             }
@@ -222,15 +223,15 @@ void oneAcquire(const Opts_t& opt, Baton_t& baton, DriveState_t& state, std::uin
         }
     }
     const bool migrate = state.holder >= 0 && static_cast<std::int64_t>(pick) != state.holder;
-    baton.turnDone.store(false, std::memory_order_relaxed);
-    baton.turn.store(static_cast<int>(pick), std::memory_order_release);  // hand off the turn
-    while (!baton.turnDone.load(std::memory_order_acquire))
+    baton.turnDone.reset(false);
+    baton.turn.store(static_cast<int>(pick));  // hand off the turn
+    while (!baton.turnDone.load())
     {
     }
     state.holder = static_cast<std::int64_t>(pick);
     if (record)
     {
-        if (baton.resultTimeout.load(std::memory_order_relaxed))
+        if (baton.resultTimeout.load())
         {
             ++state.timeouts;
         }
@@ -351,7 +352,7 @@ void runBody(harness::TestContext& ctx)
     DriveState_t state;
     runLoop(opt, baton, state);
 
-    baton.stopThreads.store(true, std::memory_order_release);
+    baton.stopThreads.store(true);
     acq.join();
     peers.clear();  // stop poll threads before summarising (their span buffers flush on exit)
 

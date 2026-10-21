@@ -5,7 +5,6 @@
 
 #include "daemon/control/handler.hpp"
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -15,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/control/exchange.hpp"
 #include "daemon/control/listener.hpp"
@@ -88,7 +88,7 @@ ControlHandler::ControlHandler(const DaemonConfig_t& config, posix::FileDesc are
                posix::EventFd::create()},
       answers_{areaDescriptor, HelloExchange{areaBytes}, DomainRequestExchange{domains}},
       peers_{std::make_unique<Peers_t>()},
-      state_{true, config.control.idleInterval, config.control.maxConnections}
+      state_{ordered::Published<bool>{true}, config.control.idleInterval, config.control.maxConnections}
 {
     // The descriptor is its own token throughout, so a ready entry needs no table to be recognised.
     polling_.watching.watch(polling_.admitting.descriptor(), posix::EpollFlag::Readable);
@@ -101,7 +101,7 @@ ControlHandler::~ControlHandler() noexcept = default;
 
 void ControlHandler::run()
 {
-    while (state_.running.load(std::memory_order_acquire))
+    while (state_.running.load())
     {
         for (const posix::Epoll::Ready_t entry : polling_.watching.wait(state_.idleInterval))
         {
@@ -111,7 +111,7 @@ void ControlHandler::run()
             if (woke == polling_.stopSignal.descriptor())
             {
                 static_cast<void>(polling_.stopSignal.drain());
-                state_.running.store(false, std::memory_order_release);
+                state_.running.store(false);
                 continue;
             }
             if (woke == polling_.admitting.descriptor())

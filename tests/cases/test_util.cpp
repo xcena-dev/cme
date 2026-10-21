@@ -26,6 +26,7 @@
 #include <thread>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 #include "util/coherency.hpp"
@@ -128,14 +129,14 @@ void testTearFreeU64(harness::TestContext& ctx)
     } holder{};
     holder.slot = PatternA;
 
-    std::atomic<bool> stop{false};
+    ordered::Relaxed<bool> stop{false};
     std::atomic<std::uint64_t> torn{0};
     std::atomic<std::uint64_t> samples{0};
 
     std::thread writer{[&]
                        {
                            std::uint64_t round = 0;
-                           while (!stop.load(std::memory_order_relaxed))
+                           while (!stop.load())
                            {
                                holder.slot = (round++ & 1u) ? PatternA : PatternB;
                            }
@@ -152,7 +153,7 @@ void testTearFreeU64(harness::TestContext& ctx)
                                    torn.fetch_add(1, std::memory_order_relaxed);
                                }
                            }
-                           stop.store(true, std::memory_order_relaxed);
+                           stop.store(true);
                        }};
 
     reader.join();
@@ -184,7 +185,7 @@ struct HappensBeforeRun_t
     HappensBeforeBlock_t block{};
     std::atomic<std::int32_t> mismatch{0};
     std::atomic<std::int32_t> seen{0};
-    std::atomic<bool> done{false};
+    ordered::Published<bool> done{false};
 };
 
 // Stages the payload, then publishes the iteration number, with a wmb after each store.
@@ -199,17 +200,17 @@ void publishHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
         run.block.ready = static_cast<std::uint32_t>(i);
         cme::coherency::wmb(&run.block.ready, sizeof(run.block.ready), coherency);
         // hold this iteration until the reader reports it, so no publication goes unread
-        while (!run.done.load(std::memory_order_acquire) && run.block.ready != 0u &&
+        while (!run.done.load() && run.block.ready != 0u &&
                run.seen.load(std::memory_order_acquire) < i)
         {
             std::this_thread::yield();
         }
-        if (run.done.load(std::memory_order_acquire))
+        if (run.done.load())
         {
             break;
         }
     }
-    run.done.store(true, std::memory_order_release);
+    run.done.store(true);
 }
 
 // Reads the iteration number, then the payload, with an rmb before each. A payload that does
@@ -217,7 +218,7 @@ void publishHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
 void observeHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
 {
     std::int32_t last = 0;
-    while (!run.done.load(std::memory_order_acquire))
+    while (!run.done.load())
     {
         cme::coherency::rmb(&run.block.ready, sizeof(run.block.ready), coherency);
         const std::uint32_t readyVal = run.block.ready;
@@ -238,7 +239,7 @@ void observeHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
             break;
         }
     }
-    run.done.store(true, std::memory_order_release);
+    run.done.store(true);
 }
 
 void testHappensBefore(harness::TestContext& ctx)
@@ -283,7 +284,7 @@ constexpr std::int32_t OwnershipSamples = 1'000'000;
 struct OwnershipRun_t
 {
     OwnershipLike_t ownership{};
-    std::atomic<bool> stop{false};
+    ordered::Relaxed<bool> stop{false};
     std::atomic<std::uint64_t> torn{0};
     std::atomic<std::uint64_t> samples{0};
 };
@@ -293,7 +294,7 @@ struct OwnershipRun_t
 void rotateOwnership(OwnershipRun_t& run, cme::CoherencyMode coherency)
 {
     std::uint64_t round = 0;
-    while (!run.stop.load(std::memory_order_relaxed))
+    while (!run.stop.load())
     {
         ++round;
         run.ownership.holder = static_cast<std::uint32_t>(round & 0xFFFFu);
@@ -316,7 +317,7 @@ void sampleOwnership(OwnershipRun_t& run, cme::CoherencyMode coherency)
             run.torn.fetch_add(1, std::memory_order_relaxed);
         }
     }
-    run.stop.store(true, std::memory_order_relaxed);
+    run.stop.store(true);
 }
 
 void testOwnershipPairSnapshot(harness::TestContext& ctx)
@@ -362,7 +363,7 @@ constexpr std::size_t HammerValueCount = sizeof(HammerValues) / sizeof(HammerVal
 struct HammerState_t
 {
     cme::endian::Field_t<std::uint64_t> slot;
-    std::atomic<bool> stop{false};
+    ordered::Relaxed<bool> stop{false};
     std::atomic<std::uint64_t> torn{0};
 };
 
@@ -371,7 +372,7 @@ struct HammerState_t
 void hammerWrite(HammerState_t& state, std::int32_t writerIndex) noexcept
 {
     auto next = static_cast<std::uint64_t>(writerIndex);
-    while (!state.stop.load(std::memory_order_relaxed))
+    while (!state.stop.load())
     {
         state.slot = HammerValues[next++ % HammerValueCount];
     }
@@ -425,7 +426,7 @@ void testHammerU64(harness::TestContext& ctx)
                   });
     // give readers time to start, then stop
     harness::sleepMs(50);
-    state.stop.store(true, std::memory_order_relaxed);
+    state.stop.store(true);
     hammers.join();
 
     char buf[96];

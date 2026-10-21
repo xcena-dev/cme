@@ -22,6 +22,7 @@
 
 #include "cmed/errors.hpp"
 #include "cmed/robust_lock.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "daemon/startup/served_area.hpp"
@@ -170,27 +171,27 @@ bool recoversFromADeadHolder(pthread_mutex_t& mutex)
 bool wakesAWaiterOnTheSeqWord(std::atomic<std::uint32_t>& word)
 {
     const std::uint32_t observed = word.load(std::memory_order_acquire);
-    std::atomic<bool> entered{false};
-    std::atomic<bool> returned{false};
+    ordered::Published<bool> entered{false};
+    ordered::Published<bool> returned{false};
     bool woke = false;
 
     std::thread waiter{[&word, observed, &entered, &returned, &woke]
                        {
-                           entered.store(true, std::memory_order_release);
+                           entered.store(true);
                            woke = cmed::util::waitOnWord(word, observed, timing::Secs{5});
-                           returned.store(true, std::memory_order_release);
+                           returned.store(true);
                        }};
 
     const bool started = poll::waitUntil([&entered]
                                          {
-                                             return entered.load(std::memory_order_acquire);
+                                             return entered.load();
                                          },
                                          StartWait, PollStep);
     std::this_thread::sleep_for(Settle);
 
     // Nothing has moved the word, so a waiter that is already back was never asleep on it and no
     // wake below can be credited with ending the wait.
-    const bool stayed = !returned.load(std::memory_order_acquire);
+    const bool stayed = !returned.load();
 
     word.fetch_add(1, std::memory_order_release);
     cmed::util::wakeAllWaiters(word);
@@ -199,7 +200,7 @@ bool wakesAWaiterOnTheSeqWord(std::atomic<std::uint32_t>& word)
     // the only thing that tells the deadline from the wake.
     const bool cameBack = poll::waitUntil([&returned]
                                           {
-                                              return returned.load(std::memory_order_acquire);
+                                              return returned.load();
                                           },
                                           ReturnWait, PollStep);
 

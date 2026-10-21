@@ -7,9 +7,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
+#include "common/ordered.hpp"
 #include "core/types.hpp"
 #include "observe/latency.hpp"
 
@@ -24,34 +24,34 @@ struct PeerTelemetry_t
         struct
         {
             // OwnershipRequested (per-domain)
-            std::atomic<std::uint64_t> requested[MaxDomains]{};
+            ordered::Relaxed<std::uint64_t> requested[MaxDomains]{};
             // OwnershipAlreadyHave
-            std::atomic<std::uint64_t> alreadyHave{0};
+            ordered::Relaxed<std::uint64_t> alreadyHave{0};
             // OwnershipArrived (spin/sleep variants)
-            std::atomic<std::uint64_t> arrivedSpin{0};
-            std::atomic<std::uint64_t> arrivedSleep{0};
+            ordered::Relaxed<std::uint64_t> arrivedSpin{0};
+            ordered::Relaxed<std::uint64_t> arrivedSleep{0};
             // OwnershipNotArrived
-            std::atomic<std::uint64_t> notArrived{0};
+            ordered::Relaxed<std::uint64_t> notArrived{0};
             // OwnershipTransferable
-            std::atomic<std::uint64_t> transferable{0};
+            ordered::Relaxed<std::uint64_t> transferable{0};
             // OwnershipTransferOnRelease / OnPoll
-            std::atomic<std::uint64_t> transferOnRelease{0};
-            std::atomic<std::uint64_t> transferOnPoll{0};
+            ordered::Relaxed<std::uint64_t> transferOnRelease{0};
+            ordered::Relaxed<std::uint64_t> transferOnPoll{0};
         } count;
         struct
         {
-            std::atomic<NanosCount> wait{0};          // wait wall
-            std::atomic<NanosCount> spin{0};          // wait CPU (busy-spin proxy)
-            std::atomic<NanosCount> transferable{0};  // lock-hold duration
+            ordered::Relaxed<NanosCount> wait{0};          // wait wall
+            ordered::Relaxed<NanosCount> spin{0};          // wait CPU (busy-spin proxy)
+            ordered::Relaxed<NanosCount> transferable{0};  // lock-hold duration
         } time;
     } ownership;
 
     // ── Recovery FSM events (Event::Recovery*) ───────────────────
     struct
     {
-        std::atomic<std::uint64_t> takeover{0};
-        std::atomic<std::uint64_t> completed{0};
-        std::atomic<std::uint64_t> rejoined{0};
+        ordered::Relaxed<std::uint64_t> takeover{0};
+        ordered::Relaxed<std::uint64_t> completed{0};
+        ordered::Relaxed<std::uint64_t> rejoined{0};
     } recovery;
 
     // ── Handoff latency breakdown (CME_LATENCY) ───────────────────
@@ -60,8 +60,8 @@ struct PeerTelemetry_t
     static constexpr std::uint32_t LatCount = static_cast<std::uint32_t>(trace::LatencyStage::Count);
     struct
     {
-        std::atomic<std::uint64_t> cycles[LatCount]{};
-        std::atomic<std::uint64_t> count[LatCount]{};
+        ordered::Relaxed<std::uint64_t> cycles[LatCount]{};
+        ordered::Relaxed<std::uint64_t> count[LatCount]{};
     } handoffLat;
 };
 

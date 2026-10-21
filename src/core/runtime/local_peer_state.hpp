@@ -10,13 +10,13 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <thread>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
@@ -299,7 +299,7 @@ private:
     PeerId peerId_{0};
     Geometry::Member_t selfMember_{};  // local truth of self's slot (incl. lastSeenNanos); FAM is a write-only mirror
     std::mutex selfMemberMutex_;       // serialises this peer's threads changing and publishing selfMember_
-    std::atomic<bool> active_{false};
+    ordered::Published<bool> active_{false};
 
     std::uint32_t peerScanBound_{0};  // cached peer scan bound
 
@@ -309,11 +309,11 @@ private:
     {
         // Per-word atomics: tear-free within a word, mixed-epoch across words -- the same
         // bounded-stale tolerance the cache already relies on.
-        std::atomic<std::uint64_t> participating[DomainWordCount]{};  // participatingDomains words
-        std::atomic<std::uint64_t> lastSeenNanos{0};                  // LivenessPolicy witness (wall-clock ns)
-        std::atomic<std::int64_t> stampNs{INT64_MIN};                 // monotime ns of last refresh (old => stale)
-        std::atomic<std::uint32_t> status{0};                         // Member_t::Status
-        std::atomic<bool> valid{false};                               // slot had valid magic at last refresh
+        ordered::Relaxed<std::uint64_t> participating[DomainWordCount]{};  // participatingDomains words
+        ordered::Relaxed<std::uint64_t> lastSeenNanos{0};                  // LivenessPolicy witness (wall-clock ns)
+        ordered::Relaxed<std::int64_t> stampNs{INT64_MIN};                 // monotime ns of last refresh (old => stale)
+        ordered::Relaxed<std::uint32_t> status{0};                         // Member_t::Status
+        ordered::Relaxed<bool> valid{false};                               // slot had valid magic at last refresh
     };
     std::unique_ptr<CachedMember_t[]> memberCache_;
 
@@ -363,8 +363,8 @@ private:
         // Cross-thread control: thread owned by ctor/dtor, stop/freeze are external
         // signals -- hence atomic.
         std::thread thread;
-        std::atomic<bool> stop{false};
-        std::atomic<bool> freeze{false};
+        ordered::Published<bool> stop{false};
+        ordered::Published<bool> freeze{false};
 
         // Poll-thread-private below: single owner, so no atomics needed.
         std::uint32_t recoveryCycles{0};  // recovery takeover-span countdown

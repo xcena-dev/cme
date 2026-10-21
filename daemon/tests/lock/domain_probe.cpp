@@ -19,6 +19,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/robust_lock.hpp"
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "harness/helper_area.hpp"
@@ -57,15 +58,15 @@ public:
     Waiter(cmed::protocol::Domain_t& domain, timing::Nanos timeout, T_Settled settled)
         : worker_{[this, &domain, timeout, settled]
                   {
-                      started_.store(true, std::memory_order_release);
+                      started_.store(true);
                       outcome_ = domain.awaitState(timeout, settled);
-                      returned_.store(true, std::memory_order_release);
+                      returned_.store(true);
                   }}
     {
         // A case that asserts this thread is still waiting has to know it began first. A fixed sleep
         // from construction would measure thread startup instead, which a loaded machine can outlast.
         const timing::Deadline patience{timing::Secs{5}};
-        while (!started_.load(std::memory_order_acquire) && !patience.expired())
+        while (!started_.load() && !patience.expired())
         {
             std::this_thread::yield();
         }
@@ -93,7 +94,7 @@ public:
 
     [[nodiscard]] bool returned() const noexcept
     {
-        return returned_.load(std::memory_order_acquire);
+        return returned_.load();
     }
 
     // Read only after the thread has been joined.
@@ -103,8 +104,8 @@ public:
     }
 
 private:
-    std::atomic<bool> started_{false};
-    std::atomic<bool> returned_{false};
+    ordered::Published<bool> started_{false};
+    ordered::Published<bool> returned_{false};
     std::optional<cmed::protocol::RequestState> outcome_;
     std::thread worker_;
 };
@@ -346,8 +347,8 @@ void waitersCountsOnlyTheBlocked(probe::Context& ctx)
         ctx.check(!domain.hasWaiters(), "and leaves the count at zero, because nothing waited");
     }
 
-    std::atomic<bool> secondHolds{false};
-    std::atomic<bool> mayRelease{false};
+    ordered::Published<bool> secondHolds{false};
+    ordered::Published<bool> mayRelease{false};
     bool sawOneQueued = false;
     bool zeroWhileHolding = false;
 
@@ -357,8 +358,8 @@ void waitersCountsOnlyTheBlocked(probe::Context& ctx)
         std::thread contender{[&domain, &secondHolds, &mayRelease]
                               {
                                   const cmed::util::RobustLock mine = domain.lockForRequest();
-                                  secondHolds.store(true, std::memory_order_release);
-                                  while (!mayRelease.load(std::memory_order_acquire))
+                                  secondHolds.store(true);
+                                  while (!mayRelease.load())
                                   {
                                       std::this_thread::yield();
                                   }
@@ -368,18 +369,18 @@ void waitersCountsOnlyTheBlocked(probe::Context& ctx)
         holder.unlock();
 
         const timing::Deadline patience{timing::Secs{5}};
-        while (!secondHolds.load(std::memory_order_acquire) && !patience.expired())
+        while (!secondHolds.load() && !patience.expired())
         {
             std::this_thread::yield();
         }
         zeroWhileHolding = !domain.hasWaiters();
 
-        mayRelease.store(true, std::memory_order_release);
+        mayRelease.store(true);
         contender.join();
     }
 
     ctx.check(sawOneQueued, "a requester blocked on the mutex reads as one waiter");
-    ctx.check(secondHolds.load(std::memory_order_acquire), "the blocked requester goes on to hold it");
+    ctx.check(secondHolds.load(), "the blocked requester goes on to hold it");
     ctx.check(zeroWhileHolding, "and the count is back to zero once it holds, not while it holds");
     ctx.check(!domain.hasWaiters(), "with nothing left behind at the end");
 }

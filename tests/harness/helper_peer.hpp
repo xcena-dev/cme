@@ -30,6 +30,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
@@ -68,20 +69,20 @@ struct PeerSlot_t
 
     // ── runner -> main ─────────────────────────────────────────────
     // Raised once a pinned hold is real.
-    std::atomic<bool> holding{false};
+    ordered::Published<bool> holding{false};
     std::atomic<std::uint64_t> acquires{0};
     // The Peer never got built, so this run proves nothing.
     std::atomic<bool> failed{false};
     // The built Peer, for reads only: publishing the pointer is what main lacks when it takes
     // `peer` directly. Null outside the worker's life.
-    std::atomic<cme::Peer*> livePeer{nullptr};
+    ordered::Published<cme::Peer*> livePeer{nullptr};
 };
 
 // One worker's counters, zeroed when its Peer is not up. Check countersLive before believing one:
 // without CME_STATS every field is zero because nothing counted.
 [[nodiscard]] inline cme::TelemetrySnapshot_t readTelemetry(const PeerSlot_t& slot)
 {
-    const cme::Peer* peer = slot.livePeer.load(std::memory_order_acquire);
+    const cme::Peer* peer = slot.livePeer.load();
     return peer != nullptr ? peer->getTelemetry() : cme::TelemetrySnapshot_t{};
 }
 
@@ -104,13 +105,13 @@ inline void runPeerWorker(PeerSlot_t* slot)
         slot->failed.store(true);
         return;
     }
-    slot->livePeer.store(slot->peer.get(), std::memory_order_release);
+    slot->livePeer.store(slot->peer.get());
 
     if (slot->pinned.load(std::memory_order_acquire))
     {
         auto guard = slot->peer->lock(1);
         slot->acquires.fetch_add(1, std::memory_order_relaxed);
-        slot->holding.store(true, std::memory_order_release);
+        slot->holding.store(true);
         while (!slot->stop.load(std::memory_order_acquire))
         {
             slot->peer->setFreeze(slot->frozen.load(std::memory_order_acquire));
@@ -118,7 +119,7 @@ inline void runPeerWorker(PeerSlot_t* slot)
         }
         // Cleared before the guard goes, so a reader that sees it true knows the hold is still on.
         // That is what lets a case use it as the oracle for "somebody else got in while I held it".
-        slot->holding.store(false, std::memory_order_release);
+        slot->holding.store(false);
         if (slot->abandon.load(std::memory_order_acquire))
         {
             // Same reasoning as the Peer below: a crashed holder releases nothing, and a guard that
@@ -149,7 +150,7 @@ inline void runPeerWorker(PeerSlot_t* slot)
         domainId = (domainId % slot->domainCount) + 1;
     }
 
-    slot->livePeer.store(nullptr, std::memory_order_release);  // no reader past this point
+    slot->livePeer.store(nullptr);  // no reader past this point
 
     // A peer the case froze is a crashed peer, and a crashed process runs no destructor. Releasing
     // rather than resetting is what keeps its slot dead for recovery to find.

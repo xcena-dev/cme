@@ -5,7 +5,6 @@
 
 #include "cme/shared_session.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -19,6 +18,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 
 namespace cme
 {
@@ -38,15 +38,15 @@ struct DomainTier_t
     // The peer's CXL ownership, kept alive across a whole cohort rather than per critical
     // section. Reset == ~cme::Guard == release, which lets a remote peer in.
     std::optional<cme::Guard> held;
-    std::uint32_t batch{0};                 // local acquires since the last handoff
-    std::atomic<std::uint32_t> waiters{0};  // threads queued on `mutex`
+    std::uint32_t batch{0};                      // local acquires since the last handoff
+    ordered::Relaxed<std::uint32_t> waiters{0};  // threads queued on `mutex`
 };
 
 // Release the cohort. Runs with `mutex` still held, so the count it reads cannot change under
 // it: keep ownership when another local thread is queued, hand it back when none is.
 void releaseCohort(DomainTier_t& tier) noexcept
 {
-    if (tier.waiters.load(std::memory_order_relaxed) == 0)
+    if (tier.waiters.load() == 0)
     {
         tier.held.reset();
         tier.batch = 0;
@@ -100,7 +100,7 @@ struct SharedSession::Impl
     // std::less<> for heterogeneous lookup: find(string_view) without allocating a key on
     // every acquire. Domain counts are small, so the tree walk is cheaper than the malloc.
     std::map<std::string, std::unique_ptr<DomainTier_t>, std::less<>> domains;
-    std::atomic<std::uint32_t> cohortCap{DefaultCohortCap};
+    ordered::Relaxed<std::uint32_t> cohortCap{DefaultCohortCap};
 };
 
 struct SharedSession::Guard::Impl
@@ -159,11 +159,11 @@ SharedSession::Guard SharedSession::lock(std::string_view name)
 
     // Announce intent before queuing so the thread currently in the cohort keeps the peer's
     // ownership across the handoff gap instead of releasing it to a remote peer.
-    tier->waiters.fetch_add(1, std::memory_order_relaxed);
+    tier->waiters.add(1);
     std::unique_lock<std::timed_mutex> entryLock{tier->mutex};
-    tier->waiters.fetch_sub(1, std::memory_order_relaxed);
+    tier->waiters.subtract(1);
 
-    if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load(std::memory_order_relaxed))
+    if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load())
     {
         tier->batch = 0;
         tier->held.reset();  // release first: re-acquiring yields to remote peers
@@ -189,16 +189,16 @@ std::optional<SharedSession::Guard> SharedSession::tryLock(std::string_view name
 
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
-    tier->waiters.fetch_add(1, std::memory_order_relaxed);
+    tier->waiters.add(1);
     std::unique_lock<std::timed_mutex> entryLock{tier->mutex, std::defer_lock};
     const bool entered = entryLock.try_lock_until(deadline);
-    tier->waiters.fetch_sub(1, std::memory_order_relaxed);
+    tier->waiters.subtract(1);
     if (!entered)
     {
         return std::nullopt;
     }
 
-    if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load(std::memory_order_relaxed))
+    if (!tier->held.has_value() || tier->batch >= impl_->cohortCap.load())
     {
         tier->batch = 0;
         tier->held.reset();  // release first: re-acquiring yields to remote peers
@@ -255,7 +255,7 @@ void SharedSession::deleteDomain(std::string_view name)
 
 void SharedSession::setCohortCap(std::uint32_t cap) noexcept
 {
-    impl_->cohortCap.store(cap, std::memory_order_relaxed);
+    impl_->cohortCap.store(cap);
 }
 
 CoherencyMode SharedSession::getCoherencyMode() const noexcept

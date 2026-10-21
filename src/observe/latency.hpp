@@ -114,8 +114,8 @@ void writeJsonl(const char* path, double clockGhz) noexcept;
     {                                                                                          \
         auto& handoffLat = (peerState).getTelemetry().handoffLat;                              \
         const auto stageIndex = static_cast<std::uint32_t>(::cme::trace::LatencyStage::stage); \
-        handoffLat.cycles[stageIndex].fetch_add((deltaCycles), std::memory_order_relaxed);     \
-        handoffLat.count[stageIndex].fetch_add(1, std::memory_order_relaxed);                  \
+        handoffLat.cycles[stageIndex].add((deltaCycles));                                      \
+        handoffLat.count[stageIndex].add(1);                                                   \
     } while (0)
 
 // Close the segment opened by OBSERVE_LATENCY_BEGIN(stage): charge counter + draw

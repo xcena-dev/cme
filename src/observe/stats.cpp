@@ -6,9 +6,9 @@
 
 #include "observe/stats.hpp"
 
-#include <atomic>
 #include <cstdint>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
@@ -28,29 +28,29 @@ TelemetrySnapshot_t getTelemetrySnapshot(LocalPeerState& peerState) noexcept
 {
     TelemetrySnapshot_t snapshot{};
     const auto& telemetry = peerState.getTelemetry();
-    snapshot.waitCount = telemetry.ownership.count.arrivedSpin.load(std::memory_order_relaxed) +
-                         telemetry.ownership.count.arrivedSleep.load(std::memory_order_relaxed) +
-                         telemetry.ownership.count.notArrived.load(std::memory_order_relaxed);
-    snapshot.waitTime = telemetry.ownership.time.wait.load(std::memory_order_relaxed);
-    snapshot.spinTime = telemetry.ownership.time.spin.load(std::memory_order_relaxed);
-    snapshot.lockHoldCount = telemetry.ownership.count.transferable.load(std::memory_order_relaxed);
-    snapshot.lockHoldTime = telemetry.ownership.time.transferable.load(std::memory_order_relaxed);
+    snapshot.waitCount = telemetry.ownership.count.arrivedSpin.load() +
+                         telemetry.ownership.count.arrivedSleep.load() +
+                         telemetry.ownership.count.notArrived.load();
+    snapshot.waitTime = telemetry.ownership.time.wait.load();
+    snapshot.spinTime = telemetry.ownership.time.spin.load();
+    snapshot.lockHoldCount = telemetry.ownership.count.transferable.load();
+    snapshot.lockHoldTime = telemetry.ownership.time.transferable.load();
     for (std::uint32_t domainId = 0; domainId < MaxDomains; ++domainId)
     {
         snapshot.perDomainAcquire[domainId] =
-            telemetry.ownership.count.requested[domainId].load(std::memory_order_relaxed);
+            telemetry.ownership.count.requested[domainId].load();
     }
-    snapshot.transferOnRelease = telemetry.ownership.count.transferOnRelease.load(std::memory_order_relaxed);
-    snapshot.transferOnPoll = telemetry.ownership.count.transferOnPoll.load(std::memory_order_relaxed);
+    snapshot.transferOnRelease = telemetry.ownership.count.transferOnRelease.load();
+    snapshot.transferOnPoll = telemetry.ownership.count.transferOnPoll.load();
     const auto& latency = telemetry.handoffLat;
     for (std::uint32_t bucket = 0; bucket < TelemetrySnapshot_t::LatCount; ++bucket)
     {
-        snapshot.handoffLat.cycles[bucket] = latency.cycles[bucket].load(std::memory_order_relaxed);
-        snapshot.handoffLat.count[bucket] = latency.count[bucket].load(std::memory_order_relaxed);
+        snapshot.handoffLat.cycles[bucket] = latency.cycles[bucket].load();
+        snapshot.handoffLat.count[bucket] = latency.count[bucket].load();
     }
-    snapshot.recovery.takeover = telemetry.recovery.takeover.load(std::memory_order_relaxed);
-    snapshot.recovery.completed = telemetry.recovery.completed.load(std::memory_order_relaxed);
-    snapshot.recovery.rejoined = telemetry.recovery.rejoined.load(std::memory_order_relaxed);
+    snapshot.recovery.takeover = telemetry.recovery.takeover.load();
+    snapshot.recovery.completed = telemetry.recovery.completed.load();
+    snapshot.recovery.rejoined = telemetry.recovery.rejoined.load();
 #if defined(CME_STATS)
     snapshot.countersLive = true;
 #endif
@@ -61,9 +61,9 @@ TelemetrySnapshot_t getTelemetrySnapshot(LocalPeerState& peerState) noexcept
 
 namespace
 {
-inline void bump(std::atomic<std::uint64_t>& counter) noexcept
+inline void bump(ordered::Relaxed<std::uint64_t>& counter) noexcept
 {
-    counter.fetch_add(1, std::memory_order_relaxed);
+    counter.add(1);
 }
 
 // Accumulate wall + CPU wait time (shared by OwnershipArrived / NotArrived).
@@ -77,10 +77,8 @@ inline void recordWaitCommon(LocalPeerState& peerState, const timing::Stopwatch&
         cpuElapsed = wallElapsed;  // clamp: scheduler tick can inflate CPU proxy
     }
     auto& ownership = peerState.getTelemetry().ownership;
-    ownership.time.wait.fetch_add(static_cast<NanosCount>(wallElapsed.count()),
-                                  std::memory_order_relaxed);
-    ownership.time.spin.fetch_add(static_cast<NanosCount>(cpuElapsed.count()),
-                                  std::memory_order_relaxed);
+    ownership.time.wait.add(static_cast<NanosCount>(wallElapsed.count()));
+    ownership.time.spin.add(static_cast<NanosCount>(cpuElapsed.count()));
 }
 }  // namespace
 
@@ -88,7 +86,7 @@ void emit(observe::EventTag_t<observe::Event::OwnershipRequested>,
           LocalPeerState& peerState, DomainId domainId) noexcept
 {
     const std::uint32_t domainIndex = std::min<std::uint32_t>(domainId, MaxDomains - 1);
-    peerState.getTelemetry().ownership.count.requested[domainIndex].fetch_add(1, std::memory_order_relaxed);
+    peerState.getTelemetry().ownership.count.requested[domainIndex].add(1);
 }
 
 void emit(observe::EventTag_t<observe::Event::OwnershipAlreadyHave>,
@@ -119,9 +117,8 @@ void emit(observe::EventTag_t<observe::Event::OwnershipTransferable>,
 {
     const auto holdNs = held.elapsed();
     auto& ownership = peerState.getTelemetry().ownership;
-    ownership.count.transferable.fetch_add(1, std::memory_order_relaxed);
-    ownership.time.transferable.fetch_add(static_cast<NanosCount>(holdNs.count()),
-                                          std::memory_order_relaxed);
+    ownership.count.transferable.add(1);
+    ownership.time.transferable.add(static_cast<NanosCount>(holdNs.count()));
 }
 
 void emit(observe::EventTag_t<observe::Event::OwnershipTransferOnRelease>,

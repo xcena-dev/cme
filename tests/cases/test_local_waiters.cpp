@@ -7,12 +7,12 @@
 // Peterson. A short wait times out while a long wait on the same domain is pending, and the holder
 // releases only after that: the short wait must not get in, and the long wait must still be granted.
 
-#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <thread>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -47,12 +47,12 @@ void runBody(harness::TestContext& ctx)
     auto waiter = harness::openSession();
     waiter.joinDomain(LaneName);
 
-    std::atomic<bool> longGranted{false};
+    ordered::Published<bool> longGranted{false};
     std::thread longWait(
         [&]
         {
             const auto granted = waiter.tryLock(LaneName, LongBudget);
-            longGranted.store(granted.has_value(), std::memory_order_release);
+            longGranted.store(granted.has_value());
         });
 
     std::this_thread::sleep_for(RaiseGap);
@@ -65,7 +65,7 @@ void runBody(harness::TestContext& ctx)
     const double grantMs = sinceRelease.elapsed<timing::MillisF>().count();
 
     ctx.check(shortGaveUp, "the short wait gave up while the holder kept the domain");
-    ctx.check(longGranted.load(std::memory_order_acquire),
+    ctx.check(longGranted.load(),
               "the long wait of the same peer was granted once the holder released");
     ctx.checkf(grantMs < timing::MillisF(LongBudget).count() / 2,
                "the long wait was granted on the release, not at the end of its budget (%.0f ms)", grantMs);

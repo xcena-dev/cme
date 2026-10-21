@@ -13,7 +13,6 @@
 
 #include <sys/types.h>
 
-#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -24,6 +23,7 @@
 #include "cmed/config.hpp"
 #include "cmed/errors.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "shared/posix/seqpacket_socket.hpp"
@@ -90,7 +90,7 @@ public:
 
     ~StubSetup()
     {
-        running_.store(false, std::memory_order_release);
+        running_.store(false);
         worker_.join();
     }
 
@@ -129,7 +129,7 @@ private:
 
     void run()
     {
-        while (running_.load(std::memory_order_acquire))
+        while (running_.load())
         {
             posix::UniqueFd arrived = listening_.accept();
             if (!arrived)
@@ -176,7 +176,7 @@ private:
     posix::FileDesc areaDescriptor_;
     posix::SeqpacketSocket listening_;
 
-    std::atomic<bool> running_{true};
+    ordered::Published<bool> running_{true};
 
     // Read by nobody: what holding them buys is that they stay open, and the destructor closes them
     // after the thread that fills this has joined.

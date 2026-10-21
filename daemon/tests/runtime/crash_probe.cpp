@@ -31,6 +31,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "harness/helper.hpp"
@@ -144,8 +145,8 @@ void writeConfig(const cmed::harness::ProbeScratch& scratch, const std::vector<s
 // What the requester thread and the case share. `inside` is what a remote acquire is judged against.
 struct Holder_t
 {
-    std::atomic<bool> inside{false};
-    std::atomic<bool> failed{false};
+    ordered::Published<bool> inside{false};
+    ordered::Published<bool> failed{false};
 };
 
 // Takes the domain, says so, and stays in it for @across whatever happens to its daemon.
@@ -156,7 +157,7 @@ void holdAcross(const cmed::harness::ProbeScratch& scratch, const std::vector<st
     {
         auto session = cmed::CmedSession::connect(configFor(scratch, areaNames, 0));
         const cmed::CmedGuard guard = session.lock(HeldDomainName);
-        shared.inside.store(true, std::memory_order_release);
+        shared.inside.store(true);
 
         // What a section longer than one grant has to do. Leaving on the guard alone would keep this
         // requester inside for @across whatever happened to the daemon behind it.
@@ -166,13 +167,13 @@ void holdAcross(const cmed::harness::ProbeScratch& scratch, const std::vector<st
                                 return !guard.stillHolds();
                             },
                             across, cmed::harness::DaemonStartPoll));
-        shared.inside.store(false, std::memory_order_release);
+        shared.inside.store(false);
     }
     catch (const cmed::CmedError& failure)
     {
         std::printf("holder: %s\n", failure.what());
-        shared.inside.store(false, std::memory_order_release);
-        shared.failed.store(true, std::memory_order_release);
+        shared.inside.store(false);
+        shared.failed.store(true);
     }
 }
 
@@ -300,12 +301,12 @@ void aRemoteAcquireDoesNotOverlap(probe::Context& ctx, const cmed::harness::Prob
     static_cast<void>(poll::waitUntil(
         [&shared]
         {
-            return shared.inside.load(std::memory_order_acquire) ||
-                   shared.failed.load(std::memory_order_acquire);
+            return shared.inside.load() ||
+                   shared.failed.load();
         },
         RemoteWait, cmed::harness::DaemonStartPoll));
 
-    if (!ctx.check(shared.inside.load(std::memory_order_acquire), "node 0's requester is inside"))
+    if (!ctx.check(shared.inside.load(), "node 0's requester is inside"))
     {
         holding.join();
         return;
@@ -322,7 +323,7 @@ void aRemoteAcquireDoesNotOverlap(probe::Context& ctx, const cmed::harness::Prob
         auto second = cmed::CmedSession::connect(configFor(scratch, areaNames, 1));
         const cmed::CmedGuard guard = second.lock(HeldDomainName);
         acquired = static_cast<bool>(guard);
-        overlapped = shared.inside.load(std::memory_order_acquire);
+        overlapped = shared.inside.load();
         after = timing::monotonic<timing::Millis>() - killedAt;
     }
     catch (const cmed::CmedError& refused)

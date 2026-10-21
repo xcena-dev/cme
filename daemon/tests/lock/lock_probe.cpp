@@ -10,7 +10,6 @@
 
 #include <sys/types.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -22,6 +21,7 @@
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "daemon/startup/served_area.hpp"
@@ -65,14 +65,14 @@ public:
 
     ~StubDaemon()
     {
-        running_.store(false, std::memory_order_release);
+        running_.store(false);
         cmed::util::wakeAllWaiters(cmed::harness::resolveDoorbellWord(*area_));
         worker_.join();
     }
 
     [[nodiscard]] std::uint32_t grants() const noexcept
     {
-        return grants_.load(std::memory_order_acquire);
+        return grants_.load();
     }
 
     // Same lag as harness::StubDaemon: the wake reaches the requester before this count moves.
@@ -80,7 +80,7 @@ public:
     {
         return poll::waitUntil([this, wanted]
                                {
-                                   return grants_.load(std::memory_order_acquire) >= wanted;
+                                   return grants_.load() >= wanted;
                                },
                                within, cmed::harness::ProbePoll);
     }
@@ -88,7 +88,7 @@ public:
 private:
     void run()
     {
-        while (running_.load(std::memory_order_acquire))
+        while (running_.load())
         {
             const std::uint32_t seen = cmed::harness::getDoorbell(*area_);
             if (!drain())
@@ -122,7 +122,7 @@ private:
                 domain.wakeRequester();
                 domain.publishGrant();
                 domain.wakeRequester();
-                grants_.fetch_add(1, std::memory_order_release);
+                grants_.add(1);
                 break;
             default:
                 // Idle is a holder that left with nothing queued behind it, and there is no turn here to
@@ -132,8 +132,8 @@ private:
     }
 
     cmed::protocol::SharedArea_t* area_;
-    std::atomic<bool> running_{true};
-    std::atomic<std::uint32_t> grants_{0};
+    ordered::Published<bool> running_{true};
+    ordered::Published<std::uint32_t> grants_{0};
     std::thread worker_;
 };
 
@@ -163,8 +163,8 @@ bool excludesEveryOtherHolder(const cmed::harness::StubSetup& setup)
     constexpr std::uint32_t Threads = 4;
     constexpr std::uint32_t Rounds = 20;
 
-    std::atomic<std::uint32_t> inside{0};
-    std::atomic<bool> overlapped{false};
+    ordered::Published<std::uint32_t> inside{0};
+    ordered::Published<bool> overlapped{false};
     std::uint32_t counter = 0;  // plain on purpose: a second holder corrupts it
 
     std::vector<std::thread> holders;
@@ -178,13 +178,13 @@ bool excludesEveryOtherHolder(const cmed::harness::StubSetup& setup)
                 for (std::uint32_t round = 0; round < Rounds; ++round)
                 {
                     const cmed::CmedGuard guard = session.lock(DomainName);
-                    if (inside.fetch_add(1, std::memory_order_acq_rel) != 0)
+                    if (inside.add(1) != 0)
                     {
-                        overlapped.store(true, std::memory_order_release);
+                        overlapped.store(true);
                     }
                     ++counter;
                     std::this_thread::sleep_for(timing::Micros{50});
-                    inside.fetch_sub(1, std::memory_order_acq_rel);
+                    inside.subtract(1);
                 }
             });
     }
@@ -193,7 +193,7 @@ bool excludesEveryOtherHolder(const cmed::harness::StubSetup& setup)
         holder.join();
     }
 
-    return !overlapped.load(std::memory_order_acquire) && counter == Threads * Rounds;
+    return !overlapped.load() && counter == Threads * Rounds;
 }
 
 bool refusesAnUnknownName(const cmed::harness::StubSetup& setup)

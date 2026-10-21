@@ -47,6 +47,7 @@
 
 #include "cme/limits.hpp"
 #include "common/args.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "helper_util.hpp"
 #include "test_memory.hpp"
@@ -193,11 +194,11 @@ struct RoundStamps_t
 {
     writeNonce(nonce, 0);  // free/unlocked before the round opens
 
-    std::atomic<std::uint32_t> ready{0};     // startup sync only (not the race)
-    std::atomic<std::uint64_t> originNs{0};  // common origin, published by the opener
-    std::atomic<std::uint32_t> gate{0};      // round-open signal: DRAM (cache-coherent), NOT the FAM
-                                             // line -- stakers must not hot-poll the UC nonce to
-                                             // learn it started
+    std::atomic<std::uint32_t> ready{0};            // startup sync only (not the race)
+    ordered::Published<std::uint64_t> originNs{0};  // common origin, published by the opener
+    ordered::Published<std::uint32_t> gate{0};      // round-open signal: DRAM (cache-coherent), NOT the FAM
+                                                    // line -- stakers must not hot-poll the UC nonce to
+                                                    // learn it started
 
     std::vector<std::uint64_t> readNs(contenders, 0);   // when staker i's one UC read was served
     std::vector<std::uint64_t> writeNs(contenders, 0);  // when staker i staked (0 = missed the window)
@@ -214,8 +215,8 @@ struct RoundStamps_t
             {
                 _mm_pause();
             }  // all contenders parked on the gate
-            originNs.store(timing::monotonic<timing::Nanos>(), std::memory_order_release);
-            gate.store(1, std::memory_order_release);  // OPEN via DRAM gate; nonce is already 0
+            originNs.store(timing::monotonic<timing::Nanos>());
+            gate.store(1);  // OPEN via DRAM gate; nonce is already 0
         });
 
     harness::runThreads(
@@ -225,11 +226,11 @@ struct RoundStamps_t
             const std::uint64_t myNonce = static_cast<std::uint64_t>(index) + 1;  // distinct, nonzero
             pinTo(index);                                                         // one staker per core
             ready.fetch_add(1);
-            while (gate.load(std::memory_order_acquire) == 0)
+            while (gate.load() == 0)
             {
                 _mm_pause();
             }  // DRAM spin, no FAM poll
-            const std::uint64_t origin = originNs.load(std::memory_order_acquire);
+            const std::uint64_t origin = originNs.load();
             const std::uint64_t seen = readNonce(nonce);  // one UC read: free(0)? then stake
             readNs[index] = timing::monotonic<timing::Nanos>() - origin;
             if (seen == 0)  // saw it free -> stake (claim.cpp case 1)

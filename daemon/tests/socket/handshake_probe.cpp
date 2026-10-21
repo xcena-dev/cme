@@ -11,7 +11,6 @@
 
 #include <sys/stat.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstring>
@@ -25,6 +24,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "daemon/control/handler.hpp"
@@ -537,7 +537,7 @@ public:
 
     ~MisleadingDaemon()
     {
-        running_.store(false, std::memory_order_release);
+        running_.store(false);
         serving_.join();
     }
 
@@ -548,7 +548,7 @@ public:
 private:
     void serve()
     {
-        while (running_.load(std::memory_order_acquire))
+        while (running_.load())
         {
             posix::UniqueFd taken = listening_.accept();
             if (!taken)
@@ -577,7 +577,7 @@ private:
     posix::SeqpacketSocket listening_;
     std::string reply_;
     posix::FileDesc areaDescriptor_;
-    std::atomic<bool> running_{true};
+    ordered::Published<bool> running_{true};
     std::thread serving_;
 };
 

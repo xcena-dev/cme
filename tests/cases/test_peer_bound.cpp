@@ -8,7 +8,6 @@
 // each joiner's slot from its own record of the slots it holds, and checks the bound after every step.
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -17,6 +16,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "core/layout/geometry.hpp"
 #include "core/types.hpp"
 #include "helper.hpp"
@@ -124,11 +124,11 @@ void runBody(harness::TestContext& ctx)
     held.clear();
     ctx.check(readPeerBound(region) == expectedBound, "every member leaving moves nothing either");
 
-    std::atomic<std::uint32_t> gathered{0};
-    std::atomic<std::uint32_t> failed{0};
+    ordered::Published<std::uint32_t> gathered{0};
+    ordered::Relaxed<std::uint32_t> failed{0};
     const auto isGathered = [&]
     {
-        return gathered.load(std::memory_order_acquire) == Peers;
+        return gathered.load() == Peers;
     };
     harness::runThreads(Peers,
                         [&](std::uint32_t /*index*/)
@@ -136,16 +136,16 @@ void runBody(harness::TestContext& ctx)
                             try
                             {
                                 auto session = harness::openSession();
-                                gathered.fetch_add(1, std::memory_order_acq_rel);
+                                gathered.add(1);
                                 static_cast<void>(harness::waitUntil(isGathered, GatherWaitMs));
                             }
                             catch (const std::exception& failure)
                             {
-                                failed.fetch_add(1, std::memory_order_relaxed);
+                                failed.add(1);
                                 harness::log("parallel join failed: %s", failure.what());
                             }
                         });
-    ctx.check(failed.load(std::memory_order_relaxed) == 0 && isGathered(),
+    ctx.check(failed.load() == 0 && isGathered(),
               "joiners admitted together each got a slot");
     ctx.check(readPeerBound(region) == Peers, "joiners admitted together grow the bound over every slot");
 }

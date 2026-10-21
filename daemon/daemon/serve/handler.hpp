@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <thread>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/observe/counters.hpp"
 #include "daemon/serve/workers.hpp"
@@ -131,11 +132,11 @@ private:
     struct
     {
         // Read at the top of each pass by both, and cleared by stop().
-        std::atomic<bool> running{true};
+        ordered::Published<bool> running{true};
 
         // Raised once per dispatcher pass and consumed by the maintenance pass, which is the whole of
         // what tells a watchdog the dispatcher is still moving. Nothing else steers on it.
-        std::atomic<std::uint64_t> heartbeat{0};
+        ordered::Published<std::uint64_t> heartbeat{0};
 
         // The beat the last ping went out on. Not atomic: the maintenance thread is the only one that
         // reads or writes it, which is what makes takeBeat() safe to consume.
@@ -145,14 +146,14 @@ private:
         // Raised on the dispatcher's own thread, once per pass it takes.
         void beat() noexcept
         {
-            heartbeat.fetch_add(1, std::memory_order_release);
+            heartbeat.add(1);
         }
 
         // Whether the beat moved since this last asked. Consumed by the asking, so the maintenance
         // thread is the only caller: a second one would read the first one's movement as none.
         [[nodiscard]] bool takeBeat() noexcept
         {
-            const auto beaten = heartbeat.load(std::memory_order_acquire);
+            const auto beaten = heartbeat.load();
             if (beaten == lastHeartbeat)
             {
                 return false;

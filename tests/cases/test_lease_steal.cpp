@@ -28,6 +28,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/layout/geometry.hpp"
@@ -104,11 +105,11 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     auto view = harness::openBoundRegion(timing::Secs{1});
     auto* control = view.getAdmissionControl();
 
-    std::atomic<bool> churning{true};
+    ordered::Relaxed<bool> churning{true};
     std::atomic<std::uint64_t> stamps{0};
     std::thread contender{[control, coherency, &churning, &stamps]
                           {
-                              while (churning.load(std::memory_order_relaxed))
+                              while (churning.load())
                               {
                                   // Never zero: a free lease is staked rather than watched, and the
                                   // path under test is the one where the lease looks held.
@@ -127,7 +128,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     ctx.check(harness::threw<cme::NoFreeSlotError>(joinRegion),
               "contended lease: the joiner gives up at the deadline");
 
-    churning.store(false, std::memory_order_relaxed);
+    churning.store(false);
     contender.join();
 
     // Evidence the contention was real rather than one stamp the joiner happened to miss. A loaded

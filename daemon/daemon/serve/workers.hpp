@@ -7,11 +7,11 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/observe/counters.hpp"
 #include "shared/protocol/shared_area.hpp"
@@ -92,7 +92,7 @@ private:
     {
         // Cleared by the destructor before it bumps each worker's word, which is the order a worker
         // reads the two in.
-        std::atomic<bool> running{true};
+        ordered::Published<bool> running{true};
     } state_;
 
     // ── what a measurement asks afterwards ─────────────────────────────

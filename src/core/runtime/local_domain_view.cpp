@@ -5,7 +5,6 @@
 
 #include "core/runtime/local_domain_view.hpp"
 
-#include <atomic>
 #include <cstdint>
 
 #include "common/timing.hpp"
@@ -19,15 +18,15 @@ void LocalDomainView::pinOwnership() noexcept
     // CAS loop instead of fetch_add: a pin must not land while a transfer publish
     // holds the word (TransferringPins) -- spin the latch out (publish-length) so
     // the subsequent record validation sees the post-transfer holder.
-    auto cur = pin_.count.load(std::memory_order_acquire);
+    auto cur = pin_.count.load();
     for (;;)
     {
         if (cur == TransferringPins)
         {
-            cur = pin_.count.load(std::memory_order_acquire);
+            cur = pin_.count.load();
             continue;
         }
-        if (pin_.count.compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel))
+        if (pin_.count.cas(cur, cur + 1))
         {
             break;
         }
@@ -41,11 +40,10 @@ void LocalDomainView::pinOwnership() noexcept
 
 void LocalDomainView::unpinOwnership() noexcept
 {
-    auto cur = pin_.count.load(std::memory_order_relaxed);
+    auto cur = pin_.count.load();
     while (cur > 0 && cur != TransferringPins)  // sentinel unreachable here (pins block it); guard anyway
     {
-        if (pin_.count.compare_exchange_weak(cur, cur - 1,
-                                             std::memory_order_relaxed))
+        if (pin_.count.cas(cur, cur - 1))
         {
             return;
         }
@@ -57,35 +55,34 @@ bool LocalDomainView::tryBeginOwnershipTransfer() noexcept
     // One atomic step: succeed only when no worker holds a pin, and block new pins
     // until endOwnershipTransfer. Failure = a worker re-pinned; caller keeps the domain.
     std::uint32_t expected = 0;
-    return pin_.count.compare_exchange_strong(expected, TransferringPins,
-                                              std::memory_order_acq_rel);
+    return pin_.count.cas(expected, TransferringPins);
 }
 
 void LocalDomainView::endOwnershipTransfer() noexcept
 {
-    pin_.count.store(0, std::memory_order_release);
+    pin_.count.store(0);
 }
 
 void LocalDomainView::resetOwnershipPins() noexcept
 {
-    pin_.count.store(0, std::memory_order_relaxed);
+    pin_.count.reset(0);
 }
 
 bool LocalDomainView::canTransferOwnership() const noexcept
 {
-    return pin_.count.load(std::memory_order_acquire) == 0;
+    return pin_.count.load() == 0;
 }
 
 bool LocalDomainView::hasOwnershipPins() const noexcept
 {
     // The transfer sentinel is the poll thread's latch, not a worker's pin.
-    const auto pins = pin_.count.load(std::memory_order_acquire);
+    const auto pins = pin_.count.load();
     return pins != 0 && pins != TransferringPins;
 }
 
 std::uint32_t LocalDomainView::getOwnershipPinCount() const noexcept
 {
-    return pin_.count.load(std::memory_order_acquire);
+    return pin_.count.load();
 }
 
 timing::TimePoint LocalDomainView::getOwnershipPinStart() const noexcept
@@ -95,17 +92,17 @@ timing::TimePoint LocalDomainView::getOwnershipPinStart() const noexcept
 
 void LocalDomainView::becomeHolder() noexcept
 {
-    ownership_.isHolder.store(true, std::memory_order_release);
+    ownership_.isHolder.store(true);
 }
 
 void LocalDomainView::loseHolder() noexcept
 {
-    ownership_.isHolder.store(false, std::memory_order_relaxed);
+    ownership_.isHolder.store(false);
 }
 
 bool LocalDomainView::isHolder() const noexcept
 {
-    return ownership_.isHolder.load(std::memory_order_acquire);
+    return ownership_.isHolder.load();
 }
 
 bool LocalDomainView::isTurnToCheckOwnership(timing::TimePoint now) noexcept

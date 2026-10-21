@@ -8,11 +8,11 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/control/exchange.hpp"
 #include "daemon/control/listener.hpp"
@@ -118,7 +118,7 @@ private:
     struct
     {
         // The loop's own, read at the top of each pass and cleared by stop().
-        std::atomic<bool> running{true};
+        ordered::Published<bool> running{true};
 
         // How long one wait may park. A pass reaches its top on this even with nobody connecting.
         timing::Millis idleInterval;

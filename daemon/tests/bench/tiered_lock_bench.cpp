@@ -27,7 +27,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +46,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "shared/protocol/socket_path.hpp"
@@ -367,7 +367,7 @@ struct Run_t
     std::vector<std::uint64_t> acquireNanos;
     std::vector<std::uint64_t> releaseNanos;
     std::mutex recording;
-    std::atomic<std::uint32_t> failures{0};
+    ordered::Relaxed<std::uint32_t> failures{0};
 };
 
 // One thread's whole run: @iters sweeps, each locking every data domain once. The stopwatch stops when
@@ -416,7 +416,7 @@ void runSweeps(const Config_t& chosen, cmed::CmedSession& session, std::uint32_t
             }
             catch (const cmed::CmedError&)
             {
-                shared.failures.fetch_add(1, std::memory_order_relaxed);
+                shared.failures.add(1);
             }
         }
     }
@@ -476,7 +476,7 @@ void report(const Config_t& chosen, Run_t& shared)
     const double mean = computeMean(everyAcquire);
 
     static_cast<void>(describe("release", shared.releaseNanos));
-    std::printf("failures            : %u\n", shared.failures.load(std::memory_order_relaxed));
+    std::printf("failures            : %u\n", shared.failures.load());
 
     if (chosen.csv.empty())
     {
@@ -606,7 +606,7 @@ int main(int argc, char** argv)
         report(chosen, shared);
 
         removeLeftovers(chosen);
-        return shared.failures.load(std::memory_order_relaxed) == 0 ? 0 : 1;
+        return shared.failures.load() == 0 ? 0 : 1;
     }
     catch (const std::exception& failure)
     {

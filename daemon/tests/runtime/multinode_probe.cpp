@@ -10,7 +10,6 @@
 // resolves, --nodes raises the count, and --uri names a medium whole. The region is formatted here,
 // so the uri must be one the caller may format.
 
-#include <atomic>
 #include <cinttypes>
 #include <csignal>
 #include <cstdint>
@@ -29,6 +28,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "harness/helper.hpp"
@@ -140,9 +140,9 @@ void writeConfig(const cmed::harness::ProbeScratch& scratch, const std::vector<s
 // corrupts it.
 struct Contention_t
 {
-    std::atomic<std::uint32_t> inside{0};
-    std::atomic<bool> overlapped{false};
-    std::atomic<std::uint32_t> failures{0};
+    ordered::Published<std::uint32_t> inside{0};
+    ordered::Published<bool> overlapped{false};
+    ordered::Published<std::uint32_t> failures{0};
     std::uint32_t counter{0};
 };
 
@@ -156,19 +156,19 @@ void contend(const cmed::harness::ProbeScratch& scratch, const std::vector<std::
         for (std::uint32_t round = 0; round < Rounds; ++round)
         {
             const cmed::CmedGuard guard = session.lock(DomainName);
-            if (shared.inside.fetch_add(1, std::memory_order_acq_rel) != 0)
+            if (shared.inside.add(1) != 0)
             {
-                shared.overlapped.store(true, std::memory_order_release);
+                shared.overlapped.store(true);
             }
             ++shared.counter;
             std::this_thread::sleep_for(HoldFor);
-            shared.inside.fetch_sub(1, std::memory_order_acq_rel);
+            shared.inside.subtract(1);
         }
     }
     catch (const cmed::CmedError& failure)
     {
         std::printf("contender on node %" PRIu32 ": %s\n", node, failure.what());
-        shared.failures.fetch_add(1, std::memory_order_acq_rel);
+        shared.failures.add(1);
     }
 }
 
@@ -221,8 +221,8 @@ void everyNodeTakesItsTurn(probe::Context& ctx, const cmed::harness::ProbeScratc
         contender.join();
     }
 
-    ctx.check(shared.failures.load(std::memory_order_acquire) == 0, "every requester ran to the end");
-    ctx.check(!shared.overlapped.load(std::memory_order_acquire),
+    ctx.check(shared.failures.load() == 0, "every requester ran to the end");
+    ctx.check(!shared.overlapped.load(),
               "no instant had the domain held on two nodes");
     ctx.checkf(shared.counter == nodes * Rounds, "%" PRIu32 " critical sections ran, one per acquire",
                shared.counter);

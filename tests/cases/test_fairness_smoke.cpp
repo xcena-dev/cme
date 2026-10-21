@@ -11,7 +11,6 @@
 // zero whenever those two hold, and starvation surfaces through lock()'s own deadline instead.
 
 #include <algorithm>
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -23,6 +22,7 @@
 #include <vector>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -65,18 +65,18 @@ struct WorkerContext_t
 {
     harness::TestContext& ctx;
     cme::Geometry& region;
-    std::atomic<std::uint32_t>& atStart;
-    std::atomic<std::uint32_t>& atEnd;
+    ordered::Published<std::uint32_t>& atStart;
+    ordered::Published<std::uint32_t>& atEnd;
     std::vector<WorkerResult_t>& results;
     std::uint32_t numPeers;
     std::uint32_t iterPerPeer;
 };
 
 // Counts this peer in at one line, then waits until every peer has arrived.
-void arriveAndWait(std::atomic<std::uint32_t>& line, std::uint32_t numPeers)
+void arriveAndWait(ordered::Published<std::uint32_t>& line, std::uint32_t numPeers)
 {
-    line.fetch_add(1, std::memory_order_acq_rel);
-    while (line.load(std::memory_order_acquire) < numPeers)
+    line.add(1);
+    while (line.load() < numPeers)
     {
         std::this_thread::yield();
     }
@@ -144,8 +144,8 @@ void runOne(harness::TestContext& ctx, const Scenario_t& scenario)
     auto region =
         ctx.memory().createRegion(1, numPeers, cme::Geometry::FormatOpts_t{scenario.strategy});
 
-    std::atomic<std::uint32_t> atStart{0};
-    std::atomic<std::uint32_t> atEnd{0};
+    ordered::Published<std::uint32_t> atStart{0};
+    ordered::Published<std::uint32_t> atEnd{0};
     std::vector<WorkerResult_t> results(numPeers);
 
     const WorkerContext_t shared{ctx, region, atStart, atEnd, results, numPeers, scenario.iterPerPeer};

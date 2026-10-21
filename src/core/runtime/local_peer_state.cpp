@@ -39,7 +39,7 @@ void LocalPeerState::setPeerId(PeerId peerId) noexcept
 
 void LocalPeerState::activate() noexcept
 {
-    active_.store(true, std::memory_order_release);
+    active_.store(true);
 }
 
 void LocalPeerState::publishSelfSeen() noexcept
@@ -60,12 +60,12 @@ void LocalPeerState::publishSelfSeen() noexcept
 
 void LocalPeerState::deactivate() noexcept
 {
-    active_.store(false, std::memory_order_release);
+    active_.store(false);
 }
 
 bool LocalPeerState::isActive() const noexcept
 {
-    return active_.load(std::memory_order_acquire);
+    return active_.load();
 }
 
 void LocalPeerState::setRegionPointers(const Geometry& geometry, CoherencyMode mode) noexcept
@@ -327,12 +327,12 @@ void LocalPeerState::spawnPollThread(std::thread pollThread) noexcept
 
 void LocalPeerState::requestPollStop() noexcept
 {
-    poll_.stop.store(true, std::memory_order_release);
+    poll_.stop.store(true);
 }
 
 bool LocalPeerState::isPollStopRequested() const noexcept
 {
-    return poll_.stop.load(std::memory_order_acquire);
+    return poll_.stop.load();
 }
 
 void LocalPeerState::joinPollThread() noexcept
@@ -345,12 +345,12 @@ void LocalPeerState::joinPollThread() noexcept
 
 void LocalPeerState::setFreeze(bool frozen) noexcept
 {
-    poll_.freeze.store(frozen, std::memory_order_release);
+    poll_.freeze.store(frozen);
 }
 
 bool LocalPeerState::isFrozen() const noexcept
 {
-    return poll_.freeze.load(std::memory_order_acquire);
+    return poll_.freeze.load();
 }
 
 bool LocalPeerState::isRecoveryArmed(PeerId targetPeerId) const noexcept
@@ -432,16 +432,16 @@ LocalPeerState::getMemberView(PeerId peerId,
     }
     auto& slot = memberCache_[peerId];
     const auto nowNs = static_cast<std::int64_t>(timing::monotonic<timing::Nanos>());
-    if (slot.valid.load(std::memory_order_relaxed) &&
-        nowNs - slot.stampNs.load(std::memory_order_relaxed) <= maxAge.count())
+    if (slot.valid.load() &&
+        nowNs - slot.stampNs.load() <= maxAge.count())
     {
-        view.active = slot.status.load(std::memory_order_relaxed) ==
+        view.active = slot.status.load() ==
                       static_cast<std::uint32_t>(Geometry::Member_t::Status::Active);
         for (std::uint32_t word = 0; word < DomainWordCount; ++word)
         {
-            view.participating.setWord(word, slot.participating[word].load(std::memory_order_relaxed));
+            view.participating.setWord(word, slot.participating[word].load());
         }
-        view.lastSeenNanos = slot.lastSeenNanos.load(std::memory_order_relaxed);
+        view.lastSeenNanos = slot.lastSeenNanos.load();
         return view;
     }
     // Miss: refresh from FAM, fill the cache, and answer from that same read.
@@ -465,16 +465,13 @@ void LocalPeerState::cacheMemberSnapshot(PeerId peerId, const Geometry::Member_t
     const DomainBitmap participating = magicValid ? member.loadParticipatingDomains() : DomainBitmap{};
     for (std::uint32_t word = 0; word < DomainWordCount; ++word)
     {
-        slot.participating[word].store(participating.getWord(word), std::memory_order_relaxed);
+        slot.participating[word].store(participating.getWord(word));
     }
-    slot.lastSeenNanos.store(magicValid ? static_cast<std::uint64_t>(member.lastSeenNanos) : 0,
-                             std::memory_order_relaxed);
-    slot.status.store(magicValid ? static_cast<std::uint32_t>(member.status) : 0,
-                      std::memory_order_relaxed);
-    slot.valid.store(magicValid, std::memory_order_relaxed);
+    slot.lastSeenNanos.store(magicValid ? static_cast<std::uint64_t>(member.lastSeenNanos) : 0);
+    slot.status.store(magicValid ? static_cast<std::uint32_t>(member.status) : 0);
+    slot.valid.store(magicValid);
     // Stamp last: a reader that sees this stamp must already see the fields above.
-    slot.stampNs.store(static_cast<std::int64_t>(timing::monotonic<timing::Nanos>()),
-                       std::memory_order_relaxed);
+    slot.stampNs.store(static_cast<std::int64_t>(timing::monotonic<timing::Nanos>()));
 }
 
 PeerTelemetry_t& LocalPeerState::getTelemetry() noexcept

@@ -7,10 +7,10 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 
 namespace cmed::observe
@@ -124,16 +124,16 @@ class EventCounts
 public:
     void bump(T which) noexcept
     {
-        counted_[static_cast<std::uint32_t>(which)].fetch_add(1, std::memory_order_relaxed);
+        counted_[static_cast<std::uint32_t>(which)].add(1);
     }
 
     [[nodiscard]] std::uint64_t read(T which) const noexcept
     {
-        return counted_[static_cast<std::uint32_t>(which)].load(std::memory_order_relaxed);
+        return counted_[static_cast<std::uint32_t>(which)].load();
     }
 
 private:
-    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(T::Count)> counted_{};
+    std::array<ordered::Relaxed<std::uint64_t>, static_cast<std::size_t>(T::Count)> counted_{};
 };
 
 // What a run spent, against how many times it spent it. Two words rather than a histogram: the mean
@@ -166,18 +166,18 @@ public:
         // A span already past reads as zero rather than as the huge number the cast would make of it.
         const auto taken = spent > timing::Nanos::zero() ? static_cast<std::uint64_t>(spent.count()) : 0;
 
-        nanos_[index].fetch_add(taken, std::memory_order_relaxed);
-        times_[index].fetch_add(1, std::memory_order_relaxed);
+        nanos_[index].add(taken);
+        times_[index].add(1);
     }
 
     [[nodiscard]] std::uint64_t readNanos(T which) const noexcept
     {
-        return nanos_[static_cast<std::uint32_t>(which)].load(std::memory_order_relaxed);
+        return nanos_[static_cast<std::uint32_t>(which)].load();
     }
 
     [[nodiscard]] std::uint64_t readTimes(T which) const noexcept
     {
-        return times_[static_cast<std::uint32_t>(which)].load(std::memory_order_relaxed);
+        return times_[static_cast<std::uint32_t>(which)].load();
     }
 
     // Zero when nothing was measured, which reads the same as a path that cost nothing. A caller that
@@ -189,8 +189,8 @@ public:
     }
 
 private:
-    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(T::Count)> nanos_{};
-    std::array<std::atomic<std::uint64_t>, static_cast<std::size_t>(T::Count)> times_{};
+    std::array<ordered::Relaxed<std::uint64_t>, static_cast<std::size_t>(T::Count)> nanos_{};
+    std::array<ordered::Relaxed<std::uint64_t>, static_cast<std::size_t>(T::Count)> times_{};
 };
 
 }  // namespace cmed::observe
