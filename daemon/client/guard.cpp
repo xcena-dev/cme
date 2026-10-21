@@ -7,17 +7,17 @@
 
 #include "cmed/guard.hpp"
 
-#include <atomic>
 #include <cstdint>
 #include <utility>
 
 #include "cmed/robust_lock.hpp"
+#include "common/ordered.hpp"
 #include "shared/protocol/shared_area.hpp"
 
 namespace cmed
 {
 
-CmedGuard::CmedGuard(protocol::SharedArea_t& area, std::atomic<std::uint32_t>& holders, std::uint32_t domainId,
+CmedGuard::CmedGuard(protocol::SharedArea_t& area, ordered::SeqCst<std::uint32_t>& holders, std::uint32_t domainId,
                      util::RobustLock held) noexcept
     : area_{&area},
       holders_{&holders},
@@ -61,7 +61,7 @@ void CmedGuard::unlock() noexcept
         area_ = nullptr;
 
         // Last, so the session cannot unmap the area while the release above is still writing it.
-        holders_->fetch_sub(1, std::memory_order_release);
+        holders_->subtract(1);
     }
 }
 

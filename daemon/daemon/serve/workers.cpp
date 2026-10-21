@@ -5,7 +5,6 @@
 
 #include "daemon/serve/workers.hpp"
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -50,11 +49,11 @@ struct alignas(CachelineBytes) Worker_t
     ordered::Published<std::uint32_t> domainId{protocol::NoDomain};
 
     // Bumped with every hand-over and by the stop, and the word this worker's sleep keys on.
-    std::atomic<std::uint32_t> handed{0};
+    ordered::SeqCst<std::uint32_t> handed{0};
 
     // Whether this worker is inside the futex sleep. A hand-over to one that is still spinning or
     // running needs no syscall, and the syscall is what a hand-over otherwise costs the dispatcher.
-    std::atomic<std::uint32_t> parked{0};
+    ordered::SeqCst<std::uint32_t> parked{0};
 
     // Which bit of the pool's idle word is this worker's, which is the whole of its name.
     std::uint32_t seat{0};
@@ -100,7 +99,7 @@ void runWorker(Worker_t& worker, const Shared_t& shared)
     {
         // Read before the offer, so a hand-over landing between the offer and the wait has moved the
         // word and the wait refuses to start.
-        const auto seen = worker.handed.load(std::memory_order_acquire);
+        const auto seen = worker.handed.load();
 
         const auto domainId = worker.domainId.exchange(protocol::NoDomain);
         if (domainId == protocol::NoDomain)
@@ -151,7 +150,7 @@ DomainWorkers::~DomainWorkers() noexcept
     for (std::uint32_t index = 0; index < pool_.count; ++index)
     {
         auto& worker = pool_.workers[index];
-        worker.handed.fetch_add(1, std::memory_order_release);
+        worker.handed.add(1);
         util::wakeAllWaiters(worker.handed);
     }
 
@@ -191,11 +190,11 @@ bool DomainWorkers::assign(std::uint32_t domainId)
     // already there. One waiter on this word, so the wake reaches that worker and no other.
     auto& worker = pool_.workers[seat];
     worker.domainId.store(domainId);
-    worker.handed.fetch_add(1, std::memory_order_seq_cst);
+    worker.handed.add(1);
 
     // The bump first, then this read: a worker not yet in the sleep finds the word already moved, and
     // one that parks after this read gets EAGAIN from the kernel's own compare instead of missing the hand-over.
-    if (worker.parked.load(std::memory_order_seq_cst) != 0)
+    if (worker.parked.load() != 0)
     {
         util::wakeAllWaiters(worker.handed);
         observe_.events.bump(observe::WorkerEvent::Woke);

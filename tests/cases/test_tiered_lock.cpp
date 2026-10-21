@@ -17,7 +17,6 @@
 // Strategy from --strategy (helper strategyChoice).
 
 #include <algorithm>
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -31,6 +30,7 @@
 
 #include "cme/shared_session.hpp"
 #include "common/args.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
@@ -156,7 +156,7 @@ void runSweeps(const Config_t& cfg, Tiers_t& tiers, Worker_t worker,
 // The worker index IS the slot: peer p's threads occupy p * threadsPerPeer .. +threadsPerPeer-1,
 // so the flat index carries both and the peer id divides back out of it.
 void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint64_t>& acqLatNs,
-                std::atomic<int>& failures)
+                ordered::SeqCst<std::int32_t>& failures)
 {
     std::mutex latMutex;
 
@@ -176,7 +176,7 @@ void runWorkers(const Config_t& cfg, Tiers_t& tiers, std::vector<std::uint64_t>&
             catch (const std::exception& e)
             {
                 std::fprintf(stderr, "peer %u thread %u: %s\n", pid, slot, e.what());
-                failures.fetch_add(1);
+                failures.add(1);
             }
         });
 }
@@ -262,7 +262,7 @@ void runBody(harness::TestContext& ctx)
     std::this_thread::sleep_for(timing::Millis{100});
 
     std::vector<std::uint64_t> acqLatNs;  // merged per-acquire lock-acquire latencies (ns)
-    std::atomic<int> failures{0};
+    ordered::SeqCst<std::int32_t> failures{0};
     runWorkers(cfg, tiers, acqLatNs, failures);
 
     const bool meOk = countersMatch(cfg, stratSuffix);

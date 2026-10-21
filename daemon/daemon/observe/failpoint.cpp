@@ -53,7 +53,7 @@ bool awaitHeld(timing::Nanos within) noexcept
     // Short: what this waits out is one store by the thread entering the boundary, not any work.
     constexpr timing::Micros LookGap{10};
 
-    return poll::waitUntil(
+    return polling::waitUntil(
         []
         {
             return g_reachedHold.load();
@@ -89,7 +89,7 @@ void reach(Boundary boundary) noexcept
     constexpr timing::Micros LookGap{10};
 
     g_reachedHold.store(true);
-    const bool freed = poll::waitUntil(
+    const bool freed = polling::waitUntil(
         []
         {
             return g_letGo.load();

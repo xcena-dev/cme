@@ -13,7 +13,6 @@
 // release/re-acquire), since those are separate paths through SharedSession::lock. The bounded
 // form is checked once at the end: it is the only one that can give up on the local tier.
 
-#include <atomic>
 #include <chrono>
 #include <cinttypes>
 #include <cstdint>
@@ -24,6 +23,7 @@
 
 #include "cme/errors.hpp"
 #include "cme/shared_session.hpp"
+#include "common/ordered.hpp"
 #include "helper.hpp"
 #include "test_context.hpp"
 
@@ -47,7 +47,7 @@ std::uint64_t g_counter = 0;
 std::uint32_t hammer(cme::SharedSession& shared)
 {
     g_counter = 0;
-    std::atomic<std::uint32_t> failures{0};
+    ordered::SeqCst<std::uint32_t> failures{0};
 
     harness::runThreads(
         Threads,
@@ -64,7 +64,7 @@ std::uint32_t hammer(cme::SharedSession& shared)
             catch (const std::exception& e)
             {
                 std::fprintf(stderr, "thread: %s\n", e.what());
-                failures.fetch_add(1);
+                failures.add(1);
             }
         });
     return failures.load();

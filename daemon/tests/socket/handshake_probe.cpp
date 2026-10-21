@@ -125,11 +125,11 @@ private:
 template <typename T_Read>
 [[nodiscard]] bool countReaches(T_Read read, std::uint64_t wanted)
 {
-    return poll::waitUntil([&read, wanted]
-                           {
-                               return read() >= wanted;
-                           },
-                           CounterWithin, cmed::harness::ProbePoll);
+    return polling::waitUntil([&read, wanted]
+                              {
+                                  return read() >= wanted;
+                              },
+                              CounterWithin, cmed::harness::ProbePoll);
 }
 
 [[nodiscard]] std::optional<posix::SeqpacketSocket::Received_t> ask(posix::SeqpacketSocket& asking,

@@ -9,7 +9,6 @@
 // All four strategies: no policy may keep a domain on a peer that returned nothing.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <thread>
@@ -54,7 +53,7 @@ struct HolderThread_t
     ordered::Published<bool> stop{false};
     ordered::Published<bool> grip{false};     // main raises it to ask for one grip
     ordered::Published<bool> holding{false};  // the runner raises it once it has the domain
-    std::atomic<std::uint32_t> grips{0};
+    ordered::SeqCst<std::uint32_t> grips{0};
 };
 
 void runHolder(HolderThread_t* holder, cme::Geometry* region)
@@ -79,7 +78,7 @@ void runHolder(HolderThread_t* holder, cme::Geometry* region)
         // is still alive. The other order reports the gap between the two as an overlap.
         holder->holding.store(false);
         guard.reset();  // release timed to land on the waiter's deadline
-        holder->grips.fetch_add(1, std::memory_order_relaxed);
+        holder->grips.add(1);
     }
 }
 

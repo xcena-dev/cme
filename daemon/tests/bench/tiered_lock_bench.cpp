@@ -322,7 +322,7 @@ private:
 // Nothing is measured until every daemon answers, so a cell does not carry another cell's startup.
 [[nodiscard]] bool awaitServing(std::uint32_t node, const Config_t& chosen)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [node, &chosen]
         {
             try
@@ -502,7 +502,7 @@ void report(const Config_t& chosen, Run_t& shared)
 {
     // The name reaches another node through that node's own registry refresh, so a refusal is a
     // reason to ask again rather than an answer.
-    const bool joined = poll::waitUntil(
+    const bool joined = polling::waitUntil(
         [&asking, &name]
         {
             try

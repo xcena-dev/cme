@@ -5,13 +5,13 @@
 
 #include "core/runtime/local_peer_state.hpp"
 
-#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <thread>
 #include <utility>
 
 #include "cme/shared.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "config.hpp"
 #include "core/domain_bitmap.hpp"
@@ -267,16 +267,16 @@ namespace
 // word on the lock path without taking that mutex.
 void participationBitRmw(Geometry::Member_t& selfMember, DomainId domainId, bool set) noexcept
 {
-    auto* word = reinterpret_cast<std::atomic<std::uint64_t>*>(
+    auto* word = reinterpret_cast<ordered::Relaxed<std::uint64_t>*>(
         &selfMember.participatingDomains[domainId / DomainBitsPerWord].raw);
     const std::uint64_t mask = std::uint64_t{1} << (domainId % DomainBitsPerWord);
     if (set)
     {
-        word->fetch_or(mask, std::memory_order_relaxed);
+        word->setBits(mask);
     }
     else
     {
-        word->fetch_and(~mask, std::memory_order_relaxed);
+        word->clearBits(mask);
     }
 }
 

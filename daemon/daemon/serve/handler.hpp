@@ -10,7 +10,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <thread>
 
@@ -118,7 +117,7 @@ private:
 
         // Its own doorbell, rung only by stop(). The requesters' doorbell keeps one waiter, so a word
         // shared with it would wake the thread that wants no request.
-        std::atomic<std::uint32_t> doorbell{0};
+        ordered::SeqCst<std::uint32_t> doorbell{0};
 
         // Told the dispatcher is still moving, and told nothing when no manager armed a watchdog.
         ServiceNotifier notifier;

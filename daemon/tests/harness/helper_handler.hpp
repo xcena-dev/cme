@@ -52,7 +52,7 @@ public:
     // At least @wanted, so a case still asserts the equality and one call too many stays a failure.
     [[nodiscard]] bool awaitServed(std::uint32_t wanted, timing::Millis within = ProbeAttachWait) const
     {
-        return poll::waitUntil(
+        return polling::waitUntil(
             [this, wanted]
             {
                 return served() >= wanted;

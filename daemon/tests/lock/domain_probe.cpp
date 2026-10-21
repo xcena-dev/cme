@@ -9,7 +9,6 @@
 
 #include <pthread.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <optional>
@@ -112,11 +111,11 @@ private:
 
 [[nodiscard]] bool awaitReturn(const Waiter& waiter)
 {
-    return poll::waitUntil([&waiter]
-                           {
-                               return waiter.returned();
-                           },
-                           ReturnWait, cmed::harness::ProbePoll);
+    return polling::waitUntil([&waiter]
+                              {
+                                  return waiter.returned();
+                              },
+                              ReturnWait, cmed::harness::ProbePoll);
 }
 
 [[nodiscard]] bool isLockHeld(cmed::protocol::RequestState state) noexcept
@@ -301,21 +300,21 @@ void aTokenIsOneUnitOfTheCount(probe::Context& ctx)
 {
     ctx.openCase("OccupancyToken against a bare count");
 
-    std::atomic<std::uint32_t> queued{0};
+    ordered::SeqCst<std::uint32_t> queued{0};
 
     {
         const cmed::util::OccupancyToken outer{queued};
-        ctx.check(queued.load(std::memory_order_acquire) == 1, "one token is one unit");
+        ctx.check(queued.load() == 1, "one token is one unit");
 
         {
             const cmed::util::OccupancyToken inner{queued};
-            ctx.check(queued.load(std::memory_order_acquire) == 2, "and a second object is a second unit");
+            ctx.check(queued.load() == 2, "and a second object is a second unit");
         }
 
-        ctx.check(queued.load(std::memory_order_acquire) == 1, "the inner scope hands back its own unit only");
+        ctx.check(queued.load() == 1, "the inner scope hands back its own unit only");
     }
 
-    ctx.check(queued.load(std::memory_order_acquire) == 0, "and the count comes back to where it started");
+    ctx.check(queued.load() == 0, "and the count comes back to where it started");
 
     try
     {
@@ -327,7 +326,7 @@ void aTokenIsOneUnitOfTheCount(probe::Context& ctx)
         // @expected: the throw is what this half of the case is about.
     }
 
-    ctx.check(queued.load(std::memory_order_acquire) == 0, "a unit taken in a scope that threw is given back");
+    ctx.check(queued.load() == 0, "a unit taken in a scope that threw is given back");
 }
 
 // waiters is the daemon's input for whether to keep CXL ownership after a release, and the only state

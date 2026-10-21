@@ -641,11 +641,11 @@ int run(const Opts_t& options)
     {
         render(inspector, options, state);
         // The gap between frames, rechecked often enough that Ctrl-C lands well inside one.
-        static_cast<void>(poll::waitUntil([]
-                                          {
-                                              return g_stopRequested != 0;
-                                          },
-                                          timing::Millis{options.intervalMs}, timing::Millis{StopCheckMs}));
+        static_cast<void>(polling::waitUntil([]
+                                             {
+                                                 return g_stopRequested != 0;
+                                             },
+                                             timing::Millis{options.intervalMs}, timing::Millis{StopCheckMs}));
     }
 
     if (!useTui)

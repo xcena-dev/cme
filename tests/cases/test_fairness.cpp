@@ -27,7 +27,6 @@
 #include <getopt.h>  // NOLINT(misc-include-cleaner)
 
 #include <algorithm>
-#include <atomic>
 #include <cinttypes>
 #include <cstddef>
 #include <cstdint>
@@ -235,14 +234,14 @@ struct PeerResult_t
     std::uint64_t totalAcq{0};
     // Acquires in the measured (post-warmup) section only -- what the budget gate reads.
     // Bench-owned, not telemetry, so warm-up never counts toward the spread.
-    std::atomic<std::uint64_t> measuredAcq{0};
+    ordered::SeqCst<std::uint64_t> measuredAcq{0};
     std::uint64_t waitCount{0};
     std::uint64_t waitTime{0};
     std::uint64_t spinTime{0};
     std::uint64_t lockHoldTime{0};
     std::uint64_t wallNs{0};
     // Atomic: every worker thread of this peer bumps it.
-    std::atomic<std::uint32_t> deadlineHits{0};
+    ordered::SeqCst<std::uint32_t> deadlineHits{0};
     int returnCode{0};
     // Handoff-latency breakdown (CME_LATENCY): raw TSC cycles + counts,
     // indexed by cme::trace::LatencyStage.
@@ -302,7 +301,7 @@ void lockOnce(cme::Peer& peer, cme::DomainId domainId, const Opts_t& opt, std::u
         if (tally.record)
         {
             tally.localLat.push_back(static_cast<std::uint64_t>(waited.elapsed().count()));
-            tally.result.measuredAcq.fetch_add(1, std::memory_order_relaxed);
+            tally.result.measuredAcq.add(1);
         }
         csWork(spinCount);
         if (opt.csSleepMs != 0)
@@ -314,7 +313,7 @@ void lockOnce(cme::Peer& peer, cme::DomainId domainId, const Opts_t& opt, std::u
     {
         if (tally.record)
         {
-            tally.result.deadlineHits.fetch_add(1, std::memory_order_relaxed);
+            tally.result.deadlineHits.add(1);
         }
     }
 }
@@ -349,7 +348,7 @@ struct WorkerContext_t
     cme::Peer& peer;
     const Opts_t& opt;
     const PeerArgs_t& arg;
-    std::atomic<std::uint64_t>& wallTotal;
+    ordered::SeqCst<std::uint64_t>& wallTotal;
     std::uint32_t workerCount;
     std::uint32_t spinCount;
 };
@@ -402,7 +401,7 @@ void runWorker(const WorkerContext_t& shared)
         {
             sweepDomains(shared, visit, rng, Tally_t{localLat, *shared.arg.result, true});
         }
-        shared.wallTotal.fetch_add(static_cast<std::uint64_t>(measured.elapsed().count()));
+        shared.wallTotal.add(static_cast<std::uint64_t>(measured.elapsed().count()));
 
         const std::lock_guard<std::mutex> merge(shared.arg.result->latMutex);
         auto& dst = shared.arg.result->acqLatNs;
@@ -431,7 +430,7 @@ void runPeer(PeerArgs_t arg)
         const std::uint32_t spinCount =
             opt.asymmetric ? (arg.peerId == 0 ? opt.csLoop / 10 + 1 : opt.csLoop * 5) : opt.csLoop;
 
-        std::atomic<std::uint64_t> wallTotal{0};
+        ordered::SeqCst<std::uint64_t> wallTotal{0};
         const std::uint32_t workerCount = opt.numPeers * opt.threadsPerPeer;
 
         const WorkerContext_t shared{peer, opt, arg, wallTotal, workerCount, spinCount};

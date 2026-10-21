@@ -6,8 +6,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <type_traits>
+
+#include "common/ordered.hpp"
 
 namespace cme::endian
 {
@@ -39,15 +40,15 @@ template <typename T>
 template <typename T>
 [[nodiscard]] inline T load(const T& field) noexcept
 {
-    const auto* slot = reinterpret_cast<const std::atomic<T>*>(&field);
-    return detail::adjustEndian(slot->load(std::memory_order_relaxed));
+    const auto* slot = reinterpret_cast<const ordered::Relaxed<T>*>(&field);
+    return detail::adjustEndian(slot->load());
 }
 
 template <typename T>
 inline void store(T& field, T value) noexcept
 {
-    auto* slot = reinterpret_cast<std::atomic<T>*>(&field);
-    slot->store(detail::adjustEndian(value), std::memory_order_relaxed);
+    auto* slot = reinterpret_cast<ordered::Relaxed<T>*>(&field);
+    slot->store(detail::adjustEndian(value));
 }
 
 // ── endian::Field_t<T> ───────────────────────────────────────────────

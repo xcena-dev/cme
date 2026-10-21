@@ -116,7 +116,7 @@ clientConfigFor(const ProbeScratch& scratch, std::string_view areaName, timing::
                                            timing::Millis within)
 {
     const std::string path = daemonSocketPath(scratch, areaName);
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&path]
         {
             return ::access(path.c_str(), F_OK) == 0;
@@ -178,7 +178,7 @@ public:
         }
 
         int status = 0;
-        const bool reaped = poll::waitUntil(
+        const bool reaped = polling::waitUntil(
             [this, &status]
             {
                 return ::waitpid(running_, &status, WNOHANG) != 0;
@@ -232,7 +232,7 @@ private:
         ::kill(running_, signal);  // NOLINT(misc-include-cleaner) POSIX, via <csignal>
 
         int status = 0;
-        const bool reaped = poll::waitUntil(
+        const bool reaped = polling::waitUntil(
             [this, &status]
             {
                 return ::waitpid(running_, &status, WNOHANG) != 0;

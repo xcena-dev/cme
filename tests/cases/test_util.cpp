@@ -17,7 +17,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -130,8 +129,8 @@ void testTearFreeU64(harness::TestContext& ctx)
     holder.slot = PatternA;
 
     ordered::Relaxed<bool> stop{false};
-    std::atomic<std::uint64_t> torn{0};
-    std::atomic<std::uint64_t> samples{0};
+    ordered::SeqCst<std::uint64_t> torn{0};
+    ordered::SeqCst<std::uint64_t> samples{0};
 
     std::thread writer{[&]
                        {
@@ -147,10 +146,10 @@ void testTearFreeU64(harness::TestContext& ctx)
                            for (std::int32_t round = 0; round < 2'000'000; ++round)
                            {
                                const std::uint64_t sample = holder.slot;
-                               samples.fetch_add(1, std::memory_order_relaxed);
+                               samples.add(1);
                                if (sample != PatternA && sample != PatternB)
                                {
-                                   torn.fetch_add(1, std::memory_order_relaxed);
+                                   torn.add(1);
                                }
                            }
                            stop.store(true);
@@ -183,8 +182,8 @@ constexpr std::uint64_t HappensBeforeMix = 0x9E3779B97F4A7C15ULL;
 struct HappensBeforeRun_t
 {
     HappensBeforeBlock_t block{};
-    std::atomic<std::int32_t> mismatch{0};
-    std::atomic<std::int32_t> seen{0};
+    ordered::SeqCst<std::int32_t> mismatch{0};
+    ordered::SeqCst<std::int32_t> seen{0};
     ordered::Published<bool> done{false};
 };
 
@@ -201,7 +200,7 @@ void publishHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
         cme::coherency::wmb(&run.block.ready, sizeof(run.block.ready), coherency);
         // hold this iteration until the reader reports it, so no publication goes unread
         while (!run.done.load() && run.block.ready != 0u &&
-               run.seen.load(std::memory_order_acquire) < i)
+               run.seen.load() < i)
         {
             std::this_thread::yield();
         }
@@ -230,10 +229,10 @@ void observeHappensBefore(HappensBeforeRun_t& run, cme::CoherencyMode coherency)
         const std::uint64_t got = run.block.payload;
         if (got != static_cast<std::uint64_t>(readyVal) * HappensBeforeMix)
         {
-            run.mismatch.fetch_add(1, std::memory_order_relaxed);
+            run.mismatch.add(1);
         }
         last = static_cast<std::int32_t>(readyVal);
-        run.seen.store(last, std::memory_order_release);
+        run.seen.store(last);
         if (last >= HappensBeforeIters)
         {
             break;
@@ -285,8 +284,8 @@ struct OwnershipRun_t
 {
     OwnershipLike_t ownership{};
     ordered::Relaxed<bool> stop{false};
-    std::atomic<std::uint64_t> torn{0};
-    std::atomic<std::uint64_t> samples{0};
+    ordered::SeqCst<std::uint64_t> torn{0};
+    ordered::SeqCst<std::uint64_t> samples{0};
 };
 
 // Rotates holder and gen to the same value, so a reader that sees holder != gen read the pair
@@ -311,10 +310,10 @@ void sampleOwnership(OwnershipRun_t& run, cme::CoherencyMode coherency)
         cme::coherency::rmb(&run.ownership, sizeof(run.ownership), coherency);
         const std::uint32_t holder = run.ownership.holder;
         const std::uint64_t gen = run.ownership.gen;
-        run.samples.fetch_add(1, std::memory_order_relaxed);
+        run.samples.add(1);
         if (static_cast<std::uint64_t>(holder) != gen)
         {
-            run.torn.fetch_add(1, std::memory_order_relaxed);
+            run.torn.add(1);
         }
     }
     run.stop.store(true);
@@ -364,7 +363,7 @@ struct HammerState_t
 {
     cme::endian::Field_t<std::uint64_t> slot;
     ordered::Relaxed<bool> stop{false};
-    std::atomic<std::uint64_t> torn{0};
+    ordered::SeqCst<std::uint64_t> torn{0};
 };
 
 // Store values into the slot until the run is stopped. @writerIndex offsets the starting
@@ -396,7 +395,7 @@ void hammerRead(HammerState_t& state, std::int32_t samples) noexcept
         }
         if (!known)
         {
-            state.torn.fetch_add(1, std::memory_order_relaxed);
+            state.torn.add(1);
         }
     }
 }

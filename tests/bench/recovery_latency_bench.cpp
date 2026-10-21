@@ -19,7 +19,6 @@
 // backend: --backend shm|dax|uc, resolved against config.yaml.
 // options: --strategy, --domains (a single count, else the swept set), --peers (default 6).
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -89,7 +88,7 @@ void worker(BenchSlot_t* slot)
                 held.push_back(peer->lock(domainId));
             }
             slot->ready.store(true);
-            while (!slot->frozen.load(std::memory_order_acquire) && !slot->stop.load())
+            while (!slot->frozen.load() && !slot->stop.load())
             {
                 std::this_thread::sleep_for(timing::Millis{ReadyPollMs});
             }
@@ -103,12 +102,12 @@ void worker(BenchSlot_t* slot)
 
         slot->ready.store(true);
         cme::DomainId domainId = 1;
-        while (!slot->stop.load(std::memory_order_acquire))
+        while (!slot->stop.load())
         {
             try
             {
                 const cme::PeerGuard guard = peer->lock(domainId);
-                slot->acquires.fetch_add(1, std::memory_order_relaxed);
+                slot->acquires.add(1);
             }
             catch (const cme::LockTimeoutError&)
             {
@@ -221,7 +220,7 @@ struct Phases_t
     // run out of time. Neither class answers both, so both start here.
     const timing::Stopwatch sinceFreeze;
     const timing::Deadline budget{timing::MillisF{TimeoutMs}};
-    slots[deadPeer]->frozen.store(true, std::memory_order_release);  // start the clock
+    slots[deadPeer]->frozen.store(true);  // start the clock
 
     Phases_t phases;
     // Busy-spin every wait: the config::liveness::DeadWindow (detect) is ~O(100ms) but claim/takeover/

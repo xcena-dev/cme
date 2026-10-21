@@ -5,7 +5,6 @@
 
 #include "daemon/serve/handler.hpp"
 
-#include <atomic>
 #include <cstdint>
 
 #include "common/bitmap.hpp"
@@ -152,7 +151,7 @@ void ServeHandler::runMaintainer()
 
         // No spin: this thread has nothing to catch early. Its own doorbell rather than the requesters',
         // so nothing but the stop cuts a pass short.
-        const auto seen = maintaining_.doorbell.load(std::memory_order_acquire);
+        const auto seen = maintaining_.doorbell.load();
         static_cast<void>(
             util::waitOnWord(maintaining_.doorbell, seen, timing::Nanos{maintaining_.interval},
                              timing::Nanos::zero()));
@@ -170,7 +169,7 @@ void ServeHandler::stop() noexcept
     dispatching_.area->knock();
 
     // And the maintainer's own doorbell, which no requester rings.
-    maintaining_.doorbell.fetch_add(1, std::memory_order_release);
+    maintaining_.doorbell.add(1);
     util::wakeAllWaiters(maintaining_.doorbell);
 }
 

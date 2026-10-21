@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cinttypes>
 #include <cmath>
 #include <cstdarg>
@@ -37,6 +36,7 @@
 #include <vector>
 
 #include "cme/errors.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/layout/geometry.hpp"
@@ -73,8 +73,8 @@ enum class PState
 // acquire landed on.
 struct TimelineSlot_t : harness::PeerSlot_t
 {
-    std::atomic<PState> state{PState::Running};
-    std::array<std::atomic<std::uint64_t>, DomainCeiling> perDomain{};
+    ordered::SeqCst<PState> state{PState::Running};
+    std::array<ordered::SeqCst<std::uint64_t>, DomainCeiling> perDomain{};
 };
 
 void worker(TimelineSlot_t* slot)
@@ -110,13 +110,13 @@ void worker(TimelineSlot_t* slot)
     cme::DomainId domainId = 1;
     while (true)
     {
-        const auto status = slot->state.load(std::memory_order_acquire);
+        const auto status = slot->state.load();
         if (status == PState::Stop)
         {
             break;
         }
-        slot->peer->setFreeze(slot->frozen.load(std::memory_order_acquire));
-        if (status == PState::Paused || slot->frozen.load(std::memory_order_acquire))
+        slot->peer->setFreeze(slot->frozen.load());
+        if (status == PState::Paused || slot->frozen.load())
         {
             harness::sleepMs(50);
             continue;
@@ -124,8 +124,8 @@ void worker(TimelineSlot_t* slot)
         try
         {
             auto guard = slot->peer->lock(domainId);
-            slot->acquires.fetch_add(1, std::memory_order_relaxed);
-            slot->perDomain[domainId].fetch_add(1, std::memory_order_relaxed);
+            slot->acquires.add(1);
+            slot->perDomain[domainId].add(1);
         }
         catch (const cme::LockTimeoutError&)
         {
@@ -146,7 +146,7 @@ void spawnPeer(TimelineSlot_t& peerSlot, cme::PeerId peerId, cme::Geometry& regi
     peerSlot.state.store(PState::Running);
     peerSlot.frozen.store(false);
     peerSlot.acquires.store(0);
-    for (std::atomic<std::uint64_t>& counter : peerSlot.perDomain)
+    for (ordered::SeqCst<std::uint64_t>& counter : peerSlot.perDomain)
     {
         counter.store(0);
     }

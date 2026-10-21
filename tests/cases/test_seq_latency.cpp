@@ -30,7 +30,6 @@
 #include <getopt.h>  // NOLINT(misc-include-cleaner)
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -157,7 +156,7 @@ struct Baton_t
     ordered::Published<int> turn{-1};  // peer id whose turn it is (-1 = idle)
     ordered::Published<bool> stopThreads{false};
     ordered::Published<bool> turnDone{false};
-    std::atomic<std::uint64_t> resultNs{0};
+    ordered::SeqCst<std::uint64_t> resultNs{0};
     ordered::Relaxed<bool> resultTimeout{false};
 };
 
@@ -237,7 +236,7 @@ void oneAcquire(const Opts_t& opt, Baton_t& baton, DriveState_t& state, std::uin
         }
         else
         {
-            const std::uint64_t sampleNs = baton.resultNs.load(std::memory_order_relaxed);
+            const std::uint64_t sampleNs = baton.resultNs.load();
             state.latAll.push_back(sampleNs);
             (migrate ? state.latMigrate : state.latResident).push_back(sampleNs);
         }

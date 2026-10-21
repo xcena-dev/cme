@@ -8,7 +8,6 @@
 
 #include "cmed/session.hpp"
 
-#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -28,6 +27,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/guard.hpp"
 #include "cmed/robust_lock.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "shared/area.hpp"
@@ -295,7 +295,7 @@ struct CmedSession::Impl
 
             // A held turn is the answer, and so is an empty hand from a daemon that is still there. A
             // closed door is neither: the replacement it belongs to has yet to publish its area.
-            if (guard || (isServing() && !closing_.load(std::memory_order_seq_cst)))
+            if (guard || (isServing() && !closing_.load()))
             {
                 return guard;
             }
@@ -322,10 +322,9 @@ private:
         // reference is to, and this is what makes it wait for this attempt instead.
         const util::OccupancyToken attempting{holders_};
 
-        // Fenced, because this side stores its own word and then reads the replacement's while the
-        // replacement does the reverse. A weaker pair lets both sides conclude the area is theirs.
-        std::atomic_thread_fence(std::memory_order_seq_cst);
-        if (closing_.load(std::memory_order_seq_cst))
+        // Both words are seq_cst: this side counts in and then reads the replacement's flag while the
+        // replacement does the reverse, and a weaker pair lets both sides conclude the area is theirs.
+        if (closing_.load())
         {
             return std::nullopt;
         }
@@ -548,21 +547,21 @@ private:
     // holding a guard that asks for a second domain would otherwise wait for itself.
     [[nodiscard]] bool closeAndDrain(timing::Nanos within)
     {
-        closing_.store(true, std::memory_order_seq_cst);
+        closing_.store(true);
 
         // A critical section is the application's own length, so the count is polled rather than
         // spun on.
         constexpr timing::Micros DrainStep{200};
-        const bool drained = poll::waitUntil(
+        const bool drained = polling::waitUntil(
             [this]()
             {
-                return holders_.load(std::memory_order_seq_cst) == 0;
+                return holders_.load() == 0;
             },
             within, timing::Nanos{DrainStep});
         if (!drained)
         {
             // Nothing was replaced, so the door opens again rather than refusing every caller for good.
-            closing_.store(false, std::memory_order_seq_cst);
+            closing_.store(false);
         }
 
         return drained;
@@ -571,7 +570,7 @@ private:
     // Lets attempts in again, on the area the caller replaced while this was closed.
     void reopenArea() noexcept
     {
-        closing_.store(false, std::memory_order_seq_cst);
+        closing_.store(false);
     }
 
 private:
@@ -584,11 +583,11 @@ private:
 
     // Everything using that area: one for each attempt in flight and one for each guard out. A
     // replacement waits for this to empty, since the area it unmaps is what all of them name.
-    std::atomic<std::uint32_t> holders_{0};
+    ordered::SeqCst<std::uint32_t> holders_{0};
 
     // Whether a replacement has stopped letting attempts in. Read once before counting in and once
     // after, so a set between the two is seen by the attempt that counted in under it.
-    std::atomic<bool> closing_{false};
+    ordered::SeqCst<bool> closing_{false};
 
     // ── the resolve cache ──────────────────────────────────────────────
     // Without it every lock() scans the whole registry, on the path to a domain locked many times already.

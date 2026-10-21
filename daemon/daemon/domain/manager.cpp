@@ -229,11 +229,11 @@ DomainAnswer DomainManager::remove(const protocol::DomainName& name) noexcept
     // A requester already queued on the mutex resolved the id before the name cleared, so deleting
     // under it would strand that request. Nothing is held across the looks, which would block it.
     const std::optional<util::RobustLock> quiet =
-        poll::awaitValue([&domain]
-                         {
-                             return domain.tryLockIfIdle();
-                         },
-                         config_.daemon->registry.deleteWaitTimeout, QuiescePoll);
+        polling::awaitValue([&domain]
+                            {
+                                return domain.tryLockIfIdle();
+                            },
+                            config_.daemon->registry.deleteWaitTimeout, QuiescePoll);
     if (!quiet)
     {
         domain.markState(protocol::DomainState::Live);

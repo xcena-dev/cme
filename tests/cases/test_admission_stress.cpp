@@ -45,7 +45,7 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
     {
         results[i] = Unset;
     }
-    __atomic_store_n(barrier, 0, __ATOMIC_RELEASE);
+    harness::resolvePublishedWord(*barrier).store(0);
 
     const std::uint32_t spawned = harness::spawnChildren(
         numClaimers,
@@ -56,7 +56,7 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
             {
                 auto region = cme::Geometry::open(uri);
                 region.bindBlocking(timing::Secs{5});
-                while (__atomic_load_n(barrier, __ATOMIC_ACQUIRE) == 0)
+                while (harness::resolvePublishedWord(*barrier).load() == 0)
                 {
                     // spin to the barrier
                 }
@@ -69,7 +69,7 @@ void runRound(const std::string& uri, std::uint32_t numClaimers, std::int32_t* r
             results[index] = claimed;
         });
 
-    __atomic_store_n(barrier, 1, __ATOMIC_RELEASE);  // release all claimers together
+    harness::resolvePublishedWord(*barrier).store(1);  // release all claimers together
 
     harness::reapChildren(spawned);
     if (spawned != numClaimers)

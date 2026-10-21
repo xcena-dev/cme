@@ -14,7 +14,6 @@
 #include <fcntl.h>
 #include <pthread.h>  // IWYU pragma: keep (declares pthread_mutex_t through bits/pthreadtypes.h)
 
-#include <atomic>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -25,6 +24,7 @@
 #include "cmed/errors.hpp"
 #include "cmed/robust_lock.hpp"
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "daemon/startup/served_area.hpp"
 #include "shared/area.hpp"
@@ -114,7 +114,7 @@ private:
 // joiner would refuse.
 inline void setAbiVersion(protocol::SharedArea_t& area, std::uint32_t version) noexcept
 {
-    area.layout.abiVersion.store(version, std::memory_order_release);
+    area.layout.abiVersion.store(version);
 }
 
 inline void setAreaBytes(protocol::SharedArea_t& area, std::uint32_t bytes) noexcept
@@ -134,18 +134,18 @@ inline void setAreaBytes(protocol::SharedArea_t& area, std::uint32_t bytes) noex
 // before and after. A futex wait keyed on this word needs the word itself and not a reading of it.
 [[nodiscard]] inline std::uint32_t getDoorbell(const protocol::SharedArea_t& area) noexcept
 {
-    return area.daemon.doorbell.load(std::memory_order_acquire);
+    return area.daemon.doorbell.load();
 }
 
 // A knock count a fresh area could not have reached, so a case can tell one area's word from another's.
 inline void setDoorbell(protocol::SharedArea_t& area, std::uint32_t knocks) noexcept
 {
-    area.daemon.doorbell.store(knocks, std::memory_order_release);
+    area.daemon.doorbell.store(knocks);
 }
 
 // The atomic and not a value, for a case that sleeps on the knock rather than reading it. A futex wait
 // keys on the address, which no reading of the word can stand in for.
-[[nodiscard]] inline std::atomic<std::uint32_t>& resolveDoorbellWord(protocol::SharedArea_t& area) noexcept
+[[nodiscard]] inline ordered::SeqCst<std::uint32_t>& resolveDoorbellWord(protocol::SharedArea_t& area) noexcept
 {
     return area.daemon.doorbell;
 }
@@ -208,54 +208,54 @@ inline void clearEveryPendingBit(protocol::SharedArea_t& area) noexcept
 // rests on, so a case about it needs the half publish() will not do on its own.
 inline void setState(protocol::Domain_t& domain, protocol::RequestState next) noexcept
 {
-    domain.request.state.store(next, std::memory_order_release);
+    domain.request.state.store(next);
 }
 
 // The version publish() bumps, as a value, because what says the bump happened is that this word
 // differs from what it read before the call.
 [[nodiscard]] inline std::uint32_t getSeq(const protocol::Domain_t& domain) noexcept
 {
-    return domain.request.seq.load(std::memory_order_acquire);
+    return domain.request.seq.load();
 }
 
 // The count and not whether anything is queued. A case waits for exactly one requester to be blocked
 // on the mutex, and hasWaiters() cannot say when the second has arrived.
 [[nodiscard]] inline std::uint32_t getWaiters(const protocol::Domain_t& domain) noexcept
 {
-    return domain.request.waiters.load(std::memory_order_acquire);
+    return domain.request.waiters.load();
 }
 
 // Planted rather than earned. The count is a requester's own word, raised while it blocks on the
 // domain mutex, and a case that spawned a requester to raise it would be timing a thread instead.
 inline void setWaiters(protocol::Domain_t& domain, std::uint32_t queued) noexcept
 {
-    domain.request.waiters.store(queued, std::memory_order_release);
+    domain.request.waiters.store(queued);
 }
 
 // The word publishGrant and publishFailure write, given a value that is neither. A case reads it back
 // with getFailureCode to say a write through one mapping landed in another.
 inline void setResult(protocol::Domain_t& domain, std::int32_t value) noexcept
 {
-    domain.request.result.store(value, std::memory_order_release);
+    domain.request.result.store(value);
 }
 
 // ── the words a slot lends out ─────────────────────────────────────────
 // The raw slot, for memory a probe shares with a process it forked. The atomic itself, not a value:
 // a counter moved across processes is read-modify-written, and a futex wait keys on the address.
-[[nodiscard]] inline std::atomic<std::uint32_t>& resolveWaitersWord(protocol::SharedArea_t& area,
-                                                                    std::uint32_t domainId) noexcept
+[[nodiscard]] inline ordered::SeqCst<std::uint32_t>& resolveWaitersWord(protocol::SharedArea_t& area,
+                                                                        std::uint32_t domainId) noexcept
 {
     return area.domain.table[domainId].request.waiters;
 }
 
-[[nodiscard]] inline std::atomic<std::uint32_t>& resolveSeqWord(protocol::SharedArea_t& area,
-                                                                std::uint32_t domainId) noexcept
+[[nodiscard]] inline ordered::SeqCst<std::uint32_t>& resolveSeqWord(protocol::SharedArea_t& area,
+                                                                    std::uint32_t domainId) noexcept
 {
     return area.domain.table[domainId].request.seq;
 }
 
-[[nodiscard]] inline std::atomic<std::int32_t>& resolveResultWord(protocol::SharedArea_t& area,
-                                                                  std::uint32_t domainId) noexcept
+[[nodiscard]] inline ordered::Published<std::int32_t>& resolveResultWord(protocol::SharedArea_t& area,
+                                                                         std::uint32_t domainId) noexcept
 {
     return area.domain.table[domainId].request.result;
 }

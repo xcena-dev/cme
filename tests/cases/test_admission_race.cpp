@@ -51,7 +51,7 @@ void runBody(harness::TestContext& ctx)
         return;
     }
     results.fill(Unset);
-    __atomic_store_n(barrier.data(), 0, __ATOMIC_RELEASE);
+    harness::resolvePublishedWord(barrier[0]).store(0);
 
     const std::uint32_t spawned = harness::spawnChildren(
         Claimers,
@@ -61,7 +61,7 @@ void runBody(harness::TestContext& ctx)
             try
             {
                 auto region = harness::openBoundRegion(timing::Secs{5});
-                while (__atomic_load_n(barrier.data(), __ATOMIC_ACQUIRE) == 0)
+                while (harness::resolvePublishedWord(barrier[0]).load() == 0)
                 {
                     // spin, so the claim below lands with the others rather than after them
                 }
@@ -74,7 +74,7 @@ void runBody(harness::TestContext& ctx)
             results[index] = claimed;
         });
 
-    __atomic_store_n(barrier.data(), 1, __ATOMIC_RELEASE);  // release every claimer together
+    harness::resolvePublishedWord(barrier[0]).store(1);  // release every claimer together
 
     harness::reapChildren(spawned);
     if (!ctx.check(spawned == Claimers, "every claimer forked"))

@@ -128,8 +128,9 @@ struct Control_t
 // Count-up gate mirroring test_fairness.cpp's awaitBarrier, just cross-process.
 void awaitBarrier(std::uint32_t& counter, std::uint32_t participants) noexcept
 {
-    __atomic_fetch_add(&counter, 1u, __ATOMIC_ACQ_REL);
-    while (__atomic_load_n(&counter, __ATOMIC_ACQUIRE) < participants)
+    auto& gate = harness::resolvePublishedWord(counter);
+    gate.add(1);
+    while (gate.load() < participants)
     {
         sched_yield();
     }

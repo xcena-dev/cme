@@ -12,7 +12,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <csignal>
 #include <cstdint>
@@ -126,7 +125,7 @@ void writeConfig(const cmed::harness::ProbeScratch& scratch, const std::vector<s
 [[nodiscard]] bool awaitServing(const cmed::harness::ProbeScratch& scratch,
                                 const std::vector<std::string>& areaNames, std::uint32_t node)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&scratch, &areaNames, node]
         {
             try
@@ -162,11 +161,11 @@ void holdAcross(const cmed::harness::ProbeScratch& scratch, const std::vector<st
         // What a section longer than one grant has to do. Leaving on the guard alone would keep this
         // requester inside for @across whatever happened to the daemon behind it.
         static_cast<void>(
-            poll::waitUntil([&guard]
-                            {
-                                return !guard.stillHolds();
-                            },
-                            across, cmed::harness::DaemonStartPoll));
+            polling::waitUntil([&guard]
+                               {
+                                   return !guard.stillHolds();
+                               },
+                               across, cmed::harness::DaemonStartPoll));
         shared.inside.store(false);
     }
     catch (const cmed::CmedError& failure)
@@ -196,11 +195,11 @@ void holdDeadSection(const cmed::harness::ProbeScratch& scratch, const std::vect
 // lock has returned. On disk rather than in the region, so this poll needs no shared memory read.
 [[nodiscard]] bool awaitDeadSectionEntered(const std::string& markerPath)
 {
-    return poll::waitUntil([&markerPath]
-                           {
-                               return ::access(markerPath.c_str(), F_OK) == 0;
-                           },
-                           RemoteWait, cmed::harness::DaemonStartPoll);
+    return polling::waitUntil([&markerPath]
+                              {
+                                  return ::access(markerPath.c_str(), F_OK) == 0;
+                              },
+                              RemoteWait, cmed::harness::DaemonStartPoll);
 }
 
 // A requester SIGKILLed inside its section leaves the state word at LockHeld and rings for nobody,
@@ -298,7 +297,7 @@ void aRemoteAcquireDoesNotOverlap(probe::Context& ctx, const cmed::harness::Prob
                             holdAcross(scratch, areaNames, shared, HoldAcrossKill);
                         }};
 
-    static_cast<void>(poll::waitUntil(
+    static_cast<void>(polling::waitUntil(
         [&shared]
         {
             return shared.inside.load() ||
@@ -348,7 +347,7 @@ void aRemoteAcquireDoesNotOverlap(probe::Context& ctx, const cmed::harness::Prob
 // retried until the name is there to join.
 [[nodiscard]] bool awaitJoined(cmed::CmedSession& session, const char* name)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&session, name]
         {
             try
@@ -458,7 +457,7 @@ void aRequesterRidesThroughAReplacement(probe::Context& ctx, const cmed::harness
 
     // Asked while nothing is listening, so the call has to wait out the replacement rather than answer
     // out of the area it already holds.
-    std::atomic<bool> locked{false};
+    ordered::SeqCst<bool> locked{false};
     std::string threw;
     std::thread asking{[&session, &locked, &threw]()
                        {

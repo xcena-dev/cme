@@ -23,7 +23,6 @@
 // --strategy selects the successor policy (order|request|request-agg|peterson).
 
 #include <array>
-#include <atomic>
 #include <cinttypes>
 #include <cmath>
 #include <cstdint>
@@ -38,6 +37,7 @@
 
 #include "admission/claim.hpp"
 #include "cme/errors.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
@@ -53,11 +53,11 @@ namespace
 // claims a fresh peer id rather than keeping one, which the shared loop does not do.
 struct ChurnSlot_t : harness::PeerSlot_t
 {
-    std::atomic<bool> ready{false};   // the worker has spawned, so churn may start on it
-    std::atomic<bool> paused{false};  // worker idles its op loop while quiescing
+    ordered::SeqCst<bool> ready{false};   // the worker has spawned, so churn may start on it
+    ordered::SeqCst<bool> paused{false};  // worker idles its op loop while quiescing
     // Ops that finished, where the inherited acquires counts ops that were attempted. A
     // churn race legitimately throws, so only this one separates progress from spinning.
-    std::atomic<std::uint64_t> progressed{0};
+    ordered::SeqCst<std::uint64_t> progressed{0};
 };
 
 constexpr cme::PeerId Workers = 4;  // concurrent worker threads
@@ -142,9 +142,9 @@ void worker(ChurnSlot_t* peerSlot)
     std::string privateName;
     std::uint32_t seq = 0;
 
-    while (!peerSlot->stop.load(std::memory_order_acquire))
+    while (!peerSlot->stop.load())
     {
-        peerSlot->peer->setFreeze(peerSlot->frozen.load(std::memory_order_acquire));
+        peerSlot->peer->setFreeze(peerSlot->frozen.load());
         if (peerSlot->frozen.load() || peerSlot->paused.load())
         {
             harness::sleepMs(20);
@@ -176,10 +176,10 @@ void worker(ChurnSlot_t* peerSlot)
                 privateId = cme::NoDomain;
                 completed = true;
             }
-            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.add(1);
             if (completed)
             {
-                peerSlot->progressed.fetch_add(1, std::memory_order_relaxed);
+                peerSlot->progressed.add(1);
             }
             // Think-time: without it the soak degenerates into a control-lock contention
             // storm rather than the moderate churn recovery is meant to see.
@@ -195,14 +195,14 @@ void worker(ChurnSlot_t* peerSlot)
             {
                 return;
             }
-            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.add(1);
         }
         catch (const std::exception&)
         {
             // Expected churn race, usually a control-lock timeout. The domain may still
             // exist and be ours, so keep privateId -- forgetting it here would leak the
             // domain and spawn a second. The loop-top resync drops it if it truly vanished.
-            peerSlot->acquires.fetch_add(1, std::memory_order_relaxed);
+            peerSlot->acquires.add(1);
         }
     }
     peerSlot->peer.reset();

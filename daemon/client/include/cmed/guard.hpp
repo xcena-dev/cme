@@ -7,10 +7,17 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 #include "cmed/robust_lock.hpp"
+
+// Named and not included: the guard holds a pointer to the session's count and moves it only in
+// the .cpp, so a requester's build does not take the wrapper's header.
+namespace ordered
+{
+template <typename T>
+class SeqCst;
+}
 
 namespace cmed
 {
@@ -72,7 +79,7 @@ private:
     // Every field is decided by the session under the domain mutex, so a guard makes no judgement of
     // its own past this point.
     friend class CmedSession;
-    CmedGuard(protocol::SharedArea_t& area, std::atomic<std::uint32_t>& holders, std::uint32_t domainId,
+    CmedGuard(protocol::SharedArea_t& area, ordered::SeqCst<std::uint32_t>& holders, std::uint32_t domainId,
               util::RobustLock held) noexcept;
 
     // ── giving the turn back ───────────────────────────────────────
@@ -87,7 +94,7 @@ private:
 
     // The session's count of guards out of that area. Counted back down on the way out, since a
     // session replacing the area waits for this guard before it unmaps what the line above names.
-    std::atomic<std::uint32_t>* holders_{nullptr};
+    ordered::SeqCst<std::uint32_t>* holders_{nullptr};
 
     util::RobustLock held_;
 

@@ -63,7 +63,7 @@ constexpr timing::Millis BriefTurn{50};
 // pending bit before the loop was asleep would be measuring the pass it interrupted.
 [[nodiscard]] bool awaitParked(const cmed::protocol::SharedArea_t& area)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&area]
         {
             return area.isDispatcherParked();
@@ -196,7 +196,7 @@ private:
     [[nodiscard]] bool awaitState(std::uint32_t domainId, cmed::protocol::RequestState wanted,
                                   timing::Millis within)
     {
-        return poll::waitUntil(
+        return polling::waitUntil(
             [this, domainId, wanted]
             {
                 return cmed::harness::readState(area_.shared(), domainId) == wanted;
@@ -234,7 +234,7 @@ using ServingHalf = std::optional<cmed::daemon::ServeHandler>;
 [[nodiscard]] bool awaitHandOvers(const cmed::daemon::ServeHandler& side, std::uint64_t wanted,
                                   timing::Millis within = cmed::harness::ProbeAttachWait)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&side, wanted]
         {
             return side.readCount(cmed::observe::WorkerEvent::Handed) >= wanted;
@@ -319,7 +319,7 @@ void aDomainTheBusyMaskNamesIsLeftForItsWorker(probe::Context& ctx, cmed::harnes
 
     // A pass that ends deferred saw a bit it could not hand out. The refusal count below reads zero
     // just as well for a pass that never looked, so the two are asserted together.
-    ctx.check(poll::waitUntil(
+    ctx.check(polling::waitUntil(
                   [&side]
                   {
                       return side.readCount(cmed::observe::DispatchEvent::Deferred) >= 1;
@@ -438,7 +438,7 @@ void theMaintenancePassRunsOnItsOwnTick(probe::Context& ctx, cmed::harness::Prob
         ServedDomains serving{scratch, 1};
         ServingHalf side{std::in_place, serving.shared(), serving.domains(), handlerConfig(BriefTurn, LongTick)};
 
-        const bool ranAtOnce = poll::waitUntil(
+        const bool ranAtOnce = polling::waitUntil(
             [&side]
             {
                 return side->readCount(cmed::observe::MaintainEvent::Passes) >= 1;
@@ -465,7 +465,7 @@ void theMaintenancePassRunsOnItsOwnTick(probe::Context& ctx, cmed::harness::Prob
         const cmed::daemon::ServeHandler side{serving.shared(), serving.domains(),
                                               handlerConfig(BriefTurn, ShortTick)};
 
-        const bool reached = poll::waitUntil(
+        const bool reached = polling::waitUntil(
             [&side]
             {
                 return side.readCount(cmed::observe::MaintainEvent::Passes) >= Passes;
@@ -545,11 +545,11 @@ void bothThreadsAreJoinedOnTheWayOutOfAScope(probe::Context& ctx, cmed::harness:
         const cmed::daemon::ServeHandler side{serving.shared(), serving.domains(),
                                               handlerConfig(LongTurn, LongTick)};
         ctx.check(awaitParked(serving.shared()), "the dispatcher reaches its sleep");
-        ctx.check(poll::waitUntil([&side]
-                                  {
-                                      return side.readCount(cmed::observe::MaintainEvent::Passes) >= 1;
-                                  },
-                                  FirstPassBudget, cmed::harness::ProbePoll),
+        ctx.check(polling::waitUntil([&side]
+                                     {
+                                         return side.readCount(cmed::observe::MaintainEvent::Passes) >= 1;
+                                     },
+                                     FirstPassBudget, cmed::harness::ProbePoll),
                   "and the maintenance thread has run its pass and is waiting out its tick");
 
         leaving.restart();

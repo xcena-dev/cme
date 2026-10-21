@@ -206,11 +206,11 @@ void Geometry::bindBlocking(timing::Millis timeout)
         throw RegionInvalidError{"cme::Geometry::bindBlocking: region not mapped"};
     }
     const CoherencyMode mode = getMappingCoherency();
-    if (!poll::waitUntil([base, mode]
-                         {
-                             return isHeaderReady(base, mode);
-                         },
-                         timeout, HeaderPollGap))
+    if (!polling::waitUntil([base, mode]
+                            {
+                                return isHeaderReady(base, mode);
+                            },
+                            timeout, HeaderPollGap))
     {
         throw RegionNotFormattedError{
             "cme::Geometry::bindBlocking: region not formatted within timeout"};

@@ -16,7 +16,7 @@
 
 #include "common/timing.hpp"
 
-namespace poll
+namespace polling
 {
 
 // Looks for @wanted until it holds or @within elapses, sleeping @step between looks.
@@ -71,4 +71,4 @@ template <typename T_Look>
     }
 }
 
-}  // namespace poll
+}  // namespace polling

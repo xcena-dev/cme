@@ -23,6 +23,7 @@
 #include "cme/limits.hpp"
 #include "cmed/robust_lock.hpp"
 #include "common/bitmap.hpp"
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "shared/protocol/domain_name.hpp"
 #include "shared/util/futex.hpp"
@@ -108,25 +109,25 @@ struct alignas(CachelineBytes) Domain_t
         // requesters exclude each other, which the state words alone cannot do.
         pthread_mutex_t lock;
 
-        std::atomic<RequestState> state;
+        ordered::SeqCst<RequestState> state;
 
         // Bumped by the acquire that inherits this mutex from a holder that died inside its section.
         // Its own word, so publishing a state neither preserves it nor needs a read-modify-write.
-        std::atomic<std::uint16_t> abandonCount;
+        ordered::Published<std::uint16_t> abandonCount;
 
         // The word every futex wait keys on, bumped after every state store. Waiting on state itself
         // loses a wakeup, since a second store can restore a value the waiter had already read.
-        std::atomic<std::uint32_t> seq;
+        ordered::SeqCst<std::uint32_t> seq;
 
         // Requesters queued on `lock`, not counting the holder. Local demand and not a request count:
         // the daemon reads it to decide whether to keep CXL ownership after a release.
-        std::atomic<std::uint32_t> waiters;
+        ordered::SeqCst<std::uint32_t> waiters;
 
-        std::atomic<std::int32_t> result;  // 0 on success, negative errno from the daemon otherwise
+        ordered::Published<std::int32_t> result;  // 0 on success, negative errno from the daemon otherwise
 
         // Wall-clock ns past which a grant here means nothing, stamped when the daemon takes the turn
         // and left alone for the grants riding that acquire. Zero reads as expired.
-        std::atomic<std::uint64_t> expiresAtNanos;
+        ordered::SeqCst<std::uint64_t> expiresAtNanos;
     } request;
 
     // ── the registry line ──────────────────────────────────────────
@@ -138,7 +139,7 @@ struct alignas(CachelineBytes) Domain_t
 
         // What this slot is. One word, so a scanner cannot catch a half-written name the way it
         // could if free meant blank bytes.
-        std::atomic<DomainState> state;
+        ordered::Published<DomainState> state;
     } registry;
 
     // ── the state machine ──────────────────────────────────────────
@@ -146,15 +147,15 @@ struct alignas(CachelineBytes) Domain_t
     // without the bump would start a sleep on a version that had already moved.
     void publish(RequestState next) noexcept
     {
-        request.state.store(next, std::memory_order_seq_cst);
-        request.seq.fetch_add(1, std::memory_order_release);
+        request.state.store(next);
+        request.seq.add(1);
     }
 
     // seq_cst because each side stores its own word and then reads the other's, and a weaker pair lets
     // both conclude the turn is theirs. A seq_cst load is a plain load on this target.
     [[nodiscard]] RequestState getState() const noexcept
     {
-        return request.state.load(std::memory_order_seq_cst);
+        return request.state.load();
     }
 
     // seq is read before state, so a store landing after the state read has already moved seq and the
@@ -167,8 +168,8 @@ struct alignas(CachelineBytes) Domain_t
 
         while (true)
         {
-            const std::uint32_t seen = request.seq.load(std::memory_order_acquire);
-            const RequestState seenState = request.state.load(std::memory_order_acquire);
+            const std::uint32_t seen = request.seq.load();
+            const RequestState seenState = request.state.load();
             if (settled(seenState))
             {
                 return seenState;
@@ -196,41 +197,41 @@ struct alignas(CachelineBytes) Domain_t
     // last exchange left in the word.
     void publishGrant() noexcept
     {
-        request.result.store(0, std::memory_order_release);
+        request.result.store(0);
         publish(RequestState::LockHeld);
     }
 
     void publishFailure(std::int32_t failure) noexcept
     {
-        request.result.store(failure, std::memory_order_release);
+        request.result.store(failure);
         publish(RequestState::Error);
     }
 
     // Meaningful only once an answer is published.
     [[nodiscard]] std::int32_t getFailureCode() const noexcept
     {
-        return request.result.load(std::memory_order_acquire);
+        return request.result.load();
     }
 
     // ── the turn behind a grant ────────────────────────────────────
     // Zero is expired, so a fresh area and a revoked turn read the same and neither grants anything.
     [[nodiscard]] bool hasValidTurn() const noexcept
     {
-        return timing::WallStamp{request.expiresAtNanos.load(std::memory_order_seq_cst)}.ahead().has_value();
+        return timing::WallStamp{request.expiresAtNanos.load()}.ahead().has_value();
     }
 
     // Stamped when the daemon takes the turn rather than when it answers, since taking it is the last
     // moment the region confirmed it was ours.
     void holdTurnUntil(std::uint64_t wallNanos) noexcept
     {
-        request.expiresAtNanos.store(wallNanos, std::memory_order_seq_cst);
+        request.expiresAtNanos.store(wallNanos);
     }
 
     // From here no requester enters a section without asking. Ordered, because the daemon reads the
     // state after this while a requester stores that state and then reads this word.
     void revokeTurn() noexcept
     {
-        request.expiresAtNanos.store(0, std::memory_order_seq_cst);
+        request.expiresAtNanos.store(0);
     }
 
     // ── local demand ───────────────────────────────────────────────
@@ -238,7 +239,7 @@ struct alignas(CachelineBytes) Domain_t
     // pair, and a weaker one lets both sides conclude the turn is theirs.
     [[nodiscard]] bool hasWaiters() const noexcept
     {
-        return request.waiters.load(std::memory_order_seq_cst) > 0;
+        return request.waiters.load() > 0;
     }
 
     // The right to be the one asking, not the CXL turn. The token falls when the acquire returns: a
@@ -297,14 +298,14 @@ struct alignas(CachelineBytes) Domain_t
     // the dead holder guarded clears it. The mutex itself is sound by the time this can be read.
     [[nodiscard]] std::uint16_t getAbandonCount() const noexcept
     {
-        return request.abandonCount.load(std::memory_order_acquire);
+        return request.abandonCount.load();
     }
 
     // Fails when a further death landed after @seen was read, so a caller learns its repair covered
     // only part of what is outstanding rather than clearing a count it never saw.
     [[nodiscard]] bool clearAbandonCount(std::uint16_t seen) noexcept
     {
-        return request.abandonCount.compare_exchange_strong(seen, 0, std::memory_order_acq_rel);
+        return request.abandonCount.cas(seen, 0);
     }
 
     // ── name and slot ──────────────────────────────────────────────
@@ -338,13 +339,13 @@ struct alignas(CachelineBytes) Domain_t
     // The name field answers nothing on its own, so this word is what a scanner believes.
     [[nodiscard]] bool isExpectedState(DomainState expected) const noexcept
     {
-        return registry.state.load(std::memory_order_acquire) == expected;
+        return registry.state.load() == expected;
     }
 
     // One store, which is what lets that scanner trust this word and nothing else.
     void markState(DomainState next) noexcept
     {
-        registry.state.store(next, std::memory_order_release);
+        registry.state.store(next);
     }
 
     // A helper of the acquires above and not part of the record's contract. Access control on a member
@@ -356,7 +357,7 @@ private:
     {
         if (held.wasAbandoned())
         {
-            request.abandonCount.fetch_add(1, std::memory_order_release);
+            request.abandonCount.add(1);
         }
     }
 };
@@ -370,7 +371,7 @@ struct alignas(CachelineBytes) SharedArea_t
     {
         // Stamped last with a release store, so it is both the ready flag and the compatibility check. A
         // fresh shm object reads as zero and is refused.
-        std::atomic<std::uint32_t> abiVersion;
+        ordered::Published<std::uint32_t> abiVersion;
 
         // Plain, because the release/acquire pair on abiVersion orders them and nothing writes them again.
         std::uint32_t maxDomains;
@@ -384,11 +385,11 @@ struct alignas(CachelineBytes) SharedArea_t
     {
         // Whether the dispatcher is inside its doorbell sleep, set by the wait itself. Nothing acts on it:
         // knock() sends the wake unconditionally and a trace note is the only reader.
-        std::atomic<std::uint32_t> dispatcherParked;
+        ordered::SeqCst<std::uint32_t> dispatcherParked;
 
         // Futex word, bumped on every pending-bit set. A daemon must read it before draining and pass
         // that value to FUTEX_WAIT, or a request arriving mid-drain would not stop the sleep.
-        std::atomic<std::uint32_t> doorbell;
+        ordered::SeqCst<std::uint32_t> doorbell;
 
         // Held for the daemon's whole run, and nothing tries it yet: a requester judges by the turn stamp
         // instead, which is the heuristic this answers exactly. Last, so the words above stay packed.
@@ -413,13 +414,13 @@ struct alignas(CachelineBytes) SharedArea_t
     {
         layout.maxDomains = MaxDomains;
         layout.areaBytes = bytes;
-        layout.abiVersion.store(AbiVersion, std::memory_order_release);
+        layout.abiVersion.store(AbiVersion);
     }
 
     // Zero for an area nothing has published. A joiner asks this before it trusts any offset below it.
     [[nodiscard]] std::uint32_t getAbiVersion() const noexcept
     {
-        return layout.abiVersion.load(std::memory_order_acquire);
+        return layout.abiVersion.load();
     }
 
     // What the writing build laid out, for a joiner to compare against its own sizeof.
@@ -458,13 +459,13 @@ struct alignas(CachelineBytes) SharedArea_t
     // The value, because a futex wait needs the word it will compare against rather than a verdict.
     [[nodiscard]] std::uint32_t readDoorbell() const noexcept
     {
-        return daemon.doorbell.load(std::memory_order_acquire);
+        return daemon.doorbell.load();
     }
 
     // A verdict and not the word, because nothing waits on this one.
     [[nodiscard]] bool isDispatcherParked() const noexcept
     {
-        return daemon.dispatcherParked.load(std::memory_order_acquire) == 1;
+        return daemon.dispatcherParked.load() == 1;
     }
 
     // The bit first, then the knock. The doorbell says work exists and not which domain, so a daemon
@@ -485,7 +486,7 @@ struct alignas(CachelineBytes) SharedArea_t
     // lock-free fetch_add and a futex syscall are all it does.
     void knock() noexcept
     {
-        daemon.doorbell.fetch_add(1, std::memory_order_release);
+        daemon.doorbell.add(1);
 
         // One, because one thread serves domains and every other daemon thread waits on a word of its
         // own, so there is no wrong waiter to wake.

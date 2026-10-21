@@ -78,11 +78,11 @@ public:
     // Same lag as harness::StubDaemon: the wake reaches the requester before this count moves.
     [[nodiscard]] bool awaitGrants(std::uint32_t wanted, timing::Millis within = timing::Millis{2000}) const
     {
-        return poll::waitUntil([this, wanted]
-                               {
-                                   return grants_.load() >= wanted;
-                               },
-                               within, cmed::harness::ProbePoll);
+        return polling::waitUntil([this, wanted]
+                                  {
+                                      return grants_.load() >= wanted;
+                                  },
+                                  within, cmed::harness::ProbePoll);
     }
 
 private:

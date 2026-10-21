@@ -8,7 +8,6 @@
 #include "core/algo/ownership_transfer.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 
 #include "common/spin.hpp"
@@ -65,7 +64,7 @@ void reconcileHolderBelief(LocalPeerState& peerState, DomainId domainId)
     domain.loseHolder();
     // Our worker may have adopted the domain since the read above, and the drop must not outlive that
     // adopt. The fence keeps the second read behind the drop, so a record naming us now restores it.
-    std::atomic_thread_fence(std::memory_order_seq_cst);
+    coherency::mb();
     if (isNamedHolder())
     {
         domain.becomeHolder();

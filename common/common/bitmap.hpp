@@ -12,8 +12,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
+
+#include "common/ordered.hpp"
 
 namespace bitmap
 {
@@ -199,22 +200,20 @@ public:
     // caller claiming exclusive use of an id reads as a refusal. Idempotent for a caller that ignores it.
     [[nodiscard]] bool claim(std::uint32_t index) noexcept
     {
-        const std::uint64_t before =
-            words_[index / BitsPerWord].fetch_or(makeMask(index), std::memory_order_acq_rel);
+        const std::uint64_t before = words_[index / BitsPerWord].setBits(makeMask(index));
         return (before & makeMask(index)) == 0;
     }
 
     // Whether @index stood before this call took it down.
     [[nodiscard]] bool release(std::uint32_t index) noexcept
     {
-        const std::uint64_t before =
-            words_[index / BitsPerWord].fetch_and(~makeMask(index), std::memory_order_acq_rel);
+        const std::uint64_t before = words_[index / BitsPerWord].clearBits(makeMask(index));
         return (before & makeMask(index)) != 0;
     }
 
     [[nodiscard]] bool has(std::uint32_t index) const noexcept
     {
-        return (words_[index / BitsPerWord].load(std::memory_order_acquire) & makeMask(index)) != 0;
+        return (words_[index / BitsPerWord].load() & makeMask(index)) != 0;
     }
 
     // The lowest id that stood, taken down as it is answered, or NoIndex when none did. Retried,
@@ -226,7 +225,7 @@ public:
         {
             while (true)
             {
-                const std::uint64_t standing = words_[word].load(std::memory_order_acquire);
+                const std::uint64_t standing = words_[word].load();
                 if (standing == 0)
                 {
                     break;
@@ -234,7 +233,7 @@ public:
 
                 const auto offset = static_cast<std::uint32_t>(__builtin_ctzll(standing));
                 const std::uint64_t taking = std::uint64_t{1} << offset;
-                if ((words_[word].fetch_and(~taking, std::memory_order_acq_rel) & taking) != 0)
+                if ((words_[word].clearBits(taking) & taking) != 0)
                 {
                     return (word * BitsPerWord) + offset;
                 }
@@ -250,7 +249,7 @@ public:
         Bits<bitCount> taken;
         for (std::uint32_t word = 0; word < WordCount; ++word)
         {
-            taken.setWord(word, words_[word].load(std::memory_order_acquire));
+            taken.setWord(word, words_[word].load());
         }
         return taken;
     }
@@ -262,7 +261,7 @@ public:
         Bits<bitCount> taken;
         for (std::uint32_t word = 0; word < WordCount; ++word)
         {
-            taken.setWord(word, words_[word].exchange(0, std::memory_order_acq_rel));
+            taken.setWord(word, words_[word].exchange(0));
         }
         return taken;
     }
@@ -273,12 +272,12 @@ public:
     {
         for (std::uint32_t word = 0; word < WordCount; ++word)
         {
-            words_[word].fetch_and(~taking.getWord(word), std::memory_order_acq_rel);
+            words_[word].clearBits(taking.getWord(word));
         }
     }
 
 private:
-    std::atomic<std::uint64_t> words_[WordCount]{};
+    ordered::Published<std::uint64_t> words_[WordCount]{};
 };
 
 }  // namespace bitmap

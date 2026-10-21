@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <exception>
 
+#include "common/ordered.hpp"
 #include "helper_util.hpp"
 
 namespace harness
@@ -94,17 +95,31 @@ inline void reapChildren(std::uint32_t count)
            WTERMSIG(status) == SIGKILL;  // NOLINT(misc-include-cleaner) POSIX, via <csignal>
 }
 
+// A word of a zeroed mapping the processes share, read and written in place as a published atomic.
+// The mapping holds plain integers because no process constructs an object over what a sibling mapped.
+template <typename T>
+[[nodiscard]] ordered::Published<T>& resolvePublishedWord(T& word) noexcept
+{
+    return *reinterpret_cast<ordered::Published<T>*>(&word);
+}
+
+template <typename T>
+[[nodiscard]] const ordered::Published<T>& resolvePublishedWord(const T& word) noexcept
+{
+    return *reinterpret_cast<const ordered::Published<T>*>(&word);
+}
+
 // One word per signal in a scratch buffer shared by the processes, indexed by the case's signal enum.
 template <typename T_Signal>
 void raiseSignal(std::uint32_t* words, T_Signal signal, std::uint32_t value = 1)
 {
-    __atomic_store_n(&words[static_cast<std::uint32_t>(signal)], value, __ATOMIC_RELEASE);
+    resolvePublishedWord(words[static_cast<std::uint32_t>(signal)]).store(value);
 }
 
 template <typename T_Signal>
 [[nodiscard]] std::uint32_t readSignal(const std::uint32_t* words, T_Signal signal)
 {
-    return __atomic_load_n(&words[static_cast<std::uint32_t>(signal)], __ATOMIC_ACQUIRE);
+    return resolvePublishedWord(words[static_cast<std::uint32_t>(signal)]).load();
 }
 
 // A raised signal is seen within one step, and the cases sequence holds only a few ms long around it.

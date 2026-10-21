@@ -21,7 +21,6 @@
 // and uc variants would spend the same seconds re-asserting a timing rule that reads no medium
 // state beyond that one line.
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <thread>
@@ -106,7 +105,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
     auto* control = view.getAdmissionControl();
 
     ordered::Relaxed<bool> churning{true};
-    std::atomic<std::uint64_t> stamps{0};
+    ordered::SeqCst<std::uint64_t> stamps{0};
     std::thread contender{[control, coherency, &churning, &stamps]
                           {
                               while (churning.load())
@@ -114,7 +113,7 @@ void checkContendedLeaseGivesUp(harness::TestContext& ctx)
                                   // Never zero: a free lease is staked rather than watched, and the
                                   // path under test is the one where the lease looks held.
                                   storeNonce(control, StaleNonce + stamps.load() + 1, coherency);
-                                  stamps.fetch_add(1, std::memory_order_relaxed);
+                                  stamps.add(1);
                                   std::this_thread::sleep_for(ChurnPeriod);
                               }
                           }};

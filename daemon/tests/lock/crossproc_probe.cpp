@@ -10,7 +10,6 @@
 
 #include <unistd.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <string>
@@ -19,6 +18,7 @@
 
 #include "cmed/guard.hpp"
 #include "cmed/session.hpp"
+#include "common/ordered.hpp"
 #include "common/poll.hpp"
 #include "common/timing.hpp"
 #include "harness/helper.hpp"
@@ -55,22 +55,22 @@ constexpr std::uint32_t DoomPhase = 2;
 // nothing between them passes whether or not anything excluded the other process.
 constexpr timing::Millis HoldFor{2};
 
-std::atomic<std::uint32_t>& phaseWord(cmed::protocol::SharedArea_t& area) noexcept
+ordered::SeqCst<std::uint32_t>& phaseWord(cmed::protocol::SharedArea_t& area) noexcept
 {
     return cmed::harness::resolveWaitersWord(area, PhaseSlot);
 }
 
-std::atomic<std::uint32_t>& insideWord(cmed::protocol::SharedArea_t& area) noexcept
+ordered::SeqCst<std::uint32_t>& insideWord(cmed::protocol::SharedArea_t& area) noexcept
 {
     return cmed::harness::resolveWaitersWord(area, ScratchSlot);
 }
 
-std::atomic<std::int32_t>& overlapWord(cmed::protocol::SharedArea_t& area) noexcept
+ordered::Published<std::int32_t>& overlapWord(cmed::protocol::SharedArea_t& area) noexcept
 {
     return cmed::harness::resolveResultWord(area, ScratchSlot);
 }
 
-std::atomic<std::uint32_t>& finishedWord(cmed::protocol::SharedArea_t& area) noexcept
+ordered::SeqCst<std::uint32_t>& finishedWord(cmed::protocol::SharedArea_t& area) noexcept
 {
     return cmed::harness::resolveSeqWord(area, ScratchSlot);
 }
@@ -79,11 +79,11 @@ std::atomic<std::uint32_t>& finishedWord(cmed::protocol::SharedArea_t& area) noe
 // timeout.
 bool awaitPhase(cmed::protocol::SharedArea_t& area, std::uint32_t wanted)
 {
-    return poll::waitUntil([&area, wanted]
-                           {
-                               return phaseWord(area).load(std::memory_order_acquire) == wanted;
-                           },
-                           timing::Secs{10}, timing::Millis{1});
+    return polling::waitUntil([&area, wanted]
+                              {
+                                  return phaseWord(area).load() == wanted;
+                              },
+                              timing::Secs{10}, timing::Millis{1});
 }
 
 // A child reports through the area and never through probe::Context: its checks would print, and its
@@ -98,17 +98,17 @@ int contend(cmed::CmedSession& session, cmed::protocol::SharedArea_t& area)
             return 3;
         }
 
-        if (insideWord(area).fetch_add(1, std::memory_order_acq_rel) != 0)
+        if (insideWord(area).add(1) != 0)
         {
-            overlapWord(area).store(1, std::memory_order_release);
+            overlapWord(area).store(1);
         }
         std::this_thread::sleep_for(HoldFor);
-        if (insideWord(area).load(std::memory_order_acquire) != 1)
+        if (insideWord(area).load() != 1)
         {
-            overlapWord(area).store(1, std::memory_order_release);
+            overlapWord(area).store(1);
         }
-        insideWord(area).fetch_sub(1, std::memory_order_acq_rel);
-        finishedWord(area).fetch_add(1, std::memory_order_release);
+        insideWord(area).subtract(1);
+        finishedWord(area).add(1);
     }
     return 0;
 }
@@ -209,7 +209,7 @@ int main()
             cmed::harness::ProbeArea area{areaName.c_str()};
             cmed::harness::publishDomains(area.shared(), cmed::harness::FirstDataSlot,
                                           {ContendedName, AbandonedName});
-            phaseWord(area.shared()).store(SetupPhase, std::memory_order_release);
+            phaseWord(area.shared()).store(SetupPhase);
             const cmed::harness::StubSetup setup{scratch.makePath("cmed.sock"), area.descriptor()};
 
             std::vector<::pid_t> contenders;
@@ -222,7 +222,7 @@ int main()
             const ::pid_t diesOnAbandoned = spawn(Role::DiesOnAbandoned, area.descriptor(), setup.path());
 
             const cmed::harness::StubDaemon daemon{area.shared()};
-            phaseWord(area.shared()).store(ContendPhase, std::memory_order_release);
+            phaseWord(area.shared()).store(ContendPhase);
 
             bool everyContenderExited = true;
             for (const ::pid_t contender : contenders)
@@ -232,12 +232,12 @@ int main()
 
             ctx.openCase("several processes over one domain");
             ctx.check(everyContenderExited, "every contender finished its rounds");
-            ctx.check(overlapWord(area.shared()).load(std::memory_order_acquire) == 0,
+            ctx.check(overlapWord(area.shared()).load() == 0,
                       "no two processes were inside the span at once");
-            ctx.checkf(finishedWord(area.shared()).load(std::memory_order_acquire) == Contenders * Rounds,
+            ctx.checkf(finishedWord(area.shared()).load() == Contenders * Rounds,
                        "all %" PRIu32 " sections ran", Contenders * Rounds);
 
-            phaseWord(area.shared()).store(DoomPhase, std::memory_order_release);
+            phaseWord(area.shared()).store(DoomPhase);
 
             ctx.openCase("a holder that dies inside the span");
             ctx.check(cmed::harness::reapedCleanly(diesOnContended) &&

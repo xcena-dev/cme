@@ -21,7 +21,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <memory>
@@ -58,21 +57,21 @@ struct PeerSlot_t
     std::uint32_t idleMs{20};
     // Take one domain and keep it, instead of the acquire/release loop. That loop's guard dies with
     // its iteration, so a freeze aimed at a holder always lands after the release.
-    std::atomic<bool> pinned{false};
+    ordered::SeqCst<bool> pinned{false};
 
     // ── main -> runner ─────────────────────────────────────────────
-    std::atomic<bool> stop{false};
+    ordered::SeqCst<bool> stop{false};
     // Main raises it; the runner applies it to its own Peer.
-    std::atomic<bool> frozen{false};
+    ordered::SeqCst<bool> frozen{false};
     // On stop, leak the Peer instead of running its dtor.
-    std::atomic<bool> abandon{false};
+    ordered::SeqCst<bool> abandon{false};
 
     // ── runner -> main ─────────────────────────────────────────────
     // Raised once a pinned hold is real.
     ordered::Published<bool> holding{false};
-    std::atomic<std::uint64_t> acquires{0};
+    ordered::SeqCst<std::uint64_t> acquires{0};
     // The Peer never got built, so this run proves nothing.
-    std::atomic<bool> failed{false};
+    ordered::SeqCst<bool> failed{false};
     // The built Peer, for reads only: publishing the pointer is what main lacks when it takes
     // `peer` directly. Null outside the worker's life.
     ordered::Published<cme::Peer*> livePeer{nullptr};
@@ -107,20 +106,20 @@ inline void runPeerWorker(PeerSlot_t* slot)
     }
     slot->livePeer.store(slot->peer.get());
 
-    if (slot->pinned.load(std::memory_order_acquire))
+    if (slot->pinned.load())
     {
         auto guard = slot->peer->lock(1);
-        slot->acquires.fetch_add(1, std::memory_order_relaxed);
+        slot->acquires.add(1);
         slot->holding.store(true);
-        while (!slot->stop.load(std::memory_order_acquire))
+        while (!slot->stop.load())
         {
-            slot->peer->setFreeze(slot->frozen.load(std::memory_order_acquire));
+            slot->peer->setFreeze(slot->frozen.load());
             sleepMs(slot->idleMs);
         }
         // Cleared before the guard goes, so a reader that sees it true knows the hold is still on.
         // That is what lets a case use it as the oracle for "somebody else got in while I held it".
         slot->holding.store(false);
-        if (slot->abandon.load(std::memory_order_acquire))
+        if (slot->abandon.load())
         {
             // Same reasoning as the Peer below: a crashed holder releases nothing, and a guard that
             // runs its destructor hands the domain back before recovery ever sees it held.
@@ -129,11 +128,11 @@ inline void runPeerWorker(PeerSlot_t* slot)
     }
 
     cme::DomainId domainId = 1;
-    while (!slot->pinned.load(std::memory_order_acquire) &&
-           !slot->stop.load(std::memory_order_acquire))
+    while (!slot->pinned.load() &&
+           !slot->stop.load())
     {
-        slot->peer->setFreeze(slot->frozen.load(std::memory_order_acquire));
-        if (slot->frozen.load(std::memory_order_acquire))
+        slot->peer->setFreeze(slot->frozen.load());
+        if (slot->frozen.load())
         {
             sleepMs(slot->idleMs);
             continue;
@@ -141,7 +140,7 @@ inline void runPeerWorker(PeerSlot_t* slot)
         try
         {
             const auto guard = slot->peer->lock(domainId);
-            slot->acquires.fetch_add(1, std::memory_order_relaxed);
+            slot->acquires.add(1);
         }
         catch (const cme::LockTimeoutError&)
         {
@@ -154,7 +153,7 @@ inline void runPeerWorker(PeerSlot_t* slot)
 
     // A peer the case froze is a crashed peer, and a crashed process runs no destructor. Releasing
     // rather than resetting is what keeps its slot dead for recovery to find.
-    if (slot->abandon.load(std::memory_order_acquire))
+    if (slot->abandon.load())
     {
         static_cast<void>(slot->peer.release());
     }
@@ -200,7 +199,7 @@ void joinPeerWorkers(T_Slots& slots, std::uint32_t count)
 {
     for (std::uint32_t index = 0; index < count; ++index)
     {
-        slots[index].stop.store(true, std::memory_order_release);
+        slots[index].stop.store(true);
     }
     for (std::uint32_t index = 0; index < count; ++index)
     {

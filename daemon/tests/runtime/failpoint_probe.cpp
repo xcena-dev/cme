@@ -206,7 +206,7 @@ void aDaemonDyingBeforeItRecordsTheTurn(probe::Context& ctx, const cmed::harness
               "a daemon started after it comes up on the same area");
 
     // Generous: what is waited out is the region's dead window, which is not this probe's to pick.
-    const bool regained = poll::waitUntil(
+    const bool regained = polling::waitUntil(
         [&scratch]
         {
             try

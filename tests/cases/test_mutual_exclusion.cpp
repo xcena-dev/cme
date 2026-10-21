@@ -11,7 +11,6 @@
 // tree. Peers are threads sharing one region, each with its own cme::Peer.
 
 #include <array>
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -19,6 +18,7 @@
 #include <exception>
 #include <vector>
 
+#include "common/ordered.hpp"
 #include "common/timing.hpp"
 #include "core/algo/peer.hpp"
 #include "core/types.hpp"
@@ -91,7 +91,7 @@ void runBody(harness::TestContext& ctx)
     harness::seedDataDomains(region, 1);  // creates data domain id 1
 
     std::vector<std::uint32_t> done(NumPeers, 0);
-    std::atomic<int> ctorFailures{0};
+    ordered::SeqCst<std::int32_t> ctorFailures{0};
 
     harness::runThreads(
         NumPeers,
@@ -112,7 +112,7 @@ void runBody(harness::TestContext& ctx)
             catch (const std::exception& e)
             {
                 std::fprintf(stderr, "peer %u: %s\n", pid, e.what());
-                ctorFailures.fetch_add(1);
+                ctorFailures.add(1);
             }
         });
 

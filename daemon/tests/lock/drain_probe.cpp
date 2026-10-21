@@ -151,7 +151,7 @@ private:
     [[nodiscard]] bool awaitState(std::uint32_t domainId, cmed::protocol::RequestState wanted,
                                   timing::Millis within)
     {
-        return poll::waitUntil(
+        return polling::waitUntil(
             [this, domainId, wanted]
             {
                 return cmed::harness::readState(area_.shared(), domainId) == wanted;
@@ -207,7 +207,7 @@ constexpr timing::Millis QuietTick{60000};
 // what that pass left up. Nothing announces a pass, so this count is what says one happened.
 [[nodiscard]] bool awaitNoWorkerRefusal(const cmed::daemon::ServeHandler& drainer)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&drainer]
         {
             return drainer.readCount(cmed::observe::WorkerEvent::DeferredNoWorker) >= 1;
@@ -217,7 +217,7 @@ constexpr timing::Millis QuietTick{60000};
 
 [[nodiscard]] bool awaitHandOvers(const cmed::daemon::ServeHandler& drainer, std::uint64_t wanted)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&drainer, wanted]
         {
             return drainer.readCount(cmed::observe::WorkerEvent::Handed) >= wanted;

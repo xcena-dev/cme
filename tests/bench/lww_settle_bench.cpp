@@ -35,7 +35,6 @@
 #include <sched.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -194,7 +193,7 @@ struct RoundStamps_t
 {
     writeNonce(nonce, 0);  // free/unlocked before the round opens
 
-    std::atomic<std::uint32_t> ready{0};            // startup sync only (not the race)
+    ordered::SeqCst<std::uint32_t> ready{0};        // startup sync only (not the race)
     ordered::Published<std::uint64_t> originNs{0};  // common origin, published by the opener
     ordered::Published<std::uint32_t> gate{0};      // round-open signal: DRAM (cache-coherent), NOT the FAM
                                                     // line -- stakers must not hot-poll the UC nonce to
@@ -210,7 +209,7 @@ struct RoundStamps_t
         [&]
         {
             pinTo(contenders);  // its own core, past the stakers'
-            ready.fetch_add(1);
+            ready.add(1);
             while (ready.load() < contenders + 1)
             {
                 _mm_pause();
@@ -225,7 +224,7 @@ struct RoundStamps_t
         {
             const std::uint64_t myNonce = static_cast<std::uint64_t>(index) + 1;  // distinct, nonzero
             pinTo(index);                                                         // one staker per core
-            ready.fetch_add(1);
+            ready.add(1);
             while (gate.load() == 0)
             {
                 _mm_pause();

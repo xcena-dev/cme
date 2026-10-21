@@ -53,7 +53,7 @@ constexpr timing::Millis CohortHold{10000};
 // again.
 [[nodiscard]] bool awaitIdle(const cmed::daemon::DomainWorkers& working, std::uint32_t domainId)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&working, domainId]
         {
             return !working.isBusy(domainId);
@@ -65,7 +65,7 @@ constexpr timing::Millis CohortHold{10000};
 // pool was built is refused for want of one. The dispatcher comes back for it, and so does this.
 [[nodiscard]] bool awaitAssign(cmed::daemon::DomainWorkers& working, std::uint32_t domainId)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&working, domainId]
         {
             return working.assign(domainId);
@@ -149,7 +149,7 @@ public:
     // @wanted of them at once is what a case needs before it may ask whether a further hand-over is refused.
     [[nodiscard]] bool awaitGranting(std::uint32_t wanted)
     {
-        return poll::waitUntil(
+        return polling::waitUntil(
             [this, wanted]
             {
                 return granting() >= wanted;
@@ -159,7 +159,7 @@ public:
 
     [[nodiscard]] bool awaitHeld(std::uint32_t domainId)
     {
-        return poll::waitUntil(
+        return polling::waitUntil(
             [this, domainId]
             {
                 return cmed::harness::isHeld(area_.shared(), domainId);

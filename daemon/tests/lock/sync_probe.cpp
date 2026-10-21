@@ -12,7 +12,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -168,9 +167,9 @@ bool recoversFromADeadHolder(pthread_mutex_t& mutex)
 // The bump and the wake go out once, after the waiter is parked. A wake sent before it reaches the
 // syscall is not queued for it, so a loop of bumps would end the wait through the value it re-reads
 // on its own and would say nothing about the wake.
-bool wakesAWaiterOnTheSeqWord(std::atomic<std::uint32_t>& word)
+bool wakesAWaiterOnTheSeqWord(ordered::SeqCst<std::uint32_t>& word)
 {
-    const std::uint32_t observed = word.load(std::memory_order_acquire);
+    const std::uint32_t observed = word.load();
     ordered::Published<bool> entered{false};
     ordered::Published<bool> returned{false};
     bool woke = false;
@@ -182,36 +181,36 @@ bool wakesAWaiterOnTheSeqWord(std::atomic<std::uint32_t>& word)
                            returned.store(true);
                        }};
 
-    const bool started = poll::waitUntil([&entered]
-                                         {
-                                             return entered.load();
-                                         },
-                                         StartWait, PollStep);
+    const bool started = polling::waitUntil([&entered]
+                                            {
+                                                return entered.load();
+                                            },
+                                            StartWait, PollStep);
     std::this_thread::sleep_for(Settle);
 
     // Nothing has moved the word, so a waiter that is already back was never asleep on it and no
     // wake below can be credited with ending the wait.
     const bool stayed = !returned.load();
 
-    word.fetch_add(1, std::memory_order_release);
+    word.add(1);
     cmed::util::wakeAllWaiters(word);
 
     // Well inside the waiter's own deadline: a wait that runs out ends too, and the time it took is
     // the only thing that tells the deadline from the wake.
-    const bool cameBack = poll::waitUntil([&returned]
-                                          {
-                                              return returned.load();
-                                          },
-                                          ReturnWait, PollStep);
+    const bool cameBack = polling::waitUntil([&returned]
+                                             {
+                                                 return returned.load();
+                                             },
+                                             ReturnWait, PollStep);
 
     waiter.join();
     return started && stayed && cameBack && woke;
 }
 
 // A word nobody touches must end the wait on the deadline rather than hold the caller forever.
-bool returnsOnItsDeadline(std::atomic<std::uint32_t>& word)
+bool returnsOnItsDeadline(ordered::SeqCst<std::uint32_t>& word)
 {
-    const std::uint32_t observed = word.load(std::memory_order_acquire);
+    const std::uint32_t observed = word.load();
     const timing::Stopwatch waited;
     const bool woke = cmed::util::waitOnWord(word, observed, timing::Millis{20});
 
@@ -227,7 +226,7 @@ int main()
     {
         cmed::CmedArea area = cmed::daemon::formatArea(AreaName);
         cmed::protocol::Domain_t& context = cmed::harness::resolveSlot(area.shared(), DomainSlot);
-        std::atomic<std::uint32_t>& word = cmed::harness::resolveSeqWord(area.shared(), DomainSlot);
+        auto& word = cmed::harness::resolveSeqWord(area.shared(), DomainSlot);
 
         // The fork case runs first, while this process is still single threaded.
         passed = recoversFromADeadHolder(context.request.lock) &&
@@ -238,7 +237,7 @@ int main()
                  wakesAWaiterOnTheSeqWord(word) &&
                  returnsOnItsDeadline(word);
 
-        std::printf("sync probe seq=%" PRIu32 "\n", word.load(std::memory_order_acquire));
+        std::printf("sync probe seq=%" PRIu32 "\n", word.load());
     }
     catch (const cmed::CmedError& failure)
     {

@@ -8,8 +8,9 @@
 
 #pragma once
 
-#include <atomic>
 #include <cstdint>
+
+#include "common/ordered.hpp"
 
 namespace cmed::util
 {
@@ -17,10 +18,10 @@ namespace cmed::util
 class OccupancyToken
 {
 public:
-    explicit OccupancyToken(std::atomic<std::uint32_t>& occupancy) noexcept
+    explicit OccupancyToken(ordered::SeqCst<std::uint32_t>& occupancy) noexcept
         : occupancy_{&occupancy}
     {
-        occupancy_->fetch_add(1, std::memory_order_release);
+        occupancy_->add(1);
     }
 
     // One object is one unit. A second owner of the same one would hand back a unit it never took.
@@ -31,11 +32,11 @@ public:
 
     ~OccupancyToken() noexcept
     {
-        occupancy_->fetch_sub(1, std::memory_order_release);
+        occupancy_->subtract(1);
     }
 
 private:
-    std::atomic<std::uint32_t>* occupancy_;
+    ordered::SeqCst<std::uint32_t>* occupancy_;
 };
 
 }  // namespace cmed::util

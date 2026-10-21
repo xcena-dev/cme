@@ -45,7 +45,7 @@ constexpr timing::Millis StartStep{2};
 [[nodiscard]] inline CmedSession openWhenItAnswers(const CmedClientConfig_t& config,
                                                    timing::Millis within = StartWait)
 {
-    std::optional<CmedSession> opened = poll::awaitValue(
+    std::optional<CmedSession> opened = polling::awaitValue(
         [&config]() -> std::optional<CmedSession>
         {
             try

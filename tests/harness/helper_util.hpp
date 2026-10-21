@@ -98,7 +98,7 @@ template <typename T_Pred>
 [[nodiscard]] bool waitUntil(T_Pred pred, std::uint32_t deadlineMs,
                              std::uint32_t stepMs = PollStepMs)
 {
-    return poll::waitUntil(pred, timing::Millis{deadlineMs}, timing::Millis{stepMs});
+    return polling::waitUntil(pred, timing::Millis{deadlineMs}, timing::Millis{stepMs});
 }
 
 // Poll @pred for @windowMs and report whether it held the whole time; false the moment it does not.

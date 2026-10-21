@@ -9,12 +9,12 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <ctime>
 #include <limits>
 
+#include "common/ordered.hpp"
 #include "common/spin.hpp"
 #include "common/timing.hpp"
 
@@ -26,17 +26,17 @@ namespace
 
 // The syscall takes a plain word, and these hold the atomic to being that same object at that same
 // address rather than assuming it.
-static_assert(sizeof(std::atomic<std::uint32_t>) == sizeof(std::uint32_t), "atomic word is one word");
-static_assert(alignof(std::atomic<std::uint32_t>) == alignof(std::uint32_t), "atomic word aligns as one");
+static_assert(sizeof(ordered::SeqCst<std::uint32_t>) == sizeof(std::uint32_t), "atomic word is one word");
+static_assert(alignof(ordered::SeqCst<std::uint32_t>) == alignof(std::uint32_t), "atomic word aligns as one");
 
-[[nodiscard]] std::uint32_t* castToWord(std::atomic<std::uint32_t>& word) noexcept
+[[nodiscard]] std::uint32_t* castToWord(ordered::SeqCst<std::uint32_t>& word) noexcept
 {
     return reinterpret_cast<std::uint32_t*>(&word);
 }
 
 // No FUTEX_PRIVATE_FLAG: the waiter and the waker are different processes, and the private form
 // keys on an address two mappings do not share.
-[[nodiscard]] std::int64_t callFutexWait(std::atomic<std::uint32_t>& word,
+[[nodiscard]] std::int64_t callFutexWait(ordered::SeqCst<std::uint32_t>& word,
                                          std::uint32_t expected,
                                          timing::Nanos timeout) noexcept
 {
@@ -44,14 +44,14 @@ static_assert(alignof(std::atomic<std::uint32_t>) == alignof(std::uint32_t), "at
     return ::syscall(SYS_futex, castToWord(word), FUTEX_WAIT, expected, &span, nullptr, 0);
 }
 
-std::int64_t callFutexWake(std::atomic<std::uint32_t>& word, std::int32_t sleepers) noexcept
+std::int64_t callFutexWake(ordered::SeqCst<std::uint32_t>& word, std::int32_t sleepers) noexcept
 {
     return ::syscall(SYS_futex, castToWord(word), FUTEX_WAKE, sleepers, nullptr, nullptr, 0);
 }
 
 // The first look stays cheap, and the backoff keeps a word nobody is about to move from being
 // hammered. The cap stays low: a burst long enough to cover the whole answer delays the wake.
-[[nodiscard]] bool spinOnWord(std::atomic<std::uint32_t>& word,
+[[nodiscard]] bool spinOnWord(ordered::SeqCst<std::uint32_t>& word,
                               std::uint32_t expected,
                               timing::Nanos spin) noexcept
 {
@@ -68,7 +68,7 @@ std::int64_t callFutexWake(std::atomic<std::uint32_t>& word, std::int32_t sleepe
 
     while (true)
     {
-        if (word.load(std::memory_order_acquire) != expected)
+        if (word.load() != expected)
         {
             return true;
         }
@@ -89,24 +89,24 @@ std::int64_t callFutexWake(std::atomic<std::uint32_t>& word, std::int32_t sleepe
 // could skip a wake the sleeper needed. The kernel's compare catches the other order.
 struct Parked_t
 {
-    std::atomic<std::uint32_t>& word;
+    ordered::SeqCst<std::uint32_t>& word;
 
-    explicit Parked_t(std::atomic<std::uint32_t>& flag) noexcept
+    explicit Parked_t(ordered::SeqCst<std::uint32_t>& flag) noexcept
         : word{flag}
     {
-        word.store(1, std::memory_order_seq_cst);
+        word.store(1);
     }
 
     ~Parked_t() noexcept
     {
-        word.store(0, std::memory_order_seq_cst);
+        word.store(0);
     }
 };
 
 // The futex loop alone, so a caller recording its sleep scopes that record to the sleep rather than to
 // the spin ahead of it.
 [[nodiscard]] bool
-sleepOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, const timing::Deadline& deadline) noexcept
+sleepOnWord(ordered::SeqCst<std::uint32_t>& word, std::uint32_t expected, const timing::Deadline& deadline) noexcept
 {
     while (true)
     {
@@ -143,7 +143,7 @@ sleepOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, const timi
 
 }  // namespace
 
-bool waitOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, timing::Nanos timeout,
+bool waitOnWord(ordered::SeqCst<std::uint32_t>& word, std::uint32_t expected, timing::Nanos timeout,
                 timing::Nanos spin) noexcept
 {
     const timing::Deadline deadline{timeout};
@@ -158,8 +158,8 @@ bool waitOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, timing
     return sleepOnWord(word, expected, deadline);
 }
 
-bool waitOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, timing::Nanos timeout,
-                timing::Nanos spin, std::atomic<std::uint32_t>& parked) noexcept
+bool waitOnWord(ordered::SeqCst<std::uint32_t>& word, std::uint32_t expected, timing::Nanos timeout,
+                timing::Nanos spin, ordered::SeqCst<std::uint32_t>& parked) noexcept
 {
     const timing::Deadline deadline{timeout};
 
@@ -174,12 +174,12 @@ bool waitOnWord(std::atomic<std::uint32_t>& word, std::uint32_t expected, timing
     return sleepOnWord(word, expected, deadline);
 }
 
-void wakeOneWaiter(std::atomic<std::uint32_t>& word) noexcept
+void wakeOneWaiter(ordered::SeqCst<std::uint32_t>& word) noexcept
 {
     static_cast<void>(callFutexWake(word, 1));
 }
 
-void wakeAllWaiters(std::atomic<std::uint32_t>& word) noexcept
+void wakeAllWaiters(ordered::SeqCst<std::uint32_t>& word) noexcept
 {
     // INT32_MAX is the documented way to say "every sleeper," not a cap this code chose; the width
     // is ours to state since syscall is variadic and declares no type.

@@ -236,7 +236,7 @@ void aLateDomainBecomesVisible(probe::Context& ctx, const cmed::harness::ProbeSc
     cmed::CmedSession session = cmed::harness::openWhenItAnswers(configFor(scratch, areaNames, node));
 
     // Retried rather than slept on, because what is waited for is the daemon's own clock.
-    const bool locked = poll::waitUntil(
+    const bool locked = polling::waitUntil(
         [&session, name]
         {
             try
@@ -342,7 +342,7 @@ void anotherNodesDomainCanBeDeleted(probe::Context& ctx, const cmed::harness::Pr
 // daemon join and then leave on the hand-back, which is the participation this case is about.
 [[nodiscard]] bool awaitJoinable(cmed::CmedSession& session, const char* name)
 {
-    return poll::waitUntil(
+    return polling::waitUntil(
         [&session, name]
         {
             try
@@ -406,7 +406,7 @@ void aJoinedDomainResistsDeletion(probe::Context& ctx, const cmed::harness::Prob
 // not about a name the registry refresh has yet to carry. Empty means the delete went through.
 [[nodiscard]] std::error_code awaitDeleteAnswer(cmed::CmedSession& session, const char* name)
 {
-    const std::optional<std::error_code> answered = poll::awaitValue(
+    const std::optional<std::error_code> answered = polling::awaitValue(
         [&session, name]() -> std::optional<std::error_code>
         {
             try

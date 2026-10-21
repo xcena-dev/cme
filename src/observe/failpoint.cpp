@@ -67,7 +67,7 @@ ordered::Relaxed<std::uint32_t> g_lastHeld{NoSlot};
     // Short: what this waits out is one store by the thread entering the boundary, not any work.
     constexpr timing::Micros LookGap{10};
 
-    return poll::waitUntil(
+    return polling::waitUntil(
         [slot]
         {
             return g_holds[slot].reached.load();
@@ -161,7 +161,7 @@ void reach(Boundary boundary) noexcept
     constexpr timing::Micros LookGap{10};
 
     g_holds[slot].reached.store(true);
-    const bool freed = poll::waitUntil(
+    const bool freed = polling::waitUntil(
         [slot]
         {
             return g_holds[slot].letGo.load();
