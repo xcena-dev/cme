@@ -85,7 +85,13 @@ fi
 # Unprivileged and unable to log in: the daemon needs a uid of its own for the socket's admission
 # boundary, and nothing else that an account usually carries.
 if [ -z "$DESTDIR" ] && ! id -u "$ACCOUNT" >/dev/null 2>&1; then
-	useradd --system --shell /usr/sbin/nologin --no-create-home "$ACCOUNT"
+	# useradd also creates a group of the account's name and fails when one exists, so the account
+	# takes that group as its own instead.
+	GROUP_ARGS=()
+	if getent group "$ACCOUNT" >/dev/null; then
+		GROUP_ARGS=(--gid "$ACCOUNT")
+	fi
+	useradd --system --shell /usr/sbin/nologin --no-create-home "${GROUP_ARGS[@]}" "$ACCOUNT"
 	echo "created the system account '$ACCOUNT'"
 fi
 
