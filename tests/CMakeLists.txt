@@ -252,6 +252,7 @@ cme_test_exe(cme-failpoint-handoff-test test_failpoint_handoff.cpp)
 cme_test_exe(cme-failpoint-recovery-test test_failpoint_recovery.cpp)
 cme_test_exe(cme-failpoint-membership-test test_failpoint_membership.cpp)
 cme_test_exe(cme-failpoint-registry-test test_failpoint_registry.cpp)
+cme_test_exe(cme-peterson-cancelled-waiter-test test_peterson_cancelled_waiter.cpp)
 cme_test_exe(cme-format-race-test test_format_race.cpp)
 cme_test_exe(cme-timeout-recovery-race-test test_timeout_recovery_race.cpp)
 cme_test_exe(cme-resource-lifecycle-test test_resource_lifecycle.cpp)
@@ -506,6 +507,11 @@ cme_case(failpoint_membership TARGET cme-failpoint-membership-test STRATEGIES BA
 # whichever one is loaded.
 cme_case(failpoint_registry TARGET cme-failpoint-registry-test STRATEGY request BACKENDS shm
     SHM_TIMEOUT 300)
+
+# The last guard's unlock stopped under the climb lock while a refused tryLock of the same peer holds a
+# pin, released in either order. Skips without CME_FAILPOINT. One policy: only Peterson pins that way.
+cme_case(peterson_cancelled_waiter TARGET cme-peterson-cancelled-waiter-test STRATEGY peterson
+    BACKENDS shm SHM_TIMEOUT 60)
 
 # Nothing serializes format, so N processes formatting one region is the one contention create_race
 # does not reach. All four policies: each lays down a different successor area in the same pass.

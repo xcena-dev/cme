@@ -27,6 +27,7 @@
 #include "core/policy/successor_peterson_layout.hpp"
 #include "core/runtime/local_peer_state.hpp"
 #include "core/types.hpp"
+#include "observe/failpoint.hpp"
 #include "observe/latency.hpp"
 #include "util/coherency.hpp"
 
@@ -218,17 +219,18 @@ OwnershipResult PetersonPolicy::lock(LocalPeerState& peerState, DomainId domainI
         return OwnershipResult::NotArrived;
     }
 
-    // Pinned before the climb lock, so an unlock deciding whether to leave the tree sees this thread.
     OBSERVE_LATENCY_BEGIN(Resident);
-    ownership_transfer::holdDomain(peerState, domainId);
     auto& climb = state_->getClimb(domainId);
     std::unique_lock<std::timed_mutex> climbGuard{climb.mutex, std::defer_lock};
     const auto left = deadline.remaining();
     if (!(left ? climbGuard.try_lock_for(*left) : climbGuard.try_lock()))
     {
-        ownership_transfer::unholdDomain(peerState, domainId);
+        CME_FAILPOINT_REACH(failpoint::Boundary::PetersonLockRefused);
         return OwnershipResult::NotArrived;
     }
+    // Pinned under the climb lock, so the count an unlock reads there holds no thread that may still
+    // give up and leave the root to nobody.
+    ownership_transfer::holdDomain(peerState, domainId);
 
     // A sibling thread holds the root: the turn is this peer's, and a peer's threads do not exclude
     // each other. Record residency alone admits no one, since the tournament is the lock.
@@ -260,10 +262,11 @@ void PetersonPolicy::unlock(LocalPeerState& peerState, DomainId domainId)
 {
     OBSERVE_LATENCY_BEGIN(Unlock);
     auto& domain = peerState.getDomain(domainId);
-    // The pins are read under the climb lock: a sibling pinned before the read shares the win and keeps
-    // the root, and one pinned after it finds the tree left and climbs.
+    // Every pin is taken under the climb lock, so another pin read here is a sibling holding the win,
+    // which keeps the root. A thread that arrives later finds the tree left and climbs.
     const auto climbGuard = state_ ? std::unique_lock<std::timed_mutex>{state_->getClimb(domainId).mutex}
                                    : std::unique_lock<std::timed_mutex>{};
+    CME_FAILPOINT_REACH(failpoint::Boundary::PetersonUnlockBeforePins);
     const auto pins = domain.getOwnershipPinCount();
 
     // The outermost unlock leaves the slot's tournament, and so does one that finds no pin left.

@@ -62,6 +62,9 @@ enum class Boundary : std::uint32_t
     TakeoverMidLoop,       // TakeoverOwnership: some of the dead peer's domains moved
     RecoveryBeforeScrub,   // claim retracted, policy-private state not yet scrubbed
     RecoveryBeforeFinish,  // CompleteRecovery: scrubbed, slot not yet None
+
+    PetersonUnlockBeforePins,  // PetersonPolicy::unlock: the climb lock is held, the pin count not yet read
+    PetersonLockRefused,       // PetersonPolicy::lock: the climb lock was refused, the call not yet returned
 };
 
 // For a case's own output: a failure that names the boundary is one a reader can re-run.
@@ -119,6 +122,10 @@ enum class Boundary : std::uint32_t
             return "recovery.before_scrub";
         case Boundary::RecoveryBeforeFinish:
             return "recovery.before_finish";
+        case Boundary::PetersonUnlockBeforePins:
+            return "peterson.unlock_before_pins";
+        case Boundary::PetersonLockRefused:
+            return "peterson.lock_refused";
         case Boundary::None:
             return "none";
     }
@@ -135,15 +142,19 @@ inline constexpr bool Compiled = true;
 // may arm before the fork or inside the child body.
 void arm(Boundary boundary) noexcept;
 
-// Arm @boundary to stop the thread that reaches it until release(), clearing the last hold. Waiter
-// and holder are threads of one process, so nothing here crosses a process and no shared word does.
+// Arm @boundary to stop the thread that reaches it until it is released. Several can be held at once,
+// and the waiter and holder are threads of one process, so no shared word is involved.
 void hold(Boundary boundary) noexcept;
 
-// Whether a thread reached the held boundary and is waiting there, within @within.
-[[nodiscard]] bool awaitHeld(timing::Nanos within) noexcept;
+// Whether a thread reached the held @boundary and is waiting there, within @within.
+[[nodiscard]] bool awaitHeld(Boundary boundary, timing::Nanos within) noexcept;
 
-// Let the held thread continue. Safe before anything reaches the boundary: the word it reads is
-// stored either way.
+// Let the thread held at @boundary continue. Safe before anything reaches the boundary: the word it
+// reads is stored either way.
+void release(Boundary boundary) noexcept;
+
+// The same two for the boundary most recently passed to hold(), for a case that holds one at a time.
+[[nodiscard]] bool awaitHeld(timing::Nanos within) noexcept;
 void release() noexcept;
 
 // Die or wait, whichever @boundary was armed for, and nothing if it was not the armed one.
@@ -160,6 +171,15 @@ inline void arm(Boundary) noexcept
 }
 
 inline void hold(Boundary) noexcept
+{
+}
+
+[[nodiscard]] inline bool awaitHeld(Boundary, timing::Nanos) noexcept
+{
+    return false;
+}
+
+inline void release(Boundary) noexcept
 {
 }
 
