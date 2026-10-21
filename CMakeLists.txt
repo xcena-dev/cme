@@ -187,9 +187,8 @@ target_link_libraries(cme PUBLIC
     ${CMAKE_DL_LIBS}  # dlopen of the file backend's filesystem library
 )
 
-# The file backend reaches ROOF through a C table it loads with dlopen. All it takes at build time is
-# the header that describes the table, found under CMAKE_PREFIX_PATH or the system include path;
-# without it the backend builds and skips those calls.
+# The file backend reaches ROOF through a C table it loads with dlopen, so the build needs only the
+# header describing that table. Without it the backend builds and skips those calls.
 find_path(ROOF_INCLUDE_DIR roof/abi.hpp)
 if(ROOF_INCLUDE_DIR)
     target_include_directories(cme PRIVATE ${ROOF_INCLUDE_DIR})

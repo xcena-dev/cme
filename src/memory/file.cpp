@@ -34,8 +34,6 @@
 #ifdef CME_HAVE_ROOF_ABI
 #include <dlfcn.h>
 
-#include <mutex>
-
 #include "roof/abi.hpp"
 #include "roof/file.hpp"
 #include "roof/soname.hpp"
@@ -93,45 +91,41 @@ struct Mapping_t
     return table;
 }
 
-[[nodiscard]] const roof::CApi_t* roofTable()
+[[nodiscard]] const roof::CApi_t* getRoofTable()
 {
-    static std::once_flag loaded;
-    static const roof::CApi_t* table = nullptr;
-    std::call_once(loaded, []
-                   {
-                       table = loadRoof();
-                   });
-    return table;
+    static const roof::CApi_t* const Table = loadRoof();
+    return Table;
 }
+
+constexpr roof::Permission ReadWrite = roof::Permission::Read | roof::Permission::Write;
 
 // Each verb answers 0 or a negative errno, and -ENOTTY when the library is unusable, which is what
 // a filesystem that does not know the ioctl answers too.
-[[nodiscard]] std::int32_t roofSetDefaultPermission(std::int32_t file)
+[[nodiscard]] std::int32_t setRoofDefaultPermission(std::int32_t file)
 {
-    const auto* const table = roofTable();
-    return (table != nullptr) ? table->setDefaultPermission(file, roof::Permission::Read | roof::Permission::Write)
-                              : -ENOTTY;
+    const auto* const table = getRoofTable();
+    return (table != nullptr) ? table->setDefaultPermission(file, ReadWrite) : -ENOTTY;
 }
 
 // The question mapping asks, put before mmap(2) as the library's own map does.
-[[nodiscard]] std::int32_t roofAskPermission(std::int32_t file, bool writable)
+[[nodiscard]] std::int32_t askRoofPermission(std::int32_t file, bool writable)
 {
-    const auto* const table = roofTable();
-    const auto asked = writable ? (roof::Permission::Read | roof::Permission::Write) : roof::Permission::Read;
+    const auto* const table = getRoofTable();
+    const auto asked = writable ? ReadWrite : roof::Permission::Read;
     return (table != nullptr) ? table->askPermission(file, asked) : -ENOTTY;
 }
 
-[[nodiscard]] std::int32_t roofSetCache(std::int32_t file, CoherencyMode coherency)
+[[nodiscard]] std::int32_t setRoofCache(std::int32_t file, CoherencyMode coherency)
 {
-    const auto* const table = roofTable();
-    roof::RegionAttr_t attr;
-    attr.cache = (coherency == CoherencyMode::Uncached) ? roof::CachePolicy::Uncached : roof::CachePolicy::Writeback;
+    const auto* const table = getRoofTable();
+    const auto cache = (coherency == CoherencyMode::Uncached) ? roof::CachePolicy::Uncached : roof::CachePolicy::Writeback;
+    const roof::RegionAttr_t attr{cache};
     return (table != nullptr) ? table->setRegionAttr(file, attr) : -ENOTTY;
 }
 
-[[nodiscard]] std::optional<CoherencyMode> roofReadCache(std::int32_t file)
+[[nodiscard]] std::optional<CoherencyMode> readRoofCache(std::int32_t file)
 {
-    const auto* const table = roofTable();
+    const auto* const table = getRoofTable();
     roof::RegionAttr_t attr;
     if (table == nullptr || table->readRegionAttr(file, &attr) != 0)
     {
@@ -142,88 +136,65 @@ struct Mapping_t
 
 #else
 
-[[nodiscard]] std::int32_t roofSetDefaultPermission(std::int32_t /*file*/)
+[[nodiscard]] std::int32_t setRoofDefaultPermission(std::int32_t /*file*/)
 {
     return -ENOTTY;
 }
 
-[[nodiscard]] std::int32_t roofAskPermission(std::int32_t /*file*/, bool /*writable*/)
+[[nodiscard]] std::int32_t askRoofPermission(std::int32_t /*file*/, bool /*writable*/)
 {
     return -ENOTTY;
 }
 
-[[nodiscard]] std::int32_t roofSetCache(std::int32_t /*file*/, CoherencyMode /*coherency*/)
+[[nodiscard]] std::int32_t setRoofCache(std::int32_t /*file*/, CoherencyMode /*coherency*/)
 {
     return -ENOTTY;
 }
 
-[[nodiscard]] std::optional<CoherencyMode> roofReadCache(std::int32_t /*file*/)
+[[nodiscard]] std::optional<CoherencyMode> readRoofCache(std::int32_t /*file*/)
 {
     return std::nullopt;
 }
 
 #endif
 
-// @result is an entry point's 0 or negative errno.
-[[nodiscard]] bool failedWith(std::int32_t result, std::initializer_list<std::int32_t> codes)
+// @result is an entry point's 0 or negative errno. A failure outside @tolerated closes @file and throws.
+void requireResult(std::int32_t file, std::int32_t result, std::initializer_list<std::int32_t> tolerated,
+                   std::string_view verb, const std::string& path)
 {
-    return std::any_of(codes.begin(), codes.end(), [&](std::int32_t code)
-                       {
-                           return result == -code;
-                       });
-}
-
-[[nodiscard]] std::error_code errorOf(std::int32_t result) noexcept
-{
-    return std::error_code{-result, std::system_category()};
-}
-
-// The filesystem authorizes mmap per process, and a freshly created file grants nothing by
-// default, so every peer other than the creator is denied. cme peers are separate processes, so
-// the creator opens the default up once.
-// The default is what the mapping below asks for and no more: DELETE, ADMIN or GRANT in it
-// would hand every process on the host what one mapping never uses.
-// ENOTTY/EINVAL means the mount does not know the ioctl (tmpfs and friends), which is fine.
-// EACCES means this entry is not ours to configure: a file another process created, or one the
-// filesystem itself made and left ownerless. Its defaults are already whatever they are, and the
-// mmap below is what decides whether they suffice.
-// Anything else would surface later as an unexplained mmap EACCES in another process.
-void grantDefaultPerms(std::int32_t file, const std::string& path)
-{
-    const std::int32_t result = roofSetDefaultPermission(file);
-    if (result == 0 || failedWith(result, {ENOTTY, EINVAL, EACCES}))
+    const auto isTolerated = [&](std::int32_t code)
+    {
+        return result == -code;
+    };
+    if (result == 0 || std::any_of(tolerated.begin(), tolerated.end(), isTolerated))
     {
         return;
     }
-    const auto failure = errorOf(result);
+    const std::error_code failure{-result, std::system_category()};
     ::close(file);
-    throw BackendError{"cme::FileMemory perm_set_default(" + path + ")", failure};
+    throw BackendError{std::string{"cme::FileMemory "}.append(verb).append("(").append(path).append(")"), failure};
+}
+
+// The filesystem denies every other peer's mmap of a fresh file, so the creator opens the default
+// once, to what a mapping asks for and no more: DELETE, ADMIN or GRANT would reach every process.
+void grantDefaultPerms(std::int32_t file, const std::string& path)
+{
+    // ENOTTY/EINVAL: the mount lacks the verb. EACCES: not our entry, so the mmap judges its default.
+    // Anything else fails here rather than as an unexplained mmap EACCES in another process.
+    requireResult(file, setRoofDefaultPermission(file), {ENOTTY, EINVAL, EACCES}, "perm_set_default", path);
 }
 
 // Before ftruncate, which places the region and so fixes its pool for good.
 // ENOTTY/EINVAL means the mount maps every file one way and has no pool to pick.
 void setCachePolicy(std::int32_t file, const std::string& path, CoherencyMode coherency)
 {
-    const std::int32_t result = roofSetCache(file, coherency);
-    if (result == 0 || failedWith(result, {ENOTTY, EINVAL}))
-    {
-        return;
-    }
-    const auto failure = errorOf(result);
-    ::close(file);
-    throw BackendError{"cme::FileMemory cache_set(" + path + ")", failure};
+    requireResult(file, setRoofCache(file, coherency), {ENOTTY, EINVAL}, "cache_set", path);
 }
 
 // Consumes @file either way.
 [[nodiscard]] void* mapFd(std::int32_t file, const std::string& path, std::uint64_t mapSize, bool writable)
 {
-    const std::int32_t asked = roofAskPermission(file, writable);
-    if (asked != 0 && !failedWith(asked, {ENOTTY}))
-    {
-        const auto failure = errorOf(asked);
-        ::close(file);
-        throw BackendError{"cme::FileMemory perm_ask(" + path + ")", failure};
-    }
+    requireResult(file, askRoofPermission(file, writable), {ENOTTY}, "perm_ask", path);
     const std::int32_t protection = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
     void* mapped = ::mmap(nullptr, mapSize, protection, MAP_SHARED, file, 0);
     // Before the close, which is allowed to leave its own value in errno.
@@ -258,7 +229,7 @@ void setCachePolicy(std::int32_t file, const std::string& path, CoherencyMode co
     }
     grantDefaultPerms(file, path);
     // A pre-sized file kept the pool it was placed in, whatever @coherency asked for.
-    const auto placed = roofReadCache(file);
+    const auto placed = readRoofCache(file);
     return {mapFd(file, path, mapSize, /*writable=*/true), mapSize, placed};
 }
 
@@ -285,7 +256,7 @@ void setCachePolicy(std::int32_t file, const std::string& path, CoherencyMode co
         throw BackendError{"cme::FileMemory: file size invalid (" + path + ")"};
     }
     const std::uint64_t mapSize = roundUp(static_cast<std::uint64_t>(info.st_size), PmdAlign);
-    const auto placed = roofReadCache(file);
+    const auto placed = readRoofCache(file);
     return {mapFd(file, path, mapSize, writable), mapSize, placed};
 }
 
@@ -326,7 +297,7 @@ std::optional<CoherencyMode> FileMemory::readPoolCoherency(std::string_view path
     {
         return std::nullopt;
     }
-    const auto placed = roofReadCache(file);
+    const auto placed = readRoofCache(file);
     ::close(file);
     return placed;
 }
