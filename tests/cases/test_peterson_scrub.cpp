@@ -10,7 +10,6 @@
 // something else.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <vector>

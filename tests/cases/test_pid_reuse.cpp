@@ -10,7 +10,6 @@
 // Two domains, so a partial clear reads as one surviving bit rather than as nothing happening.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 

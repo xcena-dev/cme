@@ -9,7 +9,6 @@
 // RecoveryClaim_t's magic every dead peer reads as already claimed by peer 0.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

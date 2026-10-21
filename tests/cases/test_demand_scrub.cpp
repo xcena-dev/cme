@@ -21,7 +21,6 @@
 // there and both the read and the write below would be no-ops asserting nothing.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 

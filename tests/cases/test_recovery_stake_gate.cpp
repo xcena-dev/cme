@@ -16,7 +16,6 @@
 // --strategy selects the strategy.
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <cstdio>
 

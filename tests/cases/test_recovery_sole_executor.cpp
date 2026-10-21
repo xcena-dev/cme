@@ -8,7 +8,6 @@
 // Only CME_STATS bumps it, so a build without it leaves by SKIP rather than asserting nothing.
 
 #include <array>
-#include <atomic>
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>

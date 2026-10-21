@@ -11,7 +11,6 @@
 // Strategy is fixed to RequestAgg, so --strategy is ignored. The aggregator record is reached
 // through RequestAggLayout, the same class the policy uses to write it.
 
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
