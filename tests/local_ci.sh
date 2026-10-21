@@ -26,17 +26,19 @@ CME="$(cd "$HERE/.." && pwd)"
 . "$HERE/harness/script_args.sh"
 . "$HERE/harness/site_config.sh"
 
-USAGE="usage: local_ci.sh [--build DIR] [--jobs N] [--full] [--allow-missing] [--python BIN]
+USAGE="usage: local_ci.sh [--build DIR] [--jobs N] [--full] [--allow-missing] [--uc-only] [--python BIN]
   --full           run the sweeps at their real counts instead of cut down
   --allow-missing  warn instead of failing when a medium or tool is absent
+  --uc-only        the uc file cases alone: no dax_device, shm, wb or scripts
   --jobs           ctest parallelism; 1 by default, because a gate that flakes is not a gate"
 
 BUILD=build-ci
 JOBS=1
 FULL=0
 ALLOW_MISSING=0
+UC_ONLY=0
 PYTHON=python3
-script_parse_args "$USAGE" "build jobs python" "full allow-missing" "$@"
+script_parse_args "$USAGE" "build jobs python" "full allow-missing uc-only" "$@"
 
 STARTED_AT=$(date +%s)
 FAILED_STAGES=""
@@ -102,7 +104,9 @@ preflight()
 
 	local device mount
 	device="$(site_get dax_device)"
-	if [ -z "$device" ]; then
+	if [ "$UC_ONLY" = 1 ]; then
+		:
+	elif [ -z "$device" ]; then
 		want "dax_device is empty in config.yaml"
 	elif [ ! -c "$device" ]; then
 		want "dax_device '$device' is not a character device"
@@ -126,6 +130,7 @@ report_preflight()
 	echo "build     : $CME/$BUILD"
 	echo "dax_device: $(site_get dax_device)"
 	echo "file dir  : $(site_get file_backend_dir)"
+	echo "cases     : $([ "$UC_ONLY" = 1 ] && echo "uc only" || echo "every medium")"
 	echo "ctest jobs: $JOBS"
 	echo "depth     : $([ "$FULL" = 1 ] && echo "full counts" || echo "cut down (--full for the real thing)")"
 
@@ -165,7 +170,11 @@ do_build()
 
 do_suite()
 {
-	ctest --test-dir "$CME/$BUILD" -j "$JOBS" --output-on-failure
+	if [ "$UC_ONLY" = 1 ]; then
+		ctest --test-dir "$CME/$BUILD" -j "$JOBS" --output-on-failure -L '^uc$'
+	else
+		ctest --test-dir "$CME/$BUILD" -j "$JOBS" --output-on-failure
+	fi
 }
 
 # A bench that measures dax_device alone exits non-zero without it, where the others skip a
@@ -230,7 +239,8 @@ if [ -n "$FAILED_STAGES" ]; then
 fi
 
 stage suite "do_suite"
-stage scripts "do_scripts"
+# The scripts measure shm and dax_device, which --uc-only leaves out.
+[ "$UC_ONLY" = 1 ] || stage scripts "do_scripts"
 
 banner "summary"
 echo "elapsed: $(($(date +%s) - STARTED_AT))s"
